@@ -560,19 +560,39 @@ public class MainActivity extends Activity {
 
     private void fillWebLogin(WebView web, String username, String password, boolean notify) {
         String script = "(function(){"
-                + "var p=Array.from(document.querySelectorAll('input[type=password]')).find(e=>e.getClientRects().length);"
-                + "if(!p)return 'no_password';"
-                + "var f=p.form||p.closest('form')||document;"
-                + "var a=Array.from(f.querySelectorAll('input')).filter(e=>e!==p&&e.getClientRects().length&&!['hidden','submit','button','checkbox','radio','password','file'].includes((e.type||'text').toLowerCase()));"
-                + "var u=a.find(e=>/user|login|email|nick|name/i.test(e.name+' '+e.id+' '+e.autocomplete+' '+e.placeholder))||a[0];"
-                + "if(!u)return 'no_username';"
+                + "if(window.__kinozalAutofillTimer)clearInterval(window.__kinozalAutofillTimer);"
+                + "var userValue=" + org.json.JSONObject.quote(username) + ";"
+                + "var passValue=" + org.json.JSONObject.quote(password) + ";"
+                + "function visible(e){return !!(e&&e.getClientRects().length&&getComputedStyle(e).visibility!=='hidden');}"
+                + "function attempt(){"
+                + "var forms=Array.from(document.forms);"
+                + "for(var f of forms){"
+                + "var action=(f.getAttribute('action')||'')+' '+(f.action||'');"
+                + "var loginAction=/login|auth|account|takelogin/i.test(action);"
+                + "var fields=Array.from(f.querySelectorAll('input'));"
+                + "var p=fields.find(e=>e.type==='password'&&visible(e));"
+                + "if(!p)continue;"
+                + "var u=fields.find(e=>e!==p&&visible(e)&&!['hidden','submit','button','checkbox','radio','file'].includes((e.type||'text').toLowerCase())&&/user|login|email|nick|username/i.test([e.name,e.id,e.autocomplete,e.placeholder].join(' ')));"
+                + "var loginPage=/login\\.php/i.test(location.pathname);"
+                + "if(!u||(!loginAction&&!loginPage))continue;"
                 + "function setv(e,v){var d=Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value');if(d&&d.set)d.set.call(e,v);else e.value=v;e.dispatchEvent(new Event('input',{bubbles:true}));e.dispatchEvent(new Event('change',{bubbles:true}));}"
-                + "setv(u," + org.json.JSONObject.quote(username) + ");"
-                + "setv(p," + org.json.JSONObject.quote(password) + ");return 'ok';})()";
+                + "setv(u,userValue);setv(p,passValue);"
+                + "if(window.__kinozalAutofillTimer)clearInterval(window.__kinozalAutofillTimer);"
+                + "if(window.__kinozalAutofillObserver)window.__kinozalAutofillObserver.disconnect();"
+                + "return true;"
+                + "}return false;}"
+                + "if(attempt())return 'ok';"
+                + "var tries=0;"
+                + "window.__kinozalAutofillTimer=setInterval(function(){tries++;if(attempt()||tries>=120){clearInterval(window.__kinozalAutofillTimer);window.__kinozalAutofillTimer=null;}},750);"
+                + "if(window.MutationObserver&&document.documentElement){window.__kinozalAutofillObserver=new MutationObserver(function(){attempt();});window.__kinozalAutofillObserver.observe(document.documentElement,{childList:true,subtree:true,attributes:true});}"
+                + "return 'waiting';})()";
         web.evaluateJavascript(script, result -> {
             if (!notify) return;
-            if (result != null && result.contains("ok")) showMessage("Логин и пароль сохранены и вставлены. В следующий раз они подставятся автоматически.");
-            else showMessage("Форма входа пока не найдена. Данные сохранены и подставятся, когда форма появится.");
+            if (result != null && result.contains("ok")) {
+                showMessage("Логин и пароль подставлены в форму Kinozal.");
+            } else {
+                showMessage("Данные сохранены. Ожидаю появления формы входа Kinozal — подстановка выполнится автоматически.");
+            }
         });
     }
 
