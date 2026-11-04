@@ -90,7 +90,7 @@ public class MainActivity extends Activity {
         details.setId(View.generateViewId());
 
         mirrors.setOnClickListener(v -> showMirrors());
-        home.setOnClickListener(v -> loadHome());
+        home.setOnClickListener(v -> showHomeDashboard());
         results.setOnClickListener(v -> showNativeResults());
         details.setOnClickListener(v -> showNativeDetails());
         refresh.setOnClickListener(v -> {
@@ -114,6 +114,67 @@ public class MainActivity extends Activity {
         header.addView(details, spacedButtonParams());
         header.addView(refresh, spacedButtonParams());
         root.addView(header);
+
+        LinearLayout homePanel = new LinearLayout(this);
+        homePanel.setOrientation(LinearLayout.VERTICAL);
+        homePanel.setGravity(Gravity.CENTER_VERTICAL);
+        homePanel.setPadding(dp(34), dp(24), dp(34), dp(24));
+        GradientDrawable homeBackground = new GradientDrawable(
+                GradientDrawable.Orientation.TL_BR,
+                new int[]{Color.rgb(35, 31, 29), Color.rgb(16, 17, 22)});
+        homeBackground.setCornerRadius(dp(18));
+        homePanel.setBackground(homeBackground);
+
+        TextView homeEyebrow = new TextView(this);
+        homeEyebrow.setText("KINOZAL  •  ANDROID TV");
+        homeEyebrow.setTextColor(Color.rgb(174, 55, 18));
+        homeEyebrow.setTextSize(14);
+        homeEyebrow.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        homePanel.addView(homeEyebrow);
+
+        TextView homeHeading = new TextView(this);
+        homeHeading.setText("Кино и раздачи —\nв одном месте");
+        homeHeading.setTextColor(Color.rgb(251, 226, 173));
+        homeHeading.setTextSize(34);
+        homeHeading.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        LinearLayout.LayoutParams headingParams = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        headingParams.topMargin = dp(12);
+        homePanel.addView(homeHeading, headingParams);
+
+        TextView homeDescription = new TextView(this);
+        homeDescription.setText("Выбирайте раздел, находите нужную раздачу и запускайте просмотр через TorrServe.");
+        homeDescription.setTextColor(Color.LTGRAY);
+        homeDescription.setTextSize(17);
+        homeDescription.setMaxWidth(dp(720));
+        LinearLayout.LayoutParams descriptionParams = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        descriptionParams.topMargin = dp(10);
+        homePanel.addView(homeDescription, descriptionParams);
+
+        Button openCatalog = makeButton("ОТКРЫТЬ КАТАЛОГ");
+        openCatalog.setTextSize(17);
+        openCatalog.setTextColor(Color.WHITE);
+        openCatalog.setBackground(buttonBackground(Color.rgb(174, 55, 18), Color.rgb(251, 226, 173)));
+        LinearLayout.LayoutParams openCatalogParams = new LinearLayout.LayoutParams(dp(280), dp(58));
+        openCatalogParams.topMargin = dp(28);
+        homePanel.addView(openCatalog, openCatalogParams);
+        openCatalog.setOnClickListener(v -> openSection("browse.php"));
+
+        TextView homeHint = new TextView(this);
+        homeHint.setText("Навигация: стрелки пульта  •  Выбор: OK  •  Назад: предыдущий экран");
+        homeHint.setTextColor(Color.rgb(115, 164, 170));
+        homeHint.setTextSize(13);
+        LinearLayout.LayoutParams hintParams = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        hintParams.topMargin = dp(22);
+        homePanel.addView(homeHint, hintParams);
+        root.addView(homePanel, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, 0, 1));
+
+        LinearLayout catalogWorkspace = new LinearLayout(this);
+        catalogWorkspace.setOrientation(LinearLayout.VERTICAL);
+        catalogWorkspace.setVisibility(View.GONE);
 
         LinearLayout catalogBar = new LinearLayout(this);
         catalogBar.setGravity(Gravity.CENTER_VERTICAL);
@@ -166,7 +227,7 @@ public class MainActivity extends Activity {
         categoriesButton.setNextFocusUpId(refresh.getId());
         searchInput.setNextFocusUpId(refresh.getId());
         searchButton.setNextFocusUpId(refresh.getId());
-        root.addView(catalogBar);
+        catalogWorkspace.addView(catalogBar);
 
         Button torrentsSection = makeButton("Раздачи");
         torrentsSection.setId(View.generateViewId());
@@ -175,7 +236,7 @@ public class MainActivity extends Activity {
         searchInput.setNextFocusDownId(torrentsSection.getId());
         searchButton.setNextFocusDownId(torrentsSection.getId());
         torrentsSection.setNextFocusUpId(searchButton.getId());
-        root.addView(torrentsSection, new LinearLayout.LayoutParams(
+        catalogWorkspace.addView(torrentsSection, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, dp(42)));
 
         address = new TextView(this);
@@ -183,13 +244,13 @@ public class MainActivity extends Activity {
         address.setTextSize(11);
         address.setSingleLine(true);
         address.setPadding(dp(4), dp(2), dp(4), dp(6));
-        root.addView(address);
+        catalogWorkspace.addView(address);
 
         progress = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
         progress.setMax(100);
         progress.setProgressTintList(android.content.res.ColorStateList.valueOf(accent));
         progress.setVisibility(View.GONE);
-        root.addView(progress, new LinearLayout.LayoutParams(
+        catalogWorkspace.addView(progress, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, dp(3)));
 
         webView = new WebView(this);
@@ -238,15 +299,15 @@ public class MainActivity extends Activity {
                 }
             }
         });
-        root.addView(webView, new LinearLayout.LayoutParams(
+        catalogWorkspace.addView(webView, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, 0, 1));
+        root.addView(catalogWorkspace, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, 0, 1));
         setContentView(root);
 
         // Give TV users a visible, predictable starting focus.
-        mirrors.post(() -> {
-            if (!isFinishing() && mirrors.isShown()) {
-                mirrors.requestFocus();
-            }
+        openCatalog.post(() -> {
+            if (!isFinishing() && openCatalog.isShown()) openCatalog.requestFocus();
         });
     }
 
@@ -987,6 +1048,7 @@ public class MainActivity extends Activity {
 
     private void openSection(String path) {
         if (webView == null) return;
+        showCatalogWorkspace();
         String base = mirror == null ? DEFAULT_MIRROR : mirror;
         base = base.replaceAll("/+$", "");
         String url = base + "/" + path;
@@ -995,9 +1057,30 @@ public class MainActivity extends Activity {
         webView.loadUrl(url);
     }
 
+    private void showCatalogWorkspace() {
+        View homePanel = ((ViewGroup) findViewById(android.R.id.content)).getChildAt(0);
+        if (homePanel instanceof ViewGroup) {
+            View candidate = ((ViewGroup) homePanel).getChildAt(1);
+            View workspace = ((ViewGroup) homePanel).getChildAt(2);
+            if (candidate != null) candidate.setVisibility(View.GONE);
+            if (workspace != null) workspace.setVisibility(View.VISIBLE);
+        }
+    }
+
+    private void showHomeDashboard() {
+        View content = ((ViewGroup) findViewById(android.R.id.content)).getChildAt(0);
+        if (content instanceof ViewGroup) {
+            ViewGroup root = (ViewGroup) content;
+            if (root.getChildCount() > 2) {
+                root.getChildAt(1).setVisibility(View.VISIBLE);
+                root.getChildAt(2).setVisibility(View.GONE);
+            }
+        }
+    }
+
     private void loadHome() {
-        address.setText(mirror);
-        webView.loadUrl(mirror);
+        showHomeDashboard();
+        if (webView != null && webView.getUrl() == null) webView.loadUrl(mirror);
     }
 
     private int dp(float value) {
