@@ -6,6 +6,9 @@ import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Bundle;
+import android.net.Uri;
+import android.text.InputType;
+import android.view.inputmethod.EditorInfo;
 import android.view.Gravity;
 import android.view.KeyEvent;
 import android.view.View;
@@ -16,6 +19,7 @@ import android.webkit.WebResourceRequest;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.widget.Button;
+import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.ProgressBar;
 import android.widget.TextView;
@@ -38,6 +42,9 @@ public class MainActivity extends Activity {
     private TextView title;
     private TextView address;
     private ProgressBar progress;
+    private EditText searchInput;
+    private Button categoriesButton;
+    private Button searchButton;
     private String mirror;
 
     @Override
@@ -92,6 +99,58 @@ public class MainActivity extends Activity {
         header.addView(refresh, spacedButtonParams());
         root.addView(header);
 
+        LinearLayout catalogBar = new LinearLayout(this);
+        catalogBar.setGravity(Gravity.CENTER_VERTICAL);
+        catalogBar.setOrientation(LinearLayout.HORIZONTAL);
+        catalogBar.setPadding(0, dp(4), 0, dp(4));
+
+        categoriesButton = makeButton("Категории");
+        categoriesButton.setId(View.generateViewId());
+        categoriesButton.setOnClickListener(v -> showCategories());
+        catalogBar.addView(categoriesButton, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, dp(44)));
+
+        searchInput = new EditText(this);
+        searchInput.setSingleLine(true);
+        searchInput.setTextSize(14);
+        searchInput.setTextColor(Color.WHITE);
+        searchInput.setHintTextColor(Color.LTGRAY);
+        searchInput.setHint("Поиск по Kinozal");
+        searchInput.setInputType(InputType.TYPE_CLASS_TEXT);
+        searchInput.setImeOptions(EditorInfo.IME_ACTION_SEARCH);
+        searchInput.setPadding(dp(12), 0, dp(12), 0);
+        searchInput.setBackground(makeSearchBackground());
+        searchInput.setFocusable(true);
+        searchInput.setFocusableInTouchMode(true);
+        LinearLayout.LayoutParams searchParams = new LinearLayout.LayoutParams(
+                0, dp(44), 1);
+        searchParams.leftMargin = dp(8);
+        catalogBar.addView(searchInput, searchParams);
+
+        searchButton = makeButton("Найти");
+        searchButton.setId(View.generateViewId());
+        searchButton.setOnClickListener(v -> submitSiteSearch());
+        LinearLayout.LayoutParams searchButtonParams = spacedButtonParams();
+        catalogBar.addView(searchButton, searchButtonParams);
+        searchInput.setOnEditorActionListener((view, actionId, event) -> {
+            if (actionId == EditorInfo.IME_ACTION_SEARCH
+                    || (event != null && event.getKeyCode() == KeyEvent.KEYCODE_ENTER)) {
+                submitSiteSearch();
+                return true;
+            }
+            return false;
+        });
+
+        categoriesButton.setNextFocusRightId(searchInput.getId());
+        searchInput.setNextFocusLeftId(categoriesButton.getId());
+        searchInput.setNextFocusRightId(searchButton.getId());
+        searchButton.setNextFocusLeftId(searchInput.getId());
+        refresh.setNextFocusDownId(categoriesButton.getId());
+        categoriesButton.setNextFocusUpId(refresh.getId());
+        searchInput.setNextFocusUpId(refresh.getId());
+        searchButton.setNextFocusUpId(refresh.getId());
+        root.addView(catalogBar);
+
         address = new TextView(this);
         address.setTextColor(Color.LTGRAY);
         address.setTextSize(11);
@@ -108,10 +167,13 @@ public class MainActivity extends Activity {
 
         webView = new WebView(this);
         webView.setId(View.generateViewId());
-        webView.setNextFocusUpId(refresh.getId());
+        webView.setNextFocusUpId(searchButton.getId());
         mirrors.setNextFocusDownId(webView.getId());
         home.setNextFocusDownId(webView.getId());
-        refresh.setNextFocusDownId(webView.getId());
+        refresh.setNextFocusDownId(categoriesButton.getId());
+        categoriesButton.setNextFocusDownId(webView.getId());
+        searchInput.setNextFocusDownId(webView.getId());
+        searchButton.setNextFocusDownId(webView.getId());
         webView.setBackgroundColor(background);
         webView.getSettings().setJavaScriptEnabled(true);
         webView.getSettings().setDomStorageEnabled(true);
@@ -151,6 +213,100 @@ public class MainActivity extends Activity {
         mirrors.post(() -> {
             if (!isFinishing() && mirrors.isShown()) {
                 mirrors.requestFocus();
+            }
+        });
+    }
+
+    private GradientDrawable makeSearchBackground() {
+        GradientDrawable shape = new GradientDrawable();
+        shape.setColor(panel);
+        shape.setCornerRadius(dp(10));
+        shape.setStroke(dp(1), Color.rgb(75, 77, 91));
+        return shape;
+    }
+
+    private void showCategories() {
+        if (webView == null) return;
+        String script = "(function(){"
+                + "var out=[],seen={};"
+                + "document.querySelectorAll('a[href]').forEach(function(a){"
+                + "var t=(a.innerText||a.textContent||'').trim().replace(/\\s+/g,' ');"
+                + "var h=a.getAttribute('href')||'';"
+                + "if(!t||t.length>70||!h||h.charAt(0)==='#')return;"
+                + "if(/(?:cat|category|browse|section)=/i.test(h)||/browse\\.php/i.test(h)){"
+                + "var k=t+'|'+h;if(!seen[k]){seen[k]=1;out.push({title:t,href:h});}}"
+                + "});return JSON.stringify(out.slice(0,100));})()";
+        webView.evaluateJavascript(script, value -> {
+            try {
+                Object decoded = new org.json.JSONTokener(value).nextValue();
+                org.json.JSONArray items = new org.json.JSONArray(String.valueOf(decoded));
+                if (items.length() == 0) {
+                    Toast.makeText(this,
+                            "На этой странице категории не обнаружены. Открой главную страницу сайта и попробуй снова.",
+                            Toast.LENGTH_LONG).show();
+                    return;
+                }
+                java.util.ArrayList<String> labels = new java.util.ArrayList<>();
+                java.util.ArrayList<String> links = new java.util.ArrayList<>();
+                for (int i = 0; i < items.length(); i++) {
+                    org.json.JSONObject item = items.getJSONObject(i);
+                    String label = item.optString("title", "").trim();
+                    String href = item.optString("href", "").trim();
+                    if (!label.isEmpty() && !href.isEmpty()) {
+                        labels.add(label);
+                        links.add(href);
+                    }
+                }
+                if (labels.isEmpty()) return;
+                new AlertDialog.Builder(this)
+                        .setTitle("Категории сайта")
+                        .setItems(labels.toArray(new String[0]), (dialog, which) -> {
+                            Uri target = Uri.parse(mirror).resolve(links.get(which));
+                            if (target != null && target.getHost() != null
+                                    && target.getHost().equalsIgnoreCase(Uri.parse(mirror).getHost())) {
+                                webView.loadUrl(target.toString());
+                            } else {
+                                Toast.makeText(this, "Ссылка категории ведёт на другой домен",
+                                        Toast.LENGTH_LONG).show();
+                            }
+                        })
+                        .setNegativeButton("Закрыть", null)
+                        .show();
+            } catch (Exception e) {
+                Toast.makeText(this, "Не удалось прочитать категории этой страницы",
+                        Toast.LENGTH_LONG).show();
+            }
+        });
+    }
+
+    private void submitSiteSearch() {
+        String query = searchInput.getText().toString().trim();
+        if (query.isEmpty()) {
+            Toast.makeText(this, "Введи название для поиска", Toast.LENGTH_SHORT).show();
+            searchInput.requestFocus();
+            return;
+        }
+        String escaped = org.json.JSONObject.quote(query);
+        String script = "(function(){"
+                + "var q=" + escaped + ";"
+                + "var inputs=Array.from(document.querySelectorAll('input:not([type=hidden]),textarea'));"
+                + "var candidates=inputs.filter(function(i){"
+                + "var n=((i.name||'')+' '+(i.id||'')+' '+(i.placeholder||'')).toLowerCase();"
+                + "return /search|query|keyword|name|поиск/i.test(n)||i.type==='search';"
+                + "});"
+                + "var el=candidates.find(function(i){return i.form;})||candidates[0];"
+                + "if(!el)return 'NO_SEARCH_FIELD';"
+                + "el.value=q;el.dispatchEvent(new Event('input',{bubbles:true}));"
+                + "el.dispatchEvent(new Event('change',{bubbles:true}));"
+                + "if(el.form){if(el.form.requestSubmit)el.form.requestSubmit();else el.form.submit();return 'SUBMITTED';}"
+                + "var b=el.closest('form');if(b){b.submit();return 'SUBMITTED';}"
+                + "return 'NO_SEARCH_FORM';})()";
+        webView.evaluateJavascript(script, result -> {
+            if ("\"NO_SEARCH_FIELD\"".equals(result)
+                    || "\"NO_SEARCH_FORM\"".equals(result)) {
+                Toast.makeText(this,
+                        "Не удалось определить поисковую форму. Нужна проверка разметки сайта.",
+                        Toast.LENGTH_LONG).show();
             }
         });
     }
