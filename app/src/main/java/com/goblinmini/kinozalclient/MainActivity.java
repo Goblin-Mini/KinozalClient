@@ -81,39 +81,161 @@ public class MainActivity extends Activity {
         loadInitialCatalog();
     }
 
+    private static class HomeSection {
+        String title, path;
+        final List<HomePoster> items = new ArrayList<>();
+        HomeSection(String title, String path) { this.title = title; this.path = path; }
+    }
+
+    private static class HomePoster {
+        Torrent torrent;
+        String imageUrl;
+    }
+
     private void loadInitialCatalog() {
+        currentPath = "";
+        currentTitle = "Главная";
+        heading.setText("Главная");
         progress.setVisibility(View.VISIBLE);
         list.removeAllViews();
         io.execute(() -> {
             try {
-                String html;
-                try {
-                    html = client.fetch("browse.php");
-                } catch (SecurityException expired) {
-                    String[] saved = client.getSavedCredentials();
-                    if (saved == null) throw expired;
-                    // One automatic recovery attempt only. HTTP 429 and network errors
-                    // are not retried, preventing repeated login requests to Kinozal.
-                    client.login(saved[0], saved[1]);
-                    html = client.fetch("browse.php");
+                String[] paths = {
+                        "novinki.php",
+                        "top.php",
+                        "top.php?t=0&d=0&f=0&k=0&j=&s=0&w=1",
+                        "top.php?t=0&d=0&f=0&k=0&j=&s=0&w=2"
+                };
+                String[] titles = {"Новинки", "Топ раздач", "Топ недели", "Топ месяца"};
+                List<HomeSection> sections = new ArrayList<>();
+                for (int i = 0; i < paths.length; i++) {
+                    String html = client.fetch(paths[i]);
+                    HomeSection section = new HomeSection(titles[i], paths[i]);
+                    section.items.addAll(parseHomePosters(Jsoup.parse(html, client.getMirror() + "/")));
+                    sections.add(section);
                 }
-                lastHtml = html;
-                List<Torrent> parsed = parseTorrents(Jsoup.parse(html, client.getMirror()));
+                int count = 0;
+                for (HomeSection section : sections) count += section.items.size();
+                final int total = count;
                 runOnUiThread(() -> {
                     progress.setVisibility(View.GONE);
-                    status.setText("Авторизован · Загружено: " + parsed.size());
-                    torrents.clear(); torrents.addAll(parsed);
-                    renderTorrents(parsed);
-                    if (parsed.isEmpty()) addEmpty("Каталог получен, но раздачи не распознаны.");
+                    status.setText("Главная · Постеров: " + total);
+                    renderHome(sections);
                 });
             } catch (Exception e) {
                 runOnUiThread(() -> {
                     progress.setVisibility(View.GONE);
                     status.setText("Нет соединения");
-                    addEmpty("Не удалось загрузить каталог. " + safe(e.getMessage()));
+                    addEmpty("Не удалось загрузить главную страницу. " + safe(e.getMessage()));
                 });
             }
         });
+    }
+
+    private List<HomePoster> parseHomePosters(Document doc) {
+        List<HomePoster> out = new ArrayList<>();
+        Elements anchors = doc.select("a[href*=details.php?id=]");
+        for (Element a : anchors) {
+            String href = mirrorUrl(a.absUrl("href"), a.attr("href"));
+            if (href.isEmpty()) continue;
+            Element img = a.selectFirst("img");
+            String title = a.attr("title").trim();
+            if (title.isEmpty() && img != null) title = img.attr("alt").trim();
+            if (title.isEmpty()) title = a.text().replaceAll("\\s+", " ").trim();
+            if (title.isEmpty()) continue;
+            String image = "";
+            if (img != null) {
+                String raw = img.hasAttr("data-src") ? img.attr("data-src") : img.attr("src");
+                if (raw.isEmpty()) raw = img.attr("data-original");
+                image = mirrorUrl(img.absUrl("src"), raw);
+                if (image.isEmpty() && !raw.isEmpty()) {
+                    try { image = java.net.URI.create(client.getMirror() + "/").resolve(raw).toString(); }
+                    catch (Exception ignored) { }
+                }
+            }
+            HomePoster item = new HomePoster();
+            item.torrent = new Torrent();
+            item.torrent.title = title;
+            item.torrent.href = href;
+            item.torrent.size = item.torrent.seeds = item.torrent.leeches = "—";
+            item.imageUrl = image;
+            boolean duplicate = false;
+            for (HomePoster old : out) {
+                if (old.torrent.href.equals(href)) { duplicate = true; break; }
+            }
+            if (!duplicate) out.add(item);
+            if (out.size() >= 12) break;
+        }
+        return out;
+    }
+
+    private String mirrorUrl(String absolute, String raw) {
+        String value = absolute == null || absolute.isEmpty() ? raw : absolute;
+        if (value == null || value.trim().isEmpty()) return "";
+        try {
+            java.net.URI uri = java.net.URI.create(value.trim());
+            java.net.URI base = java.net.URI.create(client.getMirror());
+            if (uri.isAbsolute() && uri.getHost() != null
+                    && !uri.getHost().equalsIgnoreCase(base.getHost())) {
+                return new java.net.URI(base.getScheme(), null, base.getHost(), base.getPort(),
+                        uri.getPath(), uri.getQuery(), uri.getFragment()).toString();
+            }
+            if (!uri.isAbsolute()) return base.resolve(uri).toString();
+            return uri.toString();
+        } catch (Exception ignored) { return value; }
+    }
+
+    private void renderHome(List<HomeSection> sections) {
+        list.removeAllViews();
+        for (HomeSection section : sections) {
+            TextView sectionTitle = text(section.title, 20, GOLD, true);
+            LinearLayout.LayoutParams titleParams = new LinearLayout.LayoutParams(-1, dp(38));
+            titleParams.topMargin = dp(10);
+            list.addView(sectionTitle, titleParams);
+            android.widget.HorizontalScrollView horizontal = new android.widget.HorizontalScrollView(this);
+            horizontal.setHorizontalScrollBarEnabled(false);
+            horizontal.setFillViewport(false);
+            LinearLayout strip = new LinearLayout(this);
+            strip.setOrientation(LinearLayout.HORIZONTAL);
+            for (HomePoster item : section.items) {
+                LinearLayout card = new LinearLayout(this);
+                card.setOrientation(LinearLayout.VERTICAL);
+                card.setPadding(dp(5), dp(5), dp(5), dp(5));
+                card.setBackground(shape(PANEL, 0));
+                card.setFocusable(true);
+                card.setClickable(true);
+                card.setOnFocusChangeListener((v, focused) ->
+                        v.setBackground(shape(focused ? Color.rgb(57, 68, 70) : PANEL, focused ? GOLD : 0)));
+                ImageView poster = new ImageView(this);
+                poster.setScaleType(ImageView.ScaleType.CENTER_CROP);
+                poster.setBackground(shape(Color.rgb(40, 45, 49), 0));
+                card.addView(poster, new LinearLayout.LayoutParams(dp(126), dp(178)));
+                TextView name = text(item.torrent.title, 12, Color.WHITE, true);
+                name.setMaxLines(2);
+                name.setEllipsize(android.text.TextUtils.TruncateAt.END);
+                name.setPadding(dp(2), dp(6), dp(2), dp(2));
+                card.addView(name, new LinearLayout.LayoutParams(dp(126), dp(42)));
+                LinearLayout.LayoutParams cardParams = new LinearLayout.LayoutParams(dp(138), -2);
+                cardParams.rightMargin = dp(8);
+                strip.addView(card, cardParams);
+                card.setOnClickListener(v -> showTorrent(item.torrent));
+                if (!item.imageUrl.isEmpty()) {
+                    io.execute(() -> {
+                        try {
+                            byte[] bytes = client.fetchBytes(item.imageUrl, "image/*");
+                            Bitmap bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.length);
+                            if (bitmap != null) runOnUiThread(() -> {
+                                if (poster.getParent() != null) poster.setImageBitmap(bitmap);
+                            });
+                        } catch (Exception ignored) { }
+                    });
+                }
+            }
+            horizontal.addView(strip);
+            LinearLayout.LayoutParams rowParams = new LinearLayout.LayoutParams(-1, dp(238));
+            list.addView(horizontal, rowParams);
+        }
+        if (sections.isEmpty()) addEmpty("На главной пока нет подборок.");
     }
 
     private int dp(float n) { return (int)(n * getResources().getDisplayMetrics().density + .5f); }
