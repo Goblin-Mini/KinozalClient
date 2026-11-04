@@ -498,14 +498,27 @@ public class MainActivity extends Activity {
                                     new java.net.URL(posterUrl).openConnection();
                             conn.setConnectTimeout(7000);
                             conn.setReadTimeout(10000);
+                            conn.setInstanceFollowRedirects(true);
                             conn.setRequestProperty("User-Agent", webView.getSettings().getUserAgentString());
+                            conn.setRequestProperty("Accept", "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8");
+                            String pageUrl = webView.getUrl();
+                            if (pageUrl != null) conn.setRequestProperty("Referer", pageUrl);
                             String cookie = CookieManager.getInstance().getCookie(posterUrl);
                             if (cookie != null) conn.setRequestProperty("Cookie", cookie);
                             android.graphics.Bitmap bitmap;
-                            try (java.io.InputStream input = conn.getInputStream()) {
-                                bitmap = BitmapFactory.decodeStream(input);
+                            int responseCode = conn.getResponseCode();
+                            try (java.io.InputStream input = responseCode >= 200 && responseCode < 300
+                                    ? conn.getInputStream() : conn.getErrorStream()) {
+                                bitmap = responseCode >= 200 && responseCode < 300 && input != null
+                                        ? BitmapFactory.decodeStream(input) : null;
                             } finally { conn.disconnect(); }
-                            if (bitmap != null) runOnUiThread(() -> posterView.setImageBitmap(bitmap));
+                            if (bitmap != null) {
+                                runOnUiThread(() -> posterView.setImageBitmap(bitmap));
+                            } else {
+                                runOnUiThread(() -> Toast.makeText(this,
+                                        "Не удалось загрузить постер (HTTP " + responseCode + ")",
+                                        Toast.LENGTH_LONG).show());
+                            }
                         } catch (Exception ignored) { }
                     }).start();
                 }
