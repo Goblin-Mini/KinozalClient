@@ -407,7 +407,7 @@ public class MainActivity extends Activity {
                 + "out.push({title:title,href:href,meta:meta,image:img?(img.src||''):''});"
                 + "});"
                 + "if(out.length===0){"
-                + "Array.from(document.querySelectorAll('a[href*=\"details.php?id=\"]')).forEach(function(a ){
+                + "Array.from(document.querySelectorAll('a[href*=\"details.php?id=\"]')).forEach(function(a){"
                 + "var title=(a.innerText||a.textContent||'').replace(/\\s+/g,' ').trim();"
                 + "var href=a.href||'';if(!title||title.length<8||!href||seen[href])return;"
                 + "var box=a.closest('tr,article,li,.item,.block,.torrent,.post,.movie,.film,div')||a.parentElement;"
