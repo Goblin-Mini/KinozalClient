@@ -227,11 +227,12 @@ public final class KinozalHttpClient {
                 }
                 continue;
             }
+            String retryAfterHeader = connection.getHeaderField("Retry-After");
             InputStream input = code >= 400 ? connection.getErrorStream() : connection.getInputStream();
             String result = input == null ? "" : readAll(input, connection.getContentType());
             connection.disconnect();
             if (code == 429) {
-                String retryAfter = connection.getHeaderField("Retry-After");
+                String retryAfter = retryAfterHeader;
                 String wait = (retryAfter == null || retryAfter.trim().isEmpty())
                         ? "Подожди несколько минут и не повторяй вход подряд."
                         : "Повтори не раньше чем через " + retryAfter.trim() + " сек.";
