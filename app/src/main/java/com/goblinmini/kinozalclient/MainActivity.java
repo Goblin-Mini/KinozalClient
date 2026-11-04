@@ -60,6 +60,12 @@ public class MainActivity extends Activity {
     private final List<Torrent> torrents = new ArrayList<>();
     private int page = 0;
     private volatile String lastHtml = "";
+    private final java.util.LinkedHashMap<String, String> pageCache =
+            new java.util.LinkedHashMap<String, String>(12, 0.75f, true) {
+                @Override protected boolean removeEldestEntry(java.util.Map.Entry<String, String> eldest) {
+                    return size() > 12;
+                }
+            };
 
     private static class Category { String title, href, method = "GET", body = ""; }
 
@@ -253,19 +259,16 @@ public class MainActivity extends Activity {
 
     private void load(String path, String title, String postBody) {
         currentPath = path; currentTitle = title; heading.setText(title);
+        String cacheKey = (postBody == null ? "GET|" + path : "POST|" + path + "|" + postBody);
+        String cachedPage;
+        synchronized (pageCache) { cachedPage = pageCache.get(cacheKey); }
+        if (cachedPage != null) { showLoadedPage(cachedPage); return; }
         progress.setVisibility(View.VISIBLE); list.removeAllViews();
         io.execute(() -> {
             try {
                 String html = postBody == null ? client.fetch(path) : client.fetchPost(path, postBody);
-                lastHtml = html;
-                Document doc = Jsoup.parse(html, client.getMirror());
-                List<Torrent> parsed = parseTorrents(doc);
-                runOnUiThread(() -> {
-                    progress.setVisibility(View.GONE); torrents.clear(); torrents.addAll(parsed);
-                    status.setText("Загружено: " + parsed.size());
-                    renderTorrents(parsed);
-                    if (parsed.isEmpty()) addEmpty("Страница загружена, но раздачи не найдены. Возможно, фильтр не применился.");
-                });
+                synchronized (pageCache) { pageCache.put(cacheKey, html); }
+                runOnUiThread(() -> showLoadedPage(html));
             } catch (Exception e) {
                 runOnUiThread(() -> { progress.setVisibility(View.GONE); status.setText("Нет соединения");
                     addEmpty("Не удалось загрузить каталог. " + safe(e.getMessage())); });
@@ -273,6 +276,15 @@ public class MainActivity extends Activity {
         });
     }
 
+    private void showLoadedPage(String html) {
+        lastHtml = html;
+        List<Torrent> parsed = parseTorrents(Jsoup.parse(html, client.getMirror()));
+        progress.setVisibility(View.GONE);
+        torrents.clear(); torrents.addAll(parsed);
+        status.setText("Загружено: " + parsed.size());
+        renderTorrents(parsed);
+        if (parsed.isEmpty()) addEmpty("Страница загружена, но раздачи не найдены. Возможно, фильтр не применился.");
+    }
     private List<Torrent> parseTorrents(Document doc) {
         List<Torrent> out = new ArrayList<>();
 
@@ -465,20 +477,23 @@ public class MainActivity extends Activity {
                         return;
                     }
                     if (preferredTitle != null && !preferredTitle.trim().isEmpty()) {
-                        String wanted = preferredTitle.trim().replaceAll("\\s+", " ");
+                        String wanted = preferredTitle.trim().toLowerCase(java.util.Locale.ROOT);
                         Category match = null;
                         for (Category candidate : found) {
-                            String actual = candidate.title.trim().replaceAll("\\s+", " ");
-                            if (actual.equalsIgnoreCase(wanted)) {
-                                match = candidate;
-                                break;
-                            }
+                            String actual = candidate.title.trim().toLowerCase(java.util.Locale.ROOT);
+                            String hrefText = candidate.href.toLowerCase(java.util.Locale.ROOT);
+                            boolean exact = actual.equals(wanted);
+                            boolean tv = wanted.contains("телевид") && (actual.contains("телевид") || actual.contains("телеперед") || actual.equals("тв") || hrefText.contains("television") || hrefText.contains("tv="));
+                            boolean sport = wanted.contains("спорт") && (actual.contains("спорт") || actual.contains("футбол") || actual.contains("хоккей") || hrefText.contains("sport"));
+                            if (exact || tv || sport) { match = candidate; break; }
                         }
                         if (match != null) {
                             if ("POST".equals(match.method)) load(match.href, match.title, match.body);
                             else load(match.href, match.title);
                             return;
                         }
+                        showMessage("Раздел «" + preferredTitle + "» не найден в меню выбранного зеркала.");
+                        return;
                     }
                     String[] labels = new String[found.size()];
                     for (int i = 0; i < found.size(); i++) labels[i] = found.get(i).title;
