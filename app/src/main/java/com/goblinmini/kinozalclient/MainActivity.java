@@ -75,16 +75,19 @@ public class MainActivity extends Activity {
         Button mirrors = makeButton("Зеркало");
         Button home = makeButton("Главная");
         Button results = makeButton("Список");
+        Button details = makeButton("Детали");
         Button refresh = makeButton("Обновить");
 
         mirrors.setId(View.generateViewId());
         home.setId(View.generateViewId());
         refresh.setId(View.generateViewId());
         results.setId(View.generateViewId());
+        details.setId(View.generateViewId());
 
         mirrors.setOnClickListener(v -> showMirrors());
         home.setOnClickListener(v -> loadHome());
         results.setOnClickListener(v -> showNativeResults());
+        details.setOnClickListener(v -> showNativeDetails());
         refresh.setOnClickListener(v -> {
             if (webView != null) webView.reload();
         });
@@ -94,13 +97,16 @@ public class MainActivity extends Activity {
         home.setNextFocusLeftId(mirrors.getId());
         home.setNextFocusRightId(results.getId());
         results.setNextFocusLeftId(home.getId());
-        results.setNextFocusRightId(refresh.getId());
-        refresh.setNextFocusLeftId(results.getId());
+        results.setNextFocusRightId(details.getId());
+        details.setNextFocusLeftId(results.getId());
+        details.setNextFocusRightId(refresh.getId());
+        refresh.setNextFocusLeftId(details.getId());
 
         header.addView(mirrors, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, dp(44)));
         header.addView(home, spacedButtonParams());
         header.addView(results, spacedButtonParams());
+        header.addView(details, spacedButtonParams());
         header.addView(refresh, spacedButtonParams());
         root.addView(header);
 
@@ -177,6 +183,7 @@ public class MainActivity extends Activity {
         mirrors.setNextFocusDownId(webView.getId());
         home.setNextFocusDownId(webView.getId());
         results.setNextFocusDownId(webView.getId());
+        details.setNextFocusDownId(webView.getId());
         refresh.setNextFocusDownId(categoriesButton.getId());
         categoriesButton.setNextFocusDownId(webView.getId());
         searchInput.setNextFocusDownId(webView.getId());
@@ -428,6 +435,60 @@ public class MainActivity extends Activity {
                 }
             } catch (Exception e) {
                 Toast.makeText(this, "Не удалось обработать результаты Kinozal",
+                        Toast.LENGTH_LONG).show();
+            }
+        });
+    }
+
+    // First native detail view: reads the current torrent detail page's visible text.
+    private void showNativeDetails() {
+        if (webView == null) return;
+        String script = "(function(){"
+                + "var clean=function(e){return (e.innerText||e.textContent||'').replace(/\\s+/g,' ').trim();};"
+                + "var title=document.title||'';"
+                + "var candidates=Array.from(document.querySelectorAll('td,div,table,section,article'));"
+                + "var best='',score=0;"
+                + "candidates.forEach(function(e){var t=clean(e);if(t.length<100||t.length>14000)return;"
+                + "var n=(t.match(/Название:|Год выпуска:|Жанр:|О фильме:|Качество:|Видео:|Аудио:/gi)||[]).length;"
+                + "var v=n*100+Math.min(t.length,3000)/100;if(v>score){score=v;best=t;}});"
+                + "if(!best)best=clean(document.body).slice(0,9000);"
+                + "var imgs=Array.from(document.images).filter(function(i){return i.naturalWidth>100&&i.naturalHeight>140;})"
+                + ".sort(function(a,b){return (b.naturalWidth*b.naturalHeight)-(a.naturalWidth*a.naturalHeight);});"
+                + "return JSON.stringify({title:title,text:best,poster:imgs.length?imgs[0].src:''});})()";
+        webView.evaluateJavascript(script, value -> {
+            try {
+                Object decoded = new org.json.JSONTokener(value).nextValue();
+                org.json.JSONObject data = new org.json.JSONObject(String.valueOf(decoded));
+                String pageTitle = data.optString("title", "Подробности раздачи");
+                String text = data.optString("text", "").trim();
+                if (text.isEmpty()) {
+                    Toast.makeText(this, "Не удалось извлечь описание этой раздачи",
+                            Toast.LENGTH_LONG).show();
+                    return;
+                }
+                TextView contentText = new TextView(this);
+                contentText.setText(text);
+                contentText.setTextColor(Color.WHITE);
+                contentText.setTextSize(16);
+                contentText.setPadding(dp(18), dp(14), dp(18), dp(18));
+                android.widget.ScrollView scroll = new android.widget.ScrollView(this);
+                scroll.addView(contentText);
+                AlertDialog dialog = new AlertDialog.Builder(this)
+                        .setTitle("Подробности раздачи")
+                        .setView(scroll)
+                        .setPositiveButton("Открыть страницу сайта", (d, w) -> { })
+                        .setNegativeButton("Закрыть", null)
+                        .create();
+                dialog.setOnShowListener(d -> dialog.getButton(AlertDialog.BUTTON_POSITIVE)
+                        .setOnClickListener(v -> dialog.dismiss()));
+                dialog.show();
+                if (dialog.getWindow() != null) {
+                    dialog.getWindow().setLayout(
+                            ViewGroup.LayoutParams.MATCH_PARENT,
+                            ViewGroup.LayoutParams.MATCH_PARENT);
+                }
+            } catch (Exception e) {
+                Toast.makeText(this, "Не удалось прочитать подробности раздачи",
                         Toast.LENGTH_LONG).show();
             }
         });
