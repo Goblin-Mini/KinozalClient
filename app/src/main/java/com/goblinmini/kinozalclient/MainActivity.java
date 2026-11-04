@@ -1,6 +1,11 @@
 package com.goblinmini.kinozalclient;
 
 import android.app.Activity;
+import android.content.Intent;
+import android.net.Uri;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
+import android.widget.ImageView;
 import android.app.AlertDialog;
 import android.graphics.Color;
 import android.graphics.Typeface;
@@ -513,12 +518,284 @@ public class MainActivity extends Activity {
 
     private void showFavorites() { addEmpty("Избранное пока пусто. Добавление раздач будет подключено вместе с карточкой раздачи."); }
 
+    private static class TorrentDetails {
+        String title = "", poster = "", torrentLink = "";
+        final java.util.LinkedHashMap<String, String> fields = new java.util.LinkedHashMap<>();
+    }
+
     private void showTorrent(Torrent t) {
-        new AlertDialog.Builder(this).setTitle(t.title)
-                .setMessage("Размер: " + t.size + "\nСиды: " + t.seeds + "\nЛичи: " + t.leeches)
-                .setPositiveButton("Открыть на сайте", (d,w) -> {
-                    load(t.href.replace(client.getMirror() + "/", ""), t.title);
-                }).setNegativeButton("Закрыть", null).show();
+        progress.setVisibility(View.VISIBLE);
+        io.execute(() -> {
+            try {
+                String html = client.fetch(t.href);
+                Document doc = Jsoup.parse(html, t.href);
+                TorrentDetails details = parseTorrentDetails(doc, t);
+                runOnUiThread(() -> {
+                    progress.setVisibility(View.GONE);
+                    showTorrentDetails(t, details);
+                });
+            } catch (Exception e) {
+                runOnUiThread(() -> {
+                    progress.setVisibility(View.GONE);
+                    showMessage("Не удалось загрузить карточку: " + safe(e.getMessage()));
+                });
+            }
+        });
+    }
+
+    private TorrentDetails parseTorrentDetails(Document doc, Torrent torrent) {
+        TorrentDetails data = new TorrentDetails();
+        data.title = torrent.title;
+        String[] labels = {"Название", "Оригинальное название", "Год выпуска", "Жанр",
+                "Выпущено", "Режиссер", "В ролях", "О фильме", "Качество", "Видео",
+                "Аудио", "Субтитры", "Продолжительность", "Перевод", "Размер"};
+        java.util.Set<String> known = new java.util.LinkedHashSet<>(java.util.Arrays.asList(labels));
+
+        for (Element row : doc.select("tr")) {
+            Elements cells = row.select("> td, > th");
+            if (cells.size() >= 2) {
+                String key = cleanDetailLabel(cells.get(0).text());
+                if (known.contains(key)) {
+                    String value = cells.get(1).text().trim();
+                    if (!value.isEmpty()) data.fields.putIfAbsent(key, value);
+                }
+            }
+        }
+
+        // Some mirrors render labels as ordinary text rather than table cells.
+        String[] lines = doc.body().text().split("(?<=[.!?])\\s+|\\s{2,}");
+        for (String line : lines) {
+            for (String key : labels) {
+                String prefix = key + ":";
+                if (line.regionMatches(true, 0, prefix, 0, prefix.length())) {
+                    String value = line.substring(prefix.length()).trim();
+                    if (!value.isEmpty()) data.fields.putIfAbsent(key, value);
+                }
+            }
+        }
+        data.fields.putIfAbsent("Размер", torrent.size);
+
+        int bestScore = -1;
+        for (Element img : doc.select("img[src], img[data-src], img[data-original]")) {
+            String src = img.hasAttr("data-original") ? img.attr("data-original")
+                    : img.hasAttr("data-src") ? img.attr("data-src") : img.attr("src");
+            if (src.isEmpty()) continue;
+            String absolute = img.absUrl("src");
+            if (absolute.isEmpty()) absolute = doc.baseUri().isEmpty() ? src
+                    : java.net.URI.create(doc.baseUri()).resolve(src).toString();
+            String hint = (src + " " + img.attr("alt") + " " + img.attr("class")).toLowerCase(java.util.Locale.ROOT);
+            int width = parseInt(img.attr("width"));
+            int height = parseInt(img.attr("height"));
+            int score = 0;
+            if (hint.matches(".*(poster|cover|облож|film|movie|pic|photo).*")) score += 8;
+            if (width > 0 && height > 0) {
+                double ratio = (double) width / height;
+                if (ratio >= 0.48 && ratio <= 0.82) score += 10;
+                else if (ratio > 0.35 && ratio < 0.95) score += 4;
+                if (width >= 100 && height >= 140) score += 5;
+                if (width < 60 || height < 80) score -= 8;
+            }
+            if (hint.matches(".*(logo|avatar|flag|icon|button).*")) score -= 12;
+            if (score > bestScore) {
+                bestScore = score;
+                data.poster = absolute;
+            }
+        }
+
+        int bestTorrentScore = -1;
+        for (Element a : doc.select("a[href]")) {
+            String href = a.attr("href").trim();
+            String label = (a.text() + " " + a.attr("title") + " " + a.attr("class")).toLowerCase(java.util.Locale.ROOT);
+            if (href.isEmpty()) continue;
+            String absolute = href.startsWith("magnet:") ? href : a.absUrl("href");
+            if (absolute.isEmpty()) continue;
+            int score = 0;
+            if (absolute.startsWith("magnet:")) score += 150;
+            if (absolute.matches("(?i).*\\\\.torrent(?:[?#].*)?$")) score += 120;
+            if (label.matches(".*(торрент|torrent).*")) score += 45;
+            if (label.matches(".*(скачать|download).*")) score += 25;
+            if (absolute.matches("(?i).*/(get|download|dl)([./?_-].*|$).*|.*download\\\\.php.*")) score += 35;
+            if (score > bestTorrentScore) {
+                bestTorrentScore = score;
+                data.torrentLink = absolute;
+            }
+        }
+        return data;
+    }
+
+    private String cleanDetailLabel(String value) {
+        return value == null ? "" : value.replaceAll("[\\\\s:*：]+$", "").trim();
+    }
+
+    private int parseInt(String value) {
+        try { return Integer.parseInt(value.replaceAll("[^0-9]", "")); }
+        catch (Exception ignored) { return 0; }
+    }
+
+    private void showTorrentDetails(Torrent torrent, TorrentDetails data) {
+        LinearLayout root = new LinearLayout(this);
+        root.setOrientation(LinearLayout.VERTICAL);
+        root.setPadding(dp(12), dp(8), dp(12), dp(10));
+        root.setBackgroundColor(BG);
+
+        TextView title = text(data.title, 20, GOLD, true);
+        title.setMaxLines(2);
+        title.setPadding(dp(4), dp(2), dp(4), dp(8));
+        root.addView(title);
+
+        LinearLayout mainArea = new LinearLayout(this);
+        mainArea.setOrientation(LinearLayout.HORIZONTAL);
+        mainArea.setGravity(Gravity.TOP);
+
+        LinearLayout posterColumn = new LinearLayout(this);
+        posterColumn.setOrientation(LinearLayout.VERTICAL);
+        posterColumn.setGravity(Gravity.TOP | Gravity.CENTER_HORIZONTAL);
+        ImageView poster = new ImageView(this);
+        poster.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        poster.setBackground(shape(PANEL, 0));
+        posterColumn.addView(poster, new LinearLayout.LayoutParams(-1, dp(260)));
+
+        Button watch = button("Просмотр");
+        watch.setTextSize(15);
+        watch.setTextColor(Color.WHITE);
+        watch.setBackground(shape(RED, 0));
+        watch.setOnFocusChangeListener((v, focused) ->
+                v.setBackground(shape(focused ? Color.rgb(125, 48, 25) : RED, focused ? GOLD : 0)));
+        LinearLayout.LayoutParams watchParams = new LinearLayout.LayoutParams(-1, dp(48));
+        watchParams.topMargin = dp(10);
+        posterColumn.addView(watch, watchParams);
+        LinearLayout.LayoutParams posterParams = new LinearLayout.LayoutParams(dp(190), -1);
+        posterParams.rightMargin = dp(12);
+        mainArea.addView(posterColumn, posterParams);
+
+        LinearLayout detailsColumn = new LinearLayout(this);
+        detailsColumn.setOrientation(LinearLayout.VERTICAL);
+        LinearLayout tabs = new LinearLayout(this);
+        tabs.setOrientation(LinearLayout.HORIZONTAL);
+        Button descriptionTab = button("Описание");
+        Button technicalTab = button("Техданные");
+        tabs.addView(descriptionTab, new LinearLayout.LayoutParams(0, dp(44), 1));
+        LinearLayout.LayoutParams technicalParams = new LinearLayout.LayoutParams(0, dp(44), 1);
+        technicalParams.leftMargin = dp(6);
+        tabs.addView(technicalTab, technicalParams);
+        detailsColumn.addView(tabs);
+
+        ScrollView detailsScroll = new ScrollView(this);
+        detailsScroll.setFillViewport(true);
+        LinearLayout detailContent = new LinearLayout(this);
+        detailContent.setOrientation(LinearLayout.VERTICAL);
+        detailContent.setPadding(dp(8), dp(10), dp(8), dp(12));
+        detailsScroll.addView(detailContent);
+        detailsColumn.addView(detailsScroll, new LinearLayout.LayoutParams(-1, 0, 1));
+        mainArea.addView(detailsColumn, new LinearLayout.LayoutParams(0, -1, 1));
+        root.addView(mainArea, new LinearLayout.LayoutParams(-1, 0, 1));
+
+        String[][] groups = {
+                {"Название", "Оригинальное название", "Год выпуска", "Жанр", "Выпущено", "Режиссер", "В ролях", "О фильме"},
+                {"Качество", "Видео", "Аудио", "Субтитры", "Продолжительность", "Перевод", "Размер"}
+        };
+        final int[] active = {0};
+        Runnable render = () -> {
+            detailContent.removeAllViews();
+            String[] keys = groups[active[0]];
+            boolean any = false;
+            for (int i = 0; i < keys.length; i++) {
+                String key = keys[i];
+                String value = data.fields.get(key);
+                if (value == null || value.trim().isEmpty()) continue;
+                any = true;
+                LinearLayout block = new LinearLayout(this);
+                block.setOrientation(LinearLayout.VERTICAL);
+                block.setPadding(dp(8), dp(5), dp(8), dp(8));
+                TextView label = text(key, 12, TEAL, true);
+                TextView valueView = text(value, 14, Color.WHITE, false);
+                valueView.setLineSpacing(dp(1), 1f);
+                block.addView(label);
+                block.addView(valueView);
+                detailContent.addView(block);
+                View divider = new View(this);
+                divider.setBackgroundColor(Color.rgb(65, 70, 74));
+                detailContent.addView(divider, new LinearLayout.LayoutParams(-1, dp(1)));
+            }
+            if (!any) detailContent.addView(text("Сведения на странице не найдены.", 15, Color.LTGRAY, false));
+            descriptionTab.setBackground(shape(active[0] == 0 ? Color.rgb(57, 68, 70) : PANEL, active[0] == 0 ? GOLD : 0));
+            technicalTab.setBackground(shape(active[0] == 1 ? Color.rgb(57, 68, 70) : PANEL, active[0] == 1 ? GOLD : 0));
+            detailsScroll.scrollTo(0, 0);
+        };
+        descriptionTab.setOnClickListener(v -> { active[0] = 0; render.run(); });
+        technicalTab.setOnClickListener(v -> { active[0] = 1; render.run(); });
+        render.run();
+
+        watch.setOnClickListener(v -> playTorrent(data));
+        AlertDialog dialog = new AlertDialog.Builder(this)
+                .setTitle("Подробности раздачи")
+                .setView(root)
+                .setNegativeButton("Закрыть", null)
+                .create();
+        dialog.show();
+        if (dialog.getWindow() != null) {
+            dialog.getWindow().setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT);
+        }
+        if (!data.poster.isEmpty()) {
+            io.execute(() -> {
+                try {
+                    byte[] bytes = client.fetchBytes(data.poster, "image/*");
+                    Bitmap bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.length);
+                    if (bitmap != null) runOnUiThread(() -> poster.setImageBitmap(bitmap));
+                } catch (Exception ignored) { }
+            });
+        }
+        watch.requestFocus();
+    }
+
+    private void playTorrent(TorrentDetails data) {
+        if (data.torrentLink == null || data.torrentLink.isEmpty()) {
+            showMessage("Не удалось найти ссылку на торрент на странице раздачи.");
+            return;
+        }
+        try {
+            if (data.torrentLink.startsWith("magnet:")) {
+                Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(data.torrentLink));
+                intent.setPackage("ru.yourok.torrserve");
+                intent.putExtra("poster", data.poster == null ? "" : data.poster);
+                intent.putExtra("title", data.title == null ? "" : data.title);
+                startActivity(intent);
+                return;
+            }
+        } catch (Exception e) {
+            showMessage("Не удалось открыть magnet в TorrServe: " + safe(e.getMessage()));
+            return;
+        }
+        progress.setVisibility(View.VISIBLE);
+        io.execute(() -> {
+            try {
+                byte[] bytes = client.fetchBytes(data.torrentLink, "application/x-bittorrent,application/octet-stream,*/*");
+                if (bytes.length < 20 || bytes[0] != 'd') {
+                    throw new java.io.IOException("Сайт вернул не .torrent-файл. Проверь авторизацию.");
+                }
+                java.io.File target = new java.io.File(getCacheDir(), "kinozal-transfer.torrent");
+                try (java.io.FileOutputStream out = new java.io.FileOutputStream(target)) { out.write(bytes); }
+                Uri fileUri = Uri.parse("content://" + getPackageName() + ".torrentprovider/torrent");
+                Intent send = new Intent(Intent.ACTION_SEND);
+                send.setPackage("ru.yourok.torrserve");
+                send.setType("application/x-bittorrent");
+                send.putExtra(Intent.EXTRA_STREAM, fileUri);
+                send.putExtra("poster", data.poster == null ? "" : data.poster);
+                send.putExtra("title", data.title == null ? "" : data.title);
+                send.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                send.setClipData(android.content.ClipData.newUri(getContentResolver(), "torrent", fileUri));
+                runOnUiThread(() -> {
+                    progress.setVisibility(View.GONE);
+                    try { startActivity(send); }
+                    catch (Exception e) { showMessage("TorrServe MatriX не установлен или не принимает файл."); }
+                });
+            } catch (Exception e) {
+                runOnUiThread(() -> {
+                    progress.setVisibility(View.GONE);
+                    showMessage("Не удалось передать торрент: " + safe(e.getMessage()));
+                });
+            }
+        });
     }
 
     private void addEmpty(String message) {
