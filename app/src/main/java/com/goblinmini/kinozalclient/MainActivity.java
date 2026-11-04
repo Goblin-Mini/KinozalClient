@@ -312,8 +312,50 @@ public class MainActivity extends Activity {
         webView.evaluateJavascript(script, result -> {
             if ("\"NO_SEARCH_FIELD\"".equals(result)
                     || "\"NO_SEARCH_FORM\"".equals(result)) {
-                Toast.makeText(this,
-                        "Не удалось определить поисковую форму. Нужна проверка разметки сайта.",
+                inspectSearchMarkup();
+            }
+        });
+    }
+
+    // Collect form structure only; never read entered values or cookies.
+    private void inspectSearchMarkup() {
+        String script = "(function(){"
+                + "var clean=function(s){return (s||'').replace(/\\s+/g,' ').trim().slice(0,160);};"
+                + "var out={url:location.href,title:document.title,forms:[],unboundInputs:[]};"
+                + "Array.from(document.forms).forEach(function(f,idx){"
+                + "var item={index:idx,method:(f.method||'get').toUpperCase(),action:f.getAttribute('action')||'',id:f.id||'',name:f.getAttribute('name')||'',className:clean(f.className),fields:[]};"
+                + "Array.from(f.querySelectorAll('input,textarea,select,button')).forEach(function(e){"
+                + "item.fields.push({tag:e.tagName.toLowerCase(),type:e.type||'',name:e.name||'',id:e.id||'',placeholder:e.getAttribute('placeholder')||'',ariaLabel:e.getAttribute('aria-label')||'',text:clean(e.innerText||e.textContent)});});out.forms.push(item);});"
+                + "Array.from(document.querySelectorAll('input,textarea')).filter(function(e){return !e.form;}).forEach(function(e){"
+                + "out.unboundInputs.push({tag:e.tagName.toLowerCase(),type:e.type||'',name:e.name||'',id:e.id||'',placeholder:e.getAttribute('placeholder')||'',ariaLabel:e.getAttribute('aria-label')||''});});"
+                + "return JSON.stringify(out);})()";
+        webView.evaluateJavascript(script, value -> {
+            try {
+                Object decoded = new org.json.JSONTokener(value).nextValue();
+                String report = new org.json.JSONObject(String.valueOf(decoded)).toString(2);
+                TextView details = new TextView(this);
+                details.setText(report);
+                details.setTextColor(Color.WHITE);
+                details.setTextSize(11);
+                details.setTextIsSelectable(true);
+                details.setPadding(dp(12), dp(8), dp(12), dp(8));
+                android.widget.ScrollView scroll = new android.widget.ScrollView(this);
+                scroll.addView(details);
+                new AlertDialog.Builder(this)
+                        .setTitle("Структура поисковой разметки")
+                        .setMessage("Скопируй отчёт и пришли его сюда. Значения полей и cookies не считываются.")
+                        .setView(scroll)
+                        .setPositiveButton("Копировать отчёт", (dialog, which) -> {
+                            android.content.ClipboardManager clipboard =
+                                    (android.content.ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
+                            clipboard.setPrimaryClip(android.content.ClipData.newPlainText(
+                                    "Kinozal markup report", report));
+                            Toast.makeText(this, "Отчёт скопирован", Toast.LENGTH_SHORT).show();
+                        })
+                        .setNegativeButton("Закрыть", null)
+                        .show();
+            } catch (Exception e) {
+                Toast.makeText(this, "Не удалось получить разметку страницы",
                         Toast.LENGTH_LONG).show();
             }
         });
