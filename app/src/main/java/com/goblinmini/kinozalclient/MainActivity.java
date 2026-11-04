@@ -6,7 +6,6 @@ import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Bundle;
-import android.net.Uri;
 import android.text.InputType;
 import android.view.inputmethod.EditorInfo;
 import android.view.Gravity;
@@ -278,13 +277,6 @@ public class MainActivity extends Activity {
                                 Toast.makeText(this, "Некорректная ссылка категории",
                                         Toast.LENGTH_LONG).show();
                             }
-                            /*if (target != null && target.getHost() != null
-                                    && target.getHost().equalsIgnoreCase(Uri.parse(mirror).getHost())) {
-                                webView.loadUrl(target.toString());
-                            } else {
-                                Toast.makeText(this, "Ссылка категории ведёт на другой домен",
-                                        Toast.LENGTH_LONG).show();
-                            }*/
                         })
                         .setNegativeButton("Закрыть", null)
                         .show();
