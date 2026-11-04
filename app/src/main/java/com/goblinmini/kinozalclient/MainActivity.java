@@ -546,81 +546,55 @@ public class MainActivity extends Activity {
     private TorrentDetails parseTorrentDetails(Document doc, Torrent torrent) {
         TorrentDetails data = new TorrentDetails();
         data.title = torrent.title;
-        String[] labels = {"Название", "Оригинальное название", "Год выпуска", "Жанр",
-                "Выпущено", "Режиссер", "В ролях", "О фильме", "Качество", "Видео",
-                "Аудио", "Субтитры", "Продолжительность", "Перевод", "Размер"};
-        java.util.Set<String> known = new java.util.LinkedHashSet<>(java.util.Arrays.asList(labels));
+        Element info = doc.selectFirst(".bx1.justify h2");
+        if (info != null) extractBoldFields(info, data.fields);
 
-        for (Element row : doc.select("tr")) {
-            Elements cells = row.children().select("td, th");
-            if (cells.size() >= 2) {
-                String key = cleanDetailLabel(cells.get(0).text());
-                if (known.contains(key)) {
-                    String value = cells.get(1).text().trim();
-                    if (!value.isEmpty()) data.fields.putIfAbsent(key, value);
-                }
-            }
+        Element description = doc.selectFirst(".bx1.justify p");
+        if (description != null) {
+            String value = description.text().replaceFirst("(?i)^\\s*О фильме\\s*:\\s*", "").trim();
+            if (!value.isEmpty()) data.fields.put("О фильме", value);
         }
 
-        // Some mirrors render labels as ordinary text rather than table cells.
-        String[] lines = doc.body().text().split("(?<=[.!?])\\s+|\\s{2,}");
-        for (String line : lines) {
-            for (String key : labels) {
-                String prefix = key + ":";
-                if (line.regionMatches(true, 0, prefix, 0, prefix.length())) {
-                    String value = line.substring(prefix.length()).trim();
-                    if (!value.isEmpty()) data.fields.putIfAbsent(key, value);
-                }
-            }
-        }
+        Element technical = doc.selectFirst("#tabs");
+        if (technical != null) extractBoldFields(technical, data.fields);
         data.fields.putIfAbsent("Размер", torrent.size);
 
-        int bestScore = -1;
-        for (Element img : doc.select("img[src], img[data-src], img[data-original]")) {
-            String src = img.hasAttr("data-original") ? img.attr("data-original")
-                    : img.hasAttr("data-src") ? img.attr("data-src") : img.attr("src");
-            if (src.isEmpty()) continue;
-            String absolute = img.absUrl("src");
-            if (absolute.isEmpty()) absolute = doc.baseUri().isEmpty() ? src
+        Element ogImage = doc.selectFirst("meta[property=og:image]");
+        if (ogImage != null) {
+            String src = ogImage.attr("content").trim();
+            if (!src.isEmpty()) data.poster = src.startsWith("http") ? src
+                    : doc.baseUri().isEmpty() ? src
                     : java.net.URI.create(doc.baseUri()).resolve(src).toString();
-            String hint = (src + " " + img.attr("alt") + " " + img.attr("class")).toLowerCase(java.util.Locale.ROOT);
-            int width = parseInt(img.attr("width"));
-            int height = parseInt(img.attr("height"));
-            int score = 0;
-            if (hint.matches(".*(poster|cover|облож|film|movie|pic|photo).*")) score += 8;
-            if (width > 0 && height > 0) {
-                double ratio = (double) width / height;
-                if (ratio >= 0.48 && ratio <= 0.82) score += 10;
-                else if (ratio > 0.35 && ratio < 0.95) score += 4;
-                if (width >= 100 && height >= 140) score += 5;
-                if (width < 60 || height < 80) score -= 8;
-            }
-            if (hint.matches(".*(logo|avatar|flag|icon|button).*")) score -= 12;
-            if (score > bestScore) {
-                bestScore = score;
-                data.poster = absolute;
-            }
+        }
+        if (data.poster.isEmpty()) {
+            Element poster = doc.selectFirst("img[src*=/poster/]");
+            if (poster != null) data.poster = poster.absUrl("src");
         }
 
-        int bestTorrentScore = -1;
-        for (Element a : doc.select("a[href]")) {
-            String href = a.attr("href").trim();
-            String label = (a.text() + " " + a.attr("title") + " " + a.attr("class")).toLowerCase(java.util.Locale.ROOT);
-            if (href.isEmpty()) continue;
-            String absolute = href.startsWith("magnet:") ? href : a.absUrl("href");
-            if (absolute.isEmpty()) continue;
-            int score = 0;
-            if (absolute.startsWith("magnet:")) score += 150;
-            if (absolute.matches("(?i).*\\\\.torrent(?:[?#].*)?$")) score += 120;
-            if (label.matches(".*(торрент|torrent).*")) score += 45;
-            if (label.matches(".*(скачать|download).*")) score += 25;
-            if (absolute.matches("(?i).*/(get|download|dl)([./?_-].*|$).*|.*download\\\\.php.*")) score += 35;
-            if (score > bestTorrentScore) {
-                bestTorrentScore = score;
-                data.torrentLink = absolute;
-            }
+        Element download = doc.selectFirst("a[href*=/download.php], a[href$=.torrent], a[href*=magnet:]");
+        if (download != null) {
+            String href = download.attr("href").trim();
+            data.torrentLink = href.startsWith("magnet:") ? href : download.absUrl("href");
         }
         return data;
+    }
+
+    private void extractBoldFields(Element block, java.util.LinkedHashMap<String, String> fields) {
+        for (Element bold : block.select("b")) {
+            String label = bold.text().replaceAll("[:：]+$", "").trim();
+            if (label.isEmpty()) continue;
+            StringBuilder value = new StringBuilder();
+            for (org.jsoup.nodes.Node node = bold.nextSibling(); node != null; node = node.nextSibling()) {
+                if (node instanceof Element && ((Element) node).tagName().equalsIgnoreCase("b")) break;
+                String part = org.jsoup.Jsoup.parse(node.toString()).text().trim();
+                if (!part.isEmpty()) {
+                    if (value.length() > 0) value.append(' ');
+                    value.append(part);
+                }
+            }
+            String text = value.toString().replaceAll("\\s+", " ").trim();
+            if (!text.isEmpty()) fields.put(label, text);
+        }
     }
 
     private String cleanDetailLabel(String value) {
