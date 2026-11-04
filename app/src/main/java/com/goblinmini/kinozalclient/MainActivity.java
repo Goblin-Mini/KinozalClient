@@ -446,7 +446,7 @@ public class MainActivity extends Activity {
         String script = "(function(){"
                 + "var body=document.body?document.body.innerText:'';"
                 + "body=body.replace(/\\r/g,'').replace(/[ \\t]+/g,' ').replace(/\\n{2,}/g,'\\n').trim();"
-                + "var labels=['Название','Оригинальное название','Год выпуска','Жанр','Выпущено','Режиссер','В ролях','О фильме','Качество','Видео','Аудио','Субтитры','Продолжительность','Перевод'];"
+                + "var labels=['Название','Оригинальное название','Год выпуска','Жанр','Выпущено','Режиссер','В ролях','О фильме','Качество','Видео','Аудио','Субтитры','Продолжительность','Перевод','Размер'];"
                 + "var positions=[];"
                 + "labels.forEach(function(label){var re=new RegExp('(?:^|[\\\\n ])'+label+'\\\\s*:', 'gi');"
                 + "var m;while((m=re.exec(body))!==null){var p=m.index+(m[0].length-label.length-1);positions.push({label:label,start:p,valueStart:re.lastIndex});}});"
@@ -454,7 +454,7 @@ public class MainActivity extends Activity {
                 + "var fields={},seen={};"
                 + "positions.forEach(function(p,i){if(seen[p.label])return;seen[p.label]=1;var next=body.length;"
                 + "for(var j=i+1;j<positions.length;j++){if(positions[j].start>p.valueStart){next=positions[j].start;break;}}"
-                + "var v=body.slice(p.valueStart,next).replace(/^[\\s:]+|[\\s]+$/g,'').trim();if(v)fields[p.label]=v.slice(0,3500);});"
+                + "var v=body.slice(p.valueStart,next).replace(/^[\\s:]+|[\\s]+$/g,'').trim();var stop=['Техданные','Релиз','Содержание','Скриншоты','Подобные','Топ по жанрам','Топ по персонам','Топ раздающего','Подобные раздачи не найдены','Комментарии ( Комментировать )'];stop.forEach(function(x){var q=v.toLowerCase().indexOf(x.toLowerCase());if(q>=0)v=v.slice(0,q).trim();});if(v)fields[p.label]=v.slice(0,3500);});"
                 + "return JSON.stringify({title:document.title||'',fields:fields});})()";
         webView.evaluateJavascript(script, value -> {
             try {
@@ -484,7 +484,7 @@ public class MainActivity extends Activity {
 
                 String[][] groups = {
                         {"Описание","Название","Оригинальное название","Год выпуска","Жанр","Выпущено","Режиссер","В ролях","О фильме"},
-                        {"Техданные","Качество","Видео","Аудио","Субтитры","Продолжительность","Перевод"}
+                        {"Техданные","Качество","Видео","Аудио","Субтитры","Продолжительность","Перевод","Размер"}
                 };
                 final int[] active = {0};
                 Runnable[] render = new Runnable[1];
