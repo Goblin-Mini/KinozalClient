@@ -61,7 +61,7 @@ public class MainActivity extends Activity {
     private int page = 0;
     private volatile String lastHtml = "";
 
-    private static class Category { String title, href; }
+    private static class Category { String title, href, method = "GET", body = ""; }
 
     private static class Torrent {
         String title, href, size, seeds, leeches;
@@ -72,7 +72,42 @@ public class MainActivity extends Activity {
         mirror = getSharedPreferences(PREFS, MODE_PRIVATE).getString("mirror", MIRRORS[0]);
         client = new KinozalHttpClient(this, mirror);
         buildShell();
-        load("browse.php", "Все раздачи");
+        loadInitialCatalog();
+    }
+
+    private void loadInitialCatalog() {
+        progress.setVisibility(View.VISIBLE);
+        list.removeAllViews();
+        io.execute(() -> {
+            try {
+                String html;
+                try {
+                    html = client.fetch("browse.php");
+                } catch (SecurityException expired) {
+                    String[] saved = client.getSavedCredentials();
+                    if (saved == null) throw expired;
+                    // One automatic recovery attempt only. HTTP 429 and network errors
+                    // are not retried, preventing repeated login requests to Kinozal.
+                    client.login(saved[0], saved[1]);
+                    html = client.fetch("browse.php");
+                }
+                lastHtml = html;
+                List<Torrent> parsed = parseTorrents(Jsoup.parse(html, client.getMirror()));
+                runOnUiThread(() -> {
+                    progress.setVisibility(View.GONE);
+                    status.setText("Авторизован · Загружено: " + parsed.size());
+                    torrents.clear(); torrents.addAll(parsed);
+                    renderTorrents(parsed);
+                    if (parsed.isEmpty()) addEmpty("Каталог получен, но раздачи не распознаны.");
+                });
+            } catch (Exception e) {
+                runOnUiThread(() -> {
+                    progress.setVisibility(View.GONE);
+                    status.setText("Нет соединения");
+                    addEmpty("Не удалось загрузить каталог. " + safe(e.getMessage()));
+                });
+            }
+        });
     }
 
     private int dp(float n) { return (int)(n * getResources().getDisplayMetrics().density + .5f); }
@@ -214,12 +249,14 @@ public class MainActivity extends Activity {
     private void focusSearch() { search.requestFocus(); }
     private void showMessage(String message) { Toast.makeText(this, message, Toast.LENGTH_LONG).show(); }
 
-    private void load(String path, String title) {
+    private void load(String path, String title) { load(path, title, null); }
+
+    private void load(String path, String title, String postBody) {
         currentPath = path; currentTitle = title; heading.setText(title);
         progress.setVisibility(View.VISIBLE); list.removeAllViews();
         io.execute(() -> {
             try {
-                String html = client.fetch(path);
+                String html = postBody == null ? client.fetch(path) : client.fetchPost(path, postBody);
                 lastHtml = html;
                 Document doc = Jsoup.parse(html, client.getMirror());
                 List<Torrent> parsed = parseTorrents(doc);
@@ -227,7 +264,7 @@ public class MainActivity extends Activity {
                     progress.setVisibility(View.GONE); torrents.clear(); torrents.addAll(parsed);
                     status.setText("Загружено: " + parsed.size());
                     renderTorrents(parsed);
-                    if (parsed.isEmpty()) addEmpty("На этой странице не удалось найти список раздач.");
+                    if (parsed.isEmpty()) addEmpty("Страница загружена, но раздачи не найдены. Возможно, фильтр не применился.");
                 });
             } catch (Exception e) {
                 runOnUiThread(() -> { progress.setVisibility(View.GONE); status.setText("Нет соединения");
@@ -382,14 +419,39 @@ public class MainActivity extends Activity {
                                 || value.equals("0") || value.equals("-1")) continue;
                         Element form = select.closest("form");
                         String action = form == null || form.attr("action").isEmpty()
-                                ? "browse.php" : form.absUrl("action");
+                                ? client.getMirror() + "/browse.php" : form.absUrl("action");
                         if (action.isEmpty()) action = client.getMirror() + "/browse.php";
-                        String separator = action.contains("?") ? "&" : "?";
-                        String target = action + separator
-                                + java.net.URLEncoder.encode(field, "UTF-8") + "="
-                                + java.net.URLEncoder.encode(value, "UTF-8");
-                        Category item = new Category(); item.title = label; item.href = target;
-                        unique.putIfAbsent(target, item);
+                        java.util.LinkedHashMap<String, String> params = new java.util.LinkedHashMap<>();
+                        if (form != null) {
+                            for (Element input : form.select("input[name]")) {
+                                String type = input.attr("type").toLowerCase(java.util.Locale.ROOT);
+                                if (!type.equals("submit") && !type.equals("button") && !type.equals("file")) {
+                                    params.put(input.attr("name"), input.attr("value"));
+                                }
+                            }
+                            for (Element otherSelect : form.select("select[name]")) {
+                                String otherName = otherSelect.attr("name");
+                                Element selectedOption = otherSelect.selectFirst("option[selected]");
+                                if (otherSelect == select) params.put(otherName, value);
+                                else if (selectedOption != null) params.put(otherName, selectedOption.attr("value"));
+                            }
+                        } else {
+                            params.put(field, value);
+                        }
+                        StringBuilder encoded = new StringBuilder();
+                        for (java.util.Map.Entry<String, String> entry : params.entrySet()) {
+                            if (encoded.length() > 0) encoded.append('&');
+                            encoded.append(java.net.URLEncoder.encode(entry.getKey(), "UTF-8"))
+                                    .append('=').append(java.net.URLEncoder.encode(entry.getValue(), "UTF-8"));
+                        }
+                        Category item = new Category(); item.title = label;
+                        item.method = form != null && form.attr("method").equalsIgnoreCase("post") ? "POST" : "GET";
+                        if ("POST".equals(item.method)) {
+                            item.href = action; item.body = encoded.toString();
+                        } else {
+                            item.href = action + (action.contains("?") ? "&" : "?") + encoded;
+                        }
+                        unique.putIfAbsent(item.href + "|" + item.body, item);
                     }
                 }
 
@@ -405,7 +467,8 @@ public class MainActivity extends Activity {
                     new AlertDialog.Builder(this).setTitle("Категории Kinozal")
                             .setItems(labels, (dialog, which) -> {
                                 Category selected = found.get(which);
-                                load(selected.href, selected.title);
+                                if ("POST".equals(selected.method)) load(selected.href, selected.title, selected.body);
+                                else load(selected.href, selected.title);
                             }).setNegativeButton("Закрыть", null).show();
                 });
             } catch (Exception e) {
