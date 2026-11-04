@@ -390,6 +390,14 @@ public class MainActivity extends Activity {
         web.getSettings().setDomStorageEnabled(true);
         web.getSettings().setDatabaseEnabled(true);
         web.getSettings().setLoadsImagesAutomatically(true);
+        web.getSettings().setJavaScriptCanOpenWindowsAutomatically(true);
+        web.getSettings().setSupportMultipleWindows(false);
+        if (android.os.Build.VERSION.SDK_INT >= 29) {
+            web.getSettings().setForceDark(android.webkit.WebSettings.FORCE_DARK_OFF);
+        }
+        if (android.os.Build.VERSION.SDK_INT >= 33) {
+            web.getSettings().setAlgorithmicDarkeningAllowed(false);
+        }
 
         CookieManager cookies = CookieManager.getInstance();
         cookies.setAcceptCookie(true);
@@ -397,28 +405,49 @@ public class MainActivity extends Activity {
 
         LinearLayout container = new LinearLayout(this);
         container.setOrientation(LinearLayout.VERTICAL);
-        container.setBackgroundColor(BG);
-        TextView hint = text("Загрузка страницы Kinozal…", 14, GOLD, false);
+        container.setBackgroundColor(Color.WHITE);
+        TextView hint = text("Загрузка страницы Kinozal…", 14, Color.BLACK, false);
+        hint.setBackgroundColor(Color.WHITE);
         hint.setPadding(dp(14), dp(10), dp(14), dp(10));
         container.addView(hint, new LinearLayout.LayoutParams(-1, -2));
-        // A weighted WebView inside a wrap-content AlertDialog can be measured
-        // at zero height. Give the dialog a real viewport after it is shown.
         container.addView(web, new LinearLayout.LayoutParams(-1, 0, 1f));
 
-        web.setWebChromeClient(new WebChromeClient());
+        web.setWebChromeClient(new WebChromeClient() {
+            @Override public void onProgressChanged(WebView view, int progressValue) {
+                hint.setText("Загрузка страницы Kinozal: " + progressValue + "%");
+            }
+            @Override public boolean onConsoleMessage(android.webkit.ConsoleMessage message) {
+                android.util.Log.w("KinozalWebView", message.message() + " -- " +
+                        message.sourceId() + ":" + message.lineNumber());
+                return true;
+            }
+        });
         web.setWebViewClient(new WebViewClient() {
             @Override public void onPageStarted(WebView view, String url, android.graphics.Bitmap favicon) {
                 hint.setText("Открывается: " + url);
             }
+            @Override public void onPageCommitVisible(WebView view, String url) {
+                hint.setText("Страница начала отображаться: " + url);
+            }
             @Override public void onPageFinished(WebView view, String url) {
-                hint.setText("Страница загружена. Если появилась проверка Cloudflare, дождитесь её завершения; затем войдите и нажмите «Готово».\n" + url);
                 cookies.flush();
+                hint.setText("Загрузка завершена. Если область ниже пустая, страница не отрисовалась. URL: " + url);
             }
             @Override public void onReceivedError(WebView view, android.webkit.WebResourceRequest request,
                                                   android.webkit.WebResourceError error) {
                 if (request.isForMainFrame()) {
-                    hint.setText("Ошибка загрузки страницы: " + error.getDescription());
+                    hint.setText("Ошибка загрузки: " + error.getDescription() + " (код " + error.getErrorCode() + ")");
                 }
+            }
+            @Override public void onReceivedHttpError(WebView view, android.webkit.WebResourceRequest request,
+                                                      android.webkit.WebResourceResponse response) {
+                if (request.isForMainFrame()) {
+                    hint.setText("Сайт вернул HTTP " + response.getStatusCode() + " " + response.getReasonPhrase());
+                }
+            }
+            @Override public boolean onRenderProcessGone(WebView view, android.webkit.RenderProcessGoneDetail detail) {
+                hint.setText("Процесс WebView аварийно завершился. Повторите открытие авторизации.");
+                return true;
             }
         });
 
@@ -426,16 +455,14 @@ public class MainActivity extends Activity {
                 .setTitle("Вход и проверка безопасности")
                 .setView(container)
                 .setPositiveButton("Готово", null)
-                .setNeutralButton("Очистить сессию", null)
+                .setNeutralButton("Перезагрузить", null)
                 .setNegativeButton("Закрыть", null)
                 .create();
         dialog.setOnShowListener(ignored -> {
             android.util.DisplayMetrics metrics = getResources().getDisplayMetrics();
             int width = Math.min((int)(metrics.widthPixels * 0.94f), dp(1200));
             int height = (int)(metrics.heightPixels * 0.86f);
-            if (dialog.getWindow() != null) {
-                dialog.getWindow().setLayout(width, height);
-            }
+            if (dialog.getWindow() != null) dialog.getWindow().setLayout(width, height);
             dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
                 cookies.flush();
                 String pageUrl = web.getUrl();
@@ -453,14 +480,7 @@ public class MainActivity extends Activity {
                 }
             });
             dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener(v -> {
-                cookies.removeAllCookies(value -> runOnUiThread(() -> {
-                    cookies.flush();
-                    client.logout();
-                    web.clearCache(true);
-                    web.clearHistory();
-                    web.loadUrl(mirror + "/login.php?m=5");
-                    hint.setText("Сессия очищена. Заново пройдите проверку Cloudflare и войдите.");
-                }));
+                web.reload();
             });
         });
         dialog.setOnDismissListener(ignored -> web.destroy());
