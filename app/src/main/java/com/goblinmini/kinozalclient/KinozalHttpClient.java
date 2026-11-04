@@ -153,7 +153,7 @@ public final class KinozalHttpClient {
                 continue;
             }
             InputStream input = code >= 400 ? connection.getErrorStream() : connection.getInputStream();
-            String result = input == null ? "" : readAll(input);
+            String result = input == null ? "" : readAll(input, connection.getContentType());
             connection.disconnect();
             if (code >= 400) throw new java.io.IOException("HTTP " + code + " при запросе Kinozal");
             return result;
@@ -246,12 +246,31 @@ public final class KinozalHttpClient {
         return URLEncoder.encode(value, "UTF-8");
     }
 
-    private static String readAll(InputStream input) throws Exception {
+    private static String readAll(InputStream input, String contentType) throws Exception {
         try (InputStream in = input; ByteArrayOutputStream out = new ByteArrayOutputStream()) {
             byte[] buffer = new byte[8192];
             int n;
             while ((n = in.read(buffer)) >= 0) out.write(buffer, 0, n);
-            return new String(out.toByteArray(), StandardCharsets.UTF_8);
+            byte[] bytes = out.toByteArray();
+            if (bytes.length >= 3 && (bytes[0] & 0xff) == 0xef
+                    && (bytes[1] & 0xff) == 0xbb && (bytes[2] & 0xff) == 0xbf) {
+                return new String(bytes, 3, bytes.length - 3, StandardCharsets.UTF_8);
+            }
+            String header = contentType == null ? "" : contentType;
+            java.util.regex.Matcher declared = java.util.regex.Pattern
+                    .compile("(?i)charset\\s*=\\s*['\\\"]?([a-z0-9._-]+)").matcher(header);
+            String charset = declared.find() ? declared.group(1) : null;
+            if (charset == null) {
+                // HTML meta declarations are ASCII-compatible, so inspect a short
+                // prefix before choosing the legacy Kinozal Windows-1251 default.
+                String prefix = new String(bytes, 0, Math.min(bytes.length, 4096), StandardCharsets.ISO_8859_1);
+                java.util.regex.Matcher meta = java.util.regex.Pattern
+                        .compile("(?i)<meta[^>]+charset\\s*=\\s*['\\\"]?([a-z0-9._-]+)").matcher(prefix);
+                if (meta.find()) charset = meta.group(1);
+            }
+            if (charset == null || charset.isEmpty()) charset = "windows-1251";
+            try { return new String(bytes, java.nio.charset.Charset.forName(charset)); }
+            catch (Exception unsupported) { return new String(bytes, StandardCharsets.UTF_8); }
         }
     }
 }
