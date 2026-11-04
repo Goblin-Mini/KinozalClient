@@ -455,12 +455,7 @@ public class MainActivity extends Activity {
                 + "positions.forEach(function(p,i){if(seen[p.label])return;seen[p.label]=1;var next=body.length;"
                 + "for(var j=i+1;j<positions.length;j++){if(positions[j].start>p.valueStart){next=positions[j].start;break;}}"
                 + "var v=body.slice(p.valueStart,next).replace(/^[\\s:]+|[\\s]+$/g,'').trim();if(v)fields[p.label]=v.slice(0,3500);});"
-                + "var comments='';"
-                + "var all=Array.from(document.querySelectorAll('body *'));"
-                + "var marker=all.find(function(e){return e.children.length===0&&/Комментарии\\s*\\(/i.test((e.innerText||e.textContent||'').trim());});"
-                + "if(marker){var node=marker;for(var k=0;k<6&&node;k++,node=node.parentElement){var t=(node.innerText||'').trim();"
-                + "if(t.length>120&&t.length<18000&&(/Ответить/i.test(t)||/\\d{1,2}\\s+[а-я]+\\s+20\\d{2}/i.test(t))){comments=t;break;}}}"
-                + "return JSON.stringify({title:document.title||'',fields:fields,comments:comments});})()";
+                + "return JSON.stringify({title:document.title||'',fields:fields});})()";
         webView.evaluateJavascript(script, value -> {
             try {
                 Object decoded = new org.json.JSONTokener(value).nextValue();
@@ -471,7 +466,6 @@ public class MainActivity extends Activity {
                             Toast.LENGTH_LONG).show();
                     return;
                 }
-                String commentsText = data.optString("comments", "").trim();
                 LinearLayout root = new LinearLayout(this);
                 root.setOrientation(LinearLayout.VERTICAL);
                 root.setPadding(dp(12), dp(8), dp(12), dp(8));
@@ -490,24 +484,13 @@ public class MainActivity extends Activity {
 
                 String[][] groups = {
                         {"Описание","Название","Оригинальное название","Год выпуска","Жанр","Выпущено","Режиссер","В ролях","О фильме"},
-                        {"Техданные","Качество","Видео","Аудио","Субтитры","Продолжительность","Перевод"},
-                        {"Комментарии"}
+                        {"Техданные","Качество","Видео","Аудио","Субтитры","Продолжительность","Перевод"}
                 };
                 final int[] active = {0};
                 Runnable[] render = new Runnable[1];
                 render[0] = () -> {
                     content.removeAllViews();
-                    if (active[0] == 2) {
-                        TextView commentsView = new TextView(this);
-                        commentsView.setText(commentsText.isEmpty()
-                                ? "Не удалось автоматически выделить блок комментариев. Открой страницу сайта для просмотра."
-                                : commentsText);
-                        commentsView.setTextColor(Color.WHITE);
-                        commentsView.setTextSize(15);
-                        commentsView.setLineSpacing(dp(2), 1.0f);
-                        commentsView.setPadding(dp(4), dp(8), dp(4), dp(12));
-                        content.addView(commentsView);
-                    } else if (active[0] == 0) {
+                    if (active[0] == 0) {
                         String[] compactKeys = {"Название","Оригинальное название","Год выпуска","Жанр","Выпущено","Режиссер"};
                         for (int k = 0; k < compactKeys.length; k += 2) {
                             LinearLayout row = new LinearLayout(this);
