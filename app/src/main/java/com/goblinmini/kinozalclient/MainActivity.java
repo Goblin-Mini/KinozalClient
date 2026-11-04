@@ -260,40 +260,50 @@ public class MainActivity extends Activity {
 
     private void showCategories() {
         if (webView == null) return;
-        // The first select on browse.php is explicitly labelled "Выбор раздела".
-        // Its option values are the category IDs used by browse.php?c=ID.
+        // Find the actual category select by its placeholder option, not by
+        // select order or nearby labels (which can belong to other filters).
         String script = "(function(){"
                 + "var selects=Array.from(document.querySelectorAll('select'));"
                 + "var select=selects.find(function(s){"
-                + "var label=s.labels&&s.labels.length?s.labels[0].innerText:'';"
-                + "var parent=s.parentElement?(s.parentElement.innerText||s.parentElement.textContent||''):'';"
-                + "return /выбор\\s+раздела/i.test(label+' '+parent);"
-                + "})||selects[0];"
-                + "if(!select)return JSON.stringify([]);"
-                + "return JSON.stringify(Array.from(select.options).map(function(o){"
+                + "return Array.from(s.options).some(function(o){"
+                + "return (o.textContent||'').replace(/\\s+/g,' ').trim().toLowerCase()==='поиск по разделам';"
+                + "});"
+                + "});"
+                + "if(!select)return JSON.stringify({found:false,options:[]});"
+                + "var options=Array.from(select.options).map(function(o){"
                 + "return {text:(o.textContent||'').replace(/\\s+/g,' ').trim(),value:(o.value||'').trim()};"
-                + "}).filter(function(o){return o.text.length>0&&/^\\d+$/.test(o.value);}));"
+                + "}).filter(function(o){return o.text.length>0;});"
+                + "return JSON.stringify({found:true,options:options});"
                 + "})()";
         webView.evaluateJavascript(script, value -> {
             try {
                 Object decoded = new org.json.JSONTokener(value).nextValue();
-                org.json.JSONArray options = new org.json.JSONArray(String.valueOf(decoded));
-                if (options.length() == 0) {
+                org.json.JSONObject result = new org.json.JSONObject(String.valueOf(decoded));
+                if (!result.optBoolean("found", false)) {
                     Toast.makeText(this,
-                            "Не удалось получить категории из фильтра «Выбор раздела». Открой browse.php и повтори.",
+                            "Не найден именно фильтр «Поиск по разделам». Открой страницу «Раздачи» и повтори.",
                             Toast.LENGTH_LONG).show();
                     return;
                 }
+                org.json.JSONArray options = result.optJSONArray("options");
                 java.util.ArrayList<String> labels = new java.util.ArrayList<>();
                 java.util.ArrayList<String> ids = new java.util.ArrayList<>();
-                for (int i = 0; i < options.length(); i++) {
-                    org.json.JSONObject option = options.getJSONObject(i);
-                    String label = option.optString("text", "").trim();
-                    String id = option.optString("value", "").trim();
-                    if (!label.isEmpty() && id.matches("\\d+")) {
-                        labels.add(label);
-                        ids.add(id);
+                if (options != null) {
+                    for (int i = 0; i < options.length(); i++) {
+                        org.json.JSONObject option = options.getJSONObject(i);
+                        String label = option.optString("text", "").trim();
+                        String id = option.optString("value", "").trim();
+                        if (!label.equalsIgnoreCase("Поиск по разделам")
+                                && !label.isEmpty() && id.matches("\\d+")) {
+                            labels.add(label);
+                            ids.add(id);
+                        }
                     }
+                }
+                if (labels.isEmpty()) {
+                    Toast.makeText(this, "В фильтре «Поиск по разделам» не найдены категории.",
+                            Toast.LENGTH_LONG).show();
+                    return;
                 }
                 new AlertDialog.Builder(this)
                         .setTitle("Категории Kinozal (" + labels.size() + ")")
