@@ -297,18 +297,26 @@ public class MainActivity extends Activity {
         String escaped = org.json.JSONObject.quote(query);
         String script = "(function(){"
                 + "var q=" + escaped + ";"
+                + "var form=document.querySelector('form#srchform');"
+                + "var el=form&&form.querySelector('input[name=\\\"s\\\"],input#s');"
+                + "if(!el){"
                 + "var inputs=Array.from(document.querySelectorAll('input:not([type=hidden]),textarea'));"
                 + "var candidates=inputs.filter(function(i){"
                 + "var n=((i.name||'')+' '+(i.id||'')+' '+(i.placeholder||'')).toLowerCase();"
                 + "return /search|query|keyword|name|поиск/i.test(n)||i.type==='search';"
                 + "});"
-                + "var el=candidates.find(function(i){return i.form;})||candidates[0];"
+                + "el=candidates.find(function(i){return i.form;})||candidates[0];"
+                + "form=el&&el.form;"
+                + "}"
                 + "if(!el)return 'NO_SEARCH_FIELD';"
+                + "if(!form)form=el.form;"
+                + "if(!form)return 'NO_SEARCH_FORM';"
                 + "el.value=q;el.dispatchEvent(new Event('input',{bubbles:true}));"
                 + "el.dispatchEvent(new Event('change',{bubbles:true}));"
-                + "if(el.form){if(el.form.requestSubmit)el.form.requestSubmit();else el.form.submit();return 'SUBMITTED';}"
-                + "var b=el.closest('form');if(b){b.submit();return 'SUBMITTED';}"
-                + "return 'NO_SEARCH_FORM';})()";
+                + "var submit=form.querySelector('input[type=submit],button[type=submit]');"
+                + "if(form.requestSubmit){if(submit)form.requestSubmit(submit);else form.requestSubmit();}"
+                + "else form.submit();"
+                + "return 'SUBMITTED';})()";
         webView.evaluateJavascript(script, result -> {
             if ("\"NO_SEARCH_FIELD\"".equals(result)
                     || "\"NO_SEARCH_FORM\"".equals(result)) {
@@ -333,27 +341,37 @@ public class MainActivity extends Activity {
             try {
                 Object decoded = new org.json.JSONTokener(value).nextValue();
                 String report = new org.json.JSONObject(String.valueOf(decoded)).toString(2);
+                TextView hint = new TextView(this);
+                hint.setText("Сфотографируй отчёт. Если он не помещается, прокрути вниз. Значения полей и cookies не считываются.");
+                hint.setTextColor(Color.LTGRAY);
+                hint.setTextSize(14);
+                hint.setPadding(dp(16), dp(10), dp(16), dp(10));
                 TextView details = new TextView(this);
                 details.setText(report);
                 details.setTextColor(Color.WHITE);
-                details.setTextSize(11);
+                details.setTextSize(14);
+                details.setTypeface(android.graphics.Typeface.MONOSPACE);
                 details.setTextIsSelectable(true);
-                details.setPadding(dp(12), dp(8), dp(12), dp(8));
+                details.setPadding(dp(16), dp(8), dp(16), dp(16));
                 android.widget.ScrollView scroll = new android.widget.ScrollView(this);
+                scroll.setFillViewport(true);
                 scroll.addView(details);
-                new AlertDialog.Builder(this)
+                LinearLayout content = new LinearLayout(this);
+                content.setOrientation(LinearLayout.VERTICAL);
+                content.addView(hint);
+                content.addView(scroll, new LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
+                AlertDialog dialog = new AlertDialog.Builder(this)
                         .setTitle("Структура поисковой разметки")
-                        .setMessage("Скопируй отчёт и пришли его сюда. Значения полей и cookies не считываются.")
-                        .setView(scroll)
-                        .setPositiveButton("Копировать отчёт", (dialog, which) -> {
-                            android.content.ClipboardManager clipboard =
-                                    (android.content.ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
-                            clipboard.setPrimaryClip(android.content.ClipData.newPlainText(
-                                    "Kinozal markup report", report));
-                            Toast.makeText(this, "Отчёт скопирован", Toast.LENGTH_SHORT).show();
-                        })
-                        .setNegativeButton("Закрыть", null)
-                        .show();
+                        .setView(content)
+                        .setPositiveButton("Готово", null)
+                        .create();
+                dialog.show();
+                if (dialog.getWindow() != null) {
+                    dialog.getWindow().setLayout(
+                            ViewGroup.LayoutParams.MATCH_PARENT,
+                            ViewGroup.LayoutParams.MATCH_PARENT);
+                }
             } catch (Exception e) {
                 Toast.makeText(this, "Не удалось получить разметку страницы",
                         Toast.LENGTH_LONG).show();
