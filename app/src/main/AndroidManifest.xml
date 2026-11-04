@@ -10,6 +10,11 @@
         android:label="@string/app_name"
         android:theme="@style/AppTheme"
         android:usesCleartextTraffic="false">
+        <provider
+            android:name=".TorrentFileProvider"
+            android:authorities="com.goblinmini.kinozalclient.torrentprovider"
+            android:exported="false"
+            android:grantUriPermissions="true" />
         <activity
             android:name=".MainActivity"
             android:configChanges="keyboard|keyboardHidden|orientation|screenSize"
