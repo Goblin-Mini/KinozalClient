@@ -18,10 +18,6 @@ import android.widget.ProgressBar;
 import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
-import android.webkit.CookieManager;
-import android.webkit.WebChromeClient;
-import android.webkit.WebView;
-import android.webkit.WebViewClient;
 
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
@@ -374,226 +370,114 @@ public class MainActivity extends Activity {
     }
 
     private void showLogin() {
-        openBrowserSession();
+        String[] saved = client.getSavedCredentials();
+        if (saved != null) {
+            progress.setVisibility(View.VISIBLE);
+            status.setText("Восстановление сессии…");
+            io.execute(() -> {
+                try {
+                    client.login(saved[0], saved[1]);
+                    runOnUiThread(() -> {
+                        progress.setVisibility(View.GONE);
+                        status.setText("Авторизован");
+                        showMessage("Вход выполнен. Сессия сохранена.");
+                        load("browse.php", "Все раздачи");
+                    });
+                } catch (Exception e) {
+                    runOnUiThread(() -> {
+                        progress.setVisibility(View.GONE);
+                        status.setText("Требуется вход");
+                        showMessage("Не удалось восстановить сессию: " + safe(e.getMessage()));
+                        showNativeLoginForm(saved);
+                    });
+                }
+            });
+            return;
+        }
+        showNativeLoginForm(null);
     }
 
-    /**
-     * Opens the real Kinozal login page in an embedded browser so JavaScript
-     * and Cloudflare's legitimate interactive security check can run.
-     * The catalogue itself remains native and is fetched by KinozalHttpClient.
-     */
-    private void openBrowserSession() {
-        WebView web = new WebView(this);
-        web.setBackgroundColor(Color.WHITE);
-        web.setVisibility(View.VISIBLE);
-        web.getSettings().setJavaScriptEnabled(true);
-        web.getSettings().setDomStorageEnabled(true);
-        web.getSettings().setDatabaseEnabled(true);
-        web.getSettings().setLoadsImagesAutomatically(true);
-        web.getSettings().setJavaScriptCanOpenWindowsAutomatically(true);
-        web.getSettings().setSupportMultipleWindows(false);
-        if (android.os.Build.VERSION.SDK_INT >= 29) {
-            web.getSettings().setForceDark(android.webkit.WebSettings.FORCE_DARK_OFF);
-        }
-        if (android.os.Build.VERSION.SDK_INT >= 33) {
-            web.getSettings().setAlgorithmicDarkeningAllowed(false);
-        }
+    private void showNativeLoginForm(String[] saved) {
+        LinearLayout form = new LinearLayout(this);
+        form.setOrientation(LinearLayout.VERTICAL);
+        form.setPadding(dp(20), dp(8), dp(20), dp(8));
+        form.setBackgroundColor(BG);
 
-        CookieManager cookies = CookieManager.getInstance();
-        cookies.setAcceptCookie(true);
-        cookies.setAcceptThirdPartyCookies(web, true);
-
-        LinearLayout container = new LinearLayout(this);
-        container.setOrientation(LinearLayout.VERTICAL);
-        container.setBackgroundColor(Color.WHITE);
-        TextView hint = text("Загрузка страницы Kinozal…", 14, Color.BLACK, false);
-        hint.setBackgroundColor(Color.WHITE);
-        hint.setPadding(dp(14), dp(10), dp(14), dp(10));
-        container.addView(hint, new LinearLayout.LayoutParams(-1, -2));
-
-        // Native fields make login entry reliable on Android TV devices
-        // whose WebView fields do not summon the on-screen keyboard.
-        LinearLayout credentials = new LinearLayout(this);
-        credentials.setOrientation(LinearLayout.HORIZONTAL);
-        credentials.setPadding(dp(10), dp(4), dp(10), dp(4));
-        EditText loginInput = new EditText(this);
-        loginInput.setSingleLine(true);
-        loginInput.setTextColor(GOLD);
-        loginInput.setHintTextColor(TEAL);
-        loginInput.setBackground(shape(PANEL, TEAL));
-        loginInput.setPadding(dp(12), 0, dp(12), 0);
-        loginInput.setHint("Логин");
-        loginInput.setTextSize(14);
-        loginInput.setFocusable(true);
-        loginInput.setFocusableInTouchMode(true);
-        loginInput.setInputType(android.text.InputType.TYPE_CLASS_TEXT
+        EditText username = new EditText(this);
+        username.setSingleLine(true);
+        username.setTextColor(GOLD);
+        username.setHintTextColor(TEAL);
+        username.setHint("Логин Kinozal");
+        username.setBackground(shape(PANEL, TEAL));
+        username.setPadding(dp(14), 0, dp(14), 0);
+        username.setInputType(android.text.InputType.TYPE_CLASS_TEXT
                 | android.text.InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD);
-        EditText passwordInput = new EditText(this);
-        passwordInput.setSingleLine(true);
-        passwordInput.setTextColor(GOLD);
-        passwordInput.setHintTextColor(TEAL);
-        passwordInput.setBackground(shape(PANEL, TEAL));
-        passwordInput.setPadding(dp(12), 0, dp(12), 0);
-        passwordInput.setHint("Пароль");
-        passwordInput.setTextSize(14);
-        passwordInput.setFocusable(true);
-        passwordInput.setFocusableInTouchMode(true);
-        passwordInput.setInputType(android.text.InputType.TYPE_CLASS_TEXT
-                | android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD);
-        String[] savedCredentials = client.getSavedCredentials();
-        if (savedCredentials != null) {
-            loginInput.setText(savedCredentials[0]);
-            passwordInput.setText(savedCredentials[1]);
-        }
-        credentials.addView(loginInput, new LinearLayout.LayoutParams(0, dp(48), 1f));
-        credentials.addView(passwordInput, new LinearLayout.LayoutParams(0, dp(48), 1f));
-        Button fillLogin = button("Вставить в форму");
-        credentials.addView(fillLogin, new LinearLayout.LayoutParams(dp(170), dp(48)));
-        container.addView(credentials, new LinearLayout.LayoutParams(-1, -2));
-        fillLogin.setOnClickListener(v -> {
-            String userValue = loginInput.getText().toString().trim();
-            String passValue = passwordInput.getText().toString();
-            if (userValue.isEmpty() || passValue.isEmpty()) {
-                showMessage("Введите логин и пароль один раз.");
-                return;
-            }
-            try {
-                client.saveCredentials(userValue, passValue);
-                showMessage("Данные сохранены на устройстве в зашифрованном виде.");
-            } catch (Exception e) {
-                showMessage("Не удалось сохранить данные: " + safe(e.getMessage()));
-                return;
-            }
-            fillWebLogin(web, userValue, passValue, true);
-        });
-        android.view.inputmethod.InputMethodManager imm =
-                (android.view.inputmethod.InputMethodManager)getSystemService(INPUT_METHOD_SERVICE);
-        View.OnFocusChangeListener showKeyboard = (v, focused) -> {
-            if (focused) v.postDelayed(() -> imm.showSoftInput(v,
-                    android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT), 200);
-        };
-        loginInput.setOnFocusChangeListener(showKeyboard);
-        passwordInput.setOnFocusChangeListener(showKeyboard);
-        container.addView(web, new LinearLayout.LayoutParams(-1, 0, 1f));
+        form.addView(username, new LinearLayout.LayoutParams(-1, dp(52)));
 
-        web.setWebChromeClient(new WebChromeClient() {
-            @Override public void onProgressChanged(WebView view, int progressValue) {
-                hint.setText("Загрузка страницы Kinozal: " + progressValue + "%");
-            }
-            @Override public boolean onConsoleMessage(android.webkit.ConsoleMessage message) {
-                android.util.Log.w("KinozalWebView", message.message() + " -- " +
-                        message.sourceId() + ":" + message.lineNumber());
-                return true;
-            }
-        });
-        web.setWebViewClient(new WebViewClient() {
-            @Override public void onPageStarted(WebView view, String url, android.graphics.Bitmap favicon) {
-                hint.setText("Открывается: " + url);
-            }
-            @Override public void onPageCommitVisible(WebView view, String url) {
-                hint.setText("Страница начала отображаться: " + url);
-            }
-            @Override public void onPageFinished(WebView view, String url) {
-                cookies.flush();
-                hint.setText("Загрузка завершена. URL: " + url);
-                String[] remembered = client.getSavedCredentials();
-                if (remembered != null) fillWebLogin(view, remembered[0], remembered[1], false);
-            }
-            @Override public void onReceivedError(WebView view, android.webkit.WebResourceRequest request,
-                                                  android.webkit.WebResourceError error) {
-                if (request.isForMainFrame()) {
-                    hint.setText("Ошибка загрузки: " + error.getDescription() + " (код " + error.getErrorCode() + ")");
-                }
-            }
-            @Override public void onReceivedHttpError(WebView view, android.webkit.WebResourceRequest request,
-                                                      android.webkit.WebResourceResponse response) {
-                if (request.isForMainFrame()) {
-                    hint.setText("Сайт вернул HTTP " + response.getStatusCode() + " " + response.getReasonPhrase());
-                }
-            }
-            @Override public boolean onRenderProcessGone(WebView view, android.webkit.RenderProcessGoneDetail detail) {
-                hint.setText("Процесс WebView аварийно завершился. Повторите открытие авторизации.");
-                return true;
-            }
-        });
+        EditText password = new EditText(this);
+        password.setSingleLine(true);
+        password.setTextColor(GOLD);
+        password.setHintTextColor(TEAL);
+        password.setHint("Пароль");
+        password.setBackground(shape(PANEL, TEAL));
+        password.setPadding(dp(14), 0, dp(14), 0);
+        password.setInputType(android.text.InputType.TYPE_CLASS_TEXT
+                | android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD);
+        LinearLayout.LayoutParams passwordParams = new LinearLayout.LayoutParams(-1, dp(52));
+        passwordParams.topMargin = dp(10);
+        form.addView(password, passwordParams);
+
+        if (saved != null) {
+            username.setText(saved[0]);
+            password.setText(saved[1]);
+        }
 
         AlertDialog dialog = new AlertDialog.Builder(this)
-                .setTitle("Вход и проверка безопасности")
-                .setView(container)
-                .setPositiveButton("Готово", null)
-                .setNeutralButton("Перезагрузить", null)
-                .setNegativeButton("Закрыть", null)
+                .setTitle("Авторизация Kinozal")
+                .setView(form)
+                .setPositiveButton("Войти", null)
+                .setNeutralButton("Забыть данные", null)
+                .setNegativeButton("Отмена", null)
                 .create();
         dialog.setOnShowListener(ignored -> {
-            android.util.DisplayMetrics metrics = getResources().getDisplayMetrics();
-            int width = Math.min((int)(metrics.widthPixels * 0.94f), dp(1200));
-            int height = (int)(metrics.heightPixels * 0.86f);
-            if (dialog.getWindow() != null) {
-                dialog.getWindow().setLayout(width, height);
-                dialog.getWindow().setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE
-                        | android.view.WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN);
-            }
             dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
-                cookies.flush();
-                String pageUrl = web.getUrl();
-                String cookieHeader = cookies.getCookie(
-                        pageUrl == null || !pageUrl.startsWith(mirror) ? mirror : pageUrl);
-                String browserAgent = web.getSettings().getUserAgentString();
-                try {
-                    client.importBrowserSession(cookieHeader, browserAgent);
-                    dialog.dismiss();
-                    status.setText("Сессия браузера сохранена");
-                    showMessage("Данные сессии переданы. Проверяю доступ к каталогу…");
-                    load("browse.php", "Все раздачи");
-                } catch (Exception e) {
-                    showMessage("Не удалось передать сессию: " + safe(e.getMessage()));
+                String user = username.getText().toString().trim();
+                String pass = password.getText().toString();
+                if (user.isEmpty() || pass.isEmpty()) {
+                    showMessage("Введите логин и пароль.");
+                    return;
                 }
+                progress.setVisibility(View.VISIBLE);
+                dialog.getButton(AlertDialog.BUTTON_POSITIVE).setEnabled(false);
+                io.execute(() -> {
+                    try {
+                        client.login(user, pass);
+                        client.saveCredentials(user, pass);
+                        runOnUiThread(() -> {
+                            progress.setVisibility(View.GONE);
+                            dialog.dismiss();
+                            status.setText("Авторизован");
+                            showMessage("Вход выполнен. Данные сохранены, повторный ввод не потребуется.");
+                            load("browse.php", "Все раздачи");
+                        });
+                    } catch (Exception e) {
+                        runOnUiThread(() -> {
+                            progress.setVisibility(View.GONE);
+                            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setEnabled(true);
+                            showMessage("Ошибка входа: " + safe(e.getMessage()));
+                        });
+                    }
+                });
             });
             dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener(v -> {
-                web.reload();
+                client.clearSavedCredentials();
+                client.logout();
+                username.setText("");
+                password.setText("");
+                showMessage("Сохранённые данные и сессия очищены.");
             });
         });
-        dialog.setOnDismissListener(ignored -> web.destroy());
         dialog.show();
-        web.loadUrl(mirror + "/login.php?m=5");
-    }
-
-    private void fillWebLogin(WebView web, String username, String password, boolean notify) {
-        String script = "(function(){"
-                + "if(window.__kinozalAutofillTimer)clearInterval(window.__kinozalAutofillTimer);"
-                + "var userValue=" + org.json.JSONObject.quote(username) + ";"
-                + "var passValue=" + org.json.JSONObject.quote(password) + ";"
-                + "function visible(e){return !!(e&&e.getClientRects().length&&getComputedStyle(e).visibility!=='hidden');}"
-                + "function attempt(){"
-                + "var forms=Array.from(document.forms);"
-                + "for(var f of forms){"
-                + "var action=(f.getAttribute('action')||'')+' '+(f.action||'');"
-                + "var loginAction=/login|auth|account|takelogin/i.test(action);"
-                + "var fields=Array.from(f.querySelectorAll('input'));"
-                + "var p=fields.find(e=>e.type==='password'&&visible(e));"
-                + "if(!p)continue;"
-                + "var u=fields.find(e=>e!==p&&visible(e)&&!['hidden','submit','button','checkbox','radio','file'].includes((e.type||'text').toLowerCase())&&/user|login|email|nick|username/i.test([e.name,e.id,e.autocomplete,e.placeholder].join(' ')));"
-                + "var loginPage=/login\\.php/i.test(location.pathname);"
-                + "if(!u||(!loginAction&&!loginPage))continue;"
-                + "function setv(e,v){var d=Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value');if(d&&d.set)d.set.call(e,v);else e.value=v;e.dispatchEvent(new Event('input',{bubbles:true}));e.dispatchEvent(new Event('change',{bubbles:true}));}"
-                + "setv(u,userValue);setv(p,passValue);"
-                + "if(window.__kinozalAutofillTimer)clearInterval(window.__kinozalAutofillTimer);"
-                + "if(window.__kinozalAutofillObserver)window.__kinozalAutofillObserver.disconnect();"
-                + "return true;"
-                + "}return false;}"
-                + "if(attempt())return 'ok';"
-                + "var tries=0;"
-                + "window.__kinozalAutofillTimer=setInterval(function(){tries++;if(attempt()||tries>=120){clearInterval(window.__kinozalAutofillTimer);window.__kinozalAutofillTimer=null;}},750);"
-                + "if(window.MutationObserver&&document.documentElement){window.__kinozalAutofillObserver=new MutationObserver(function(){attempt();});window.__kinozalAutofillObserver.observe(document.documentElement,{childList:true,subtree:true,attributes:true});}"
-                + "return 'waiting';})()";
-        web.evaluateJavascript(script, result -> {
-            if (!notify) return;
-            if (result != null && result.contains("ok")) {
-                showMessage("Логин и пароль подставлены в форму Kinozal.");
-            } else {
-                showMessage("Данные сохранены. Ожидаю появления формы входа Kinozal — подстановка выполнится автоматически.");
-            }
-        });
     }
 
     private void chooseMirror() {
