@@ -440,39 +440,33 @@ public class MainActivity extends Activity {
         passwordInput.setFocusableInTouchMode(true);
         passwordInput.setInputType(android.text.InputType.TYPE_CLASS_TEXT
                 | android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD);
+        String[] savedCredentials = client.getSavedCredentials();
+        if (savedCredentials != null) {
+            loginInput.setText(savedCredentials[0]);
+            passwordInput.setText(savedCredentials[1]);
+        }
         credentials.addView(loginInput, new LinearLayout.LayoutParams(0, dp(48), 1f));
         credentials.addView(passwordInput, new LinearLayout.LayoutParams(0, dp(48), 1f));
         Button fillLogin = button("Вставить в форму");
         credentials.addView(fillLogin, new LinearLayout.LayoutParams(dp(170), dp(48)));
         container.addView(credentials, new LinearLayout.LayoutParams(-1, -2));
         fillLogin.setOnClickListener(v -> {
-            String userValue = loginInput.getText().toString();
+            String userValue = loginInput.getText().toString().trim();
             String passValue = passwordInput.getText().toString();
             if (userValue.isEmpty() || passValue.isEmpty()) {
-                showMessage("Введите логин и пароль в поля над страницей.");
+                showMessage("Введите логин и пароль один раз.");
                 return;
             }
-            String script = "(function(){"
-                    + "var p=Array.from(document.querySelectorAll('input[type=password]')).find(e=>e.getClientRects().length);"
-                    + "var f=p&&(p.form||p.closest('form'))||document;"
-                    + "var a=Array.from(f.querySelectorAll('input')).filter(e=>e!==p&&e.getClientRects().length&&!['hidden','submit','button','checkbox','radio','password','file'].includes((e.type||'text').toLowerCase()));"
-                    + "var u=a.find(e=>/user|login|email|nick|name/i.test(e.name+' '+e.id+' '+e.autocomplete+' '+e.placeholder))||a[0];"
-                    + "if(!u||!p)return 'Поля входа на странице не найдены';"
-                    + "u.value=" + org.json.JSONObject.quote(userValue) + ";"
-                    + "p.value=" + org.json.JSONObject.quote(passValue) + ";"
-                    + "u.dispatchEvent(new Event('input',{bubbles:true}));"
-                    + "p.dispatchEvent(new Event('input',{bubbles:true}));"
-                    + "u.dispatchEvent(new Event('change',{bubbles:true}));"
-                    + "p.dispatchEvent(new Event('change',{bubbles:true}));"
-                    + "return 'ok';})()";
-            web.evaluateJavascript(script, result -> {
-                if (result != null && result.contains("не найдены")) {
-                    showMessage("Поля входа на странице не найдены.");
-                } else {
-                    showMessage("Данные вставлены. Нажмите «Войти» на странице Kinozal.");
-                }
-            });
-            android.view.inputmethod.InputMethodManager imm =
+            try {
+                client.saveCredentials(userValue, passValue);
+                showMessage("Данные сохранены на устройстве в зашифрованном виде.");
+            } catch (Exception e) {
+                showMessage("Не удалось сохранить данные: " + safe(e.getMessage()));
+                return;
+            }
+            fillWebLogin(web, userValue, passValue, true);
+        });
+        android.view.inputmethod.InputMethodManager imm =
                     (android.view.inputmethod.InputMethodManager)getSystemService(INPUT_METHOD_SERVICE);
             imm.hideSoftInputFromWindow(loginInput.getWindowToken(), 0);
             imm.hideSoftInputFromWindow(passwordInput.getWindowToken(), 0);
@@ -506,7 +500,9 @@ public class MainActivity extends Activity {
             }
             @Override public void onPageFinished(WebView view, String url) {
                 cookies.flush();
-                hint.setText("Загрузка завершена. Если область ниже пустая, страница не отрисовалась. URL: " + url);
+                hint.setText("Загрузка завершена. URL: " + url);
+                String[] remembered = client.getSavedCredentials();
+                if (remembered != null) fillWebLogin(view, remembered[0], remembered[1], false);
             }
             @Override public void onReceivedError(WebView view, android.webkit.WebResourceRequest request,
                                                   android.webkit.WebResourceError error) {
@@ -565,6 +561,24 @@ public class MainActivity extends Activity {
         dialog.setOnDismissListener(ignored -> web.destroy());
         dialog.show();
         web.loadUrl(mirror + "/login.php?m=5");
+    }
+
+    private void fillWebLogin(WebView web, String username, String password, boolean notify) {
+        String script = "(function(){"
+                + "var p=Array.from(document.querySelectorAll('input[type=password]')).find(e=>e.getClientRects().length);"
+                + "if(!p)return 'no_password';"
+                + "var f=p.form||p.closest('form')||document;"
+                + "var a=Array.from(f.querySelectorAll('input')).filter(e=>e!==p&&e.getClientRects().length&&!['hidden','submit','button','checkbox','radio','password','file'].includes((e.type||'text').toLowerCase()));"
+                + "var u=a.find(e=>/user|login|email|nick|name/i.test(e.name+' '+e.id+' '+e.autocomplete+' '+e.placeholder))||a[0];"
+                + "if(!u)return 'no_username';"
+                + "function setv(e,v){var d=Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value');if(d&&d.set)d.set.call(e,v);else e.value=v;e.dispatchEvent(new Event('input',{bubbles:true}));e.dispatchEvent(new Event('change',{bubbles:true}));}"
+                + "setv(u," + org.json.JSONObject.quote(username) + ");"
+                + "setv(p," + org.json.JSONObject.quote(password) + ");return 'ok';})()";
+        web.evaluateJavascript(script, result -> {
+            if (!notify) return;
+            if (result != null && result.contains("ok")) showMessage("Логин и пароль сохранены и вставлены. В следующий раз они подставятся автоматически.");
+            else showMessage("Форма входа пока не найдена. Данные сохранены и подставятся, когда форма появится.");
+        });
     }
 
     private void chooseMirror() {
