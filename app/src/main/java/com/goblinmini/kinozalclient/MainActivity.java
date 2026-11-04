@@ -552,7 +552,7 @@ public class MainActivity extends Activity {
         java.util.Set<String> known = new java.util.LinkedHashSet<>(java.util.Arrays.asList(labels));
 
         for (Element row : doc.select("tr")) {
-            Elements cells = row.select("> td, > th");
+            Elements cells = row.children().select("td, th");
             if (cells.size() >= 2) {
                 String key = cleanDetailLabel(cells.get(0).text());
                 if (known.contains(key)) {
@@ -624,7 +624,7 @@ public class MainActivity extends Activity {
     }
 
     private String cleanDetailLabel(String value) {
-        return value == null ? "" : value.replaceAll("[\\\\s:*：]+$", "").trim();
+        return value == null ? "" : value.replaceAll("[:：*]+$", "").trim();
     }
 
     private int parseInt(String value) {
