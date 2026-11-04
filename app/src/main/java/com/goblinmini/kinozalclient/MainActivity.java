@@ -54,6 +54,7 @@ public class MainActivity extends Activity {
     private EditText search;
     private final List<Torrent> torrents = new ArrayList<>();
     private int page = 0;
+    private volatile String lastHtml = "";
 
     private static class Category { String title, href; }
 
@@ -214,6 +215,7 @@ public class MainActivity extends Activity {
         io.execute(() -> {
             try {
                 String html = client.fetch(path);
+                lastHtml = html;
                 Document doc = Jsoup.parse(html, client.getMirror());
                 List<Torrent> parsed = parseTorrents(doc);
                 runOnUiThread(() -> {
@@ -285,11 +287,17 @@ public class MainActivity extends Activity {
     }
 
     private void categories() {
+        // Reuse the catalogue response instead of requesting browse.php again.
+        // This avoids unnecessary duplicate traffic and reduces HTTP 429 responses.
+        String cached = lastHtml;
+        if (cached == null || cached.isEmpty()) {
+            showMessage("Сначала загрузите каталог, затем откройте категории.");
+            return;
+        }
         progress.setVisibility(View.VISIBLE);
         io.execute(() -> {
             try {
-                String html = client.fetch("browse.php");
-                Document d = Jsoup.parse(html, client.getMirror() + "/");
+                Document d = Jsoup.parse(cached, client.getMirror() + "/");
                 List<Category> found = new ArrayList<>();
                 java.util.LinkedHashMap<String, Category> unique = new java.util.LinkedHashMap<>();
 
