@@ -260,14 +260,19 @@ public class MainActivity extends Activity {
 
     private void showCategories() {
         if (webView == null) return;
-        // On browse.php the first select is the "Выбор раздела" filter.
-        // The following selects are format, year, search filter and sorting.
+        // The first select on browse.php is explicitly labelled "Выбор раздела".
+        // Its option values are the category IDs used by browse.php?c=ID.
         String script = "(function(){"
-                + "var select=document.querySelector('select');"
+                + "var selects=Array.from(document.querySelectorAll('select'));"
+                + "var select=selects.find(function(s){"
+                + "var label=s.labels&&s.labels.length?s.labels[0].innerText:'';"
+                + "var parent=s.parentElement?(s.parentElement.innerText||s.parentElement.textContent||''):'';"
+                + "return /выбор\\s+раздела/i.test(label+' '+parent);"
+                + "})||selects[0];"
                 + "if(!select)return JSON.stringify([]);"
                 + "return JSON.stringify(Array.from(select.options).map(function(o){"
-                + "return {text:(o.textContent||'').replace(/\\s+/g,' ').trim(),value:o.value||''};"
-                + "}).filter(function(o){return o.text.length>0;}));"
+                + "return {text:(o.textContent||'').replace(/\\s+/g,' ').trim(),value:(o.value||'').trim()};"
+                + "}).filter(function(o){return o.text.length>0&&/^\\d+$/.test(o.value);}));"
                 + "})()";
         webView.evaluateJavascript(script, value -> {
             try {
@@ -275,18 +280,28 @@ public class MainActivity extends Activity {
                 org.json.JSONArray options = new org.json.JSONArray(String.valueOf(decoded));
                 if (options.length() == 0) {
                     Toast.makeText(this,
-                            "Не удалось прочитать первый фильтр «Выбор раздела». Открой страницу «Раздачи» и повтори.",
+                            "Не удалось получить категории из фильтра «Выбор раздела». Открой browse.php и повтори.",
                             Toast.LENGTH_LONG).show();
                     return;
                 }
                 java.util.ArrayList<String> labels = new java.util.ArrayList<>();
+                java.util.ArrayList<String> ids = new java.util.ArrayList<>();
                 for (int i = 0; i < options.length(); i++) {
-                    String label = options.getJSONObject(i).optString("text", "").trim();
-                    if (!label.isEmpty()) labels.add(label);
+                    org.json.JSONObject option = options.getJSONObject(i);
+                    String label = option.optString("text", "").trim();
+                    String id = option.optString("value", "").trim();
+                    if (!label.isEmpty() && id.matches("\\d+")) {
+                        labels.add(label);
+                        ids.add(id);
+                    }
                 }
                 new AlertDialog.Builder(this)
-                        .setTitle("Выбор раздела (" + labels.size() + ")")
-                        .setItems(labels.toArray(new String[0]), (dialog, which) -> { })
+                        .setTitle("Категории Kinozal (" + labels.size() + ")")
+                        .setItems(labels.toArray(new String[0]), (dialog, which) -> {
+                            if (which >= 0 && which < ids.size()) {
+                                openSection("browse.php?c=" + ids.get(which));
+                            }
+                        })
                         .setNegativeButton("Закрыть", null)
                         .show();
             } catch (Exception e) {
