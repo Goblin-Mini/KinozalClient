@@ -233,20 +233,43 @@ public class MainActivity extends Activity {
 
     private List<Torrent> parseTorrents(Document doc) {
         List<Torrent> out = new ArrayList<>();
-        Elements anchors = doc.select("a[href*=details.php?id=]");
+
+        // On Kinozal, uploader profiles use userdetails.php?id=...
+        // A broad "details.php?id=" selector also matched those links,
+        // causing usernames to appear as separate torrent cards.
+        // Torrent titles live specifically in the "nam" table cell.
+        Elements anchors = doc.select("table.t_peer td.nam > a[href*=details.php?id=]");
         for (Element a : anchors) {
-            String name = a.text().trim(); if (name.length() < 3) continue;
+            String name = a.text().trim();
+            if (name.length() < 3) continue;
+
             Element row = a.closest("tr");
-            Torrent t = new Torrent(); t.title = name; t.href = a.absUrl("href");
+            String href = a.absUrl("href");
+            if (href.isEmpty()) href = a.attr("href");
+
+            Torrent t = new Torrent();
+            t.title = name;
+            t.href = href;
+
             if (row != null) {
-                String rowText = row.text();
-                java.util.regex.Matcher size = java.util.regex.Pattern.compile("\\b\\d+(?:[.,]\\d+)?\\s*(?:GB|MB|ГБ|МБ)\\b", java.util.regex.Pattern.CASE_INSENSITIVE).matcher(rowText);
-                t.size = size.find() ? size.group() : "—";
                 Elements cells = row.select("td");
-                t.seeds = cells.size() > 2 ? cells.get(cells.size()-2).text().trim() : "—";
-                t.leeches = cells.size() > 1 ? cells.get(cells.size()-1).text().trim() : "—";
-            } else { t.size = "—"; t.seeds = "—"; t.leeches = "—"; }
-            boolean duplicate = false; for (Torrent old : out) if (old.href.equals(t.href)) duplicate = true;
+                // Kinozal columns: icon, title, comments, size, seeds, peers, uploaded, uploader.
+                t.size = cells.size() > 3 ? cells.get(3).text().trim() : "—";
+                t.seeds = cells.size() > 4 ? cells.get(4).text().trim() : "—";
+                t.leeches = cells.size() > 5 ? cells.get(5).text().trim() : "—";
+            } else {
+                t.size = "—";
+                t.seeds = "—";
+                t.leeches = "—";
+            }
+
+            boolean duplicate = false;
+            for (Torrent old : out) {
+                if (old.href.equals(t.href)) {
+                    duplicate = true;
+                    break;
+                }
+            }
             if (!duplicate) out.add(t);
         }
         return out;
