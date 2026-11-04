@@ -83,12 +83,26 @@ public class MainActivity extends Activity {
     }
 
     private Button button(String label) {
-        Button b = new Button(this); b.setText(label); b.setAllCaps(false);
-        b.setTextColor(GOLD); b.setTextSize(14); b.setFocusable(true);
-        b.setFocusableInTouchMode(false); b.setBackground(shape(PANEL, TEAL));
+        Button b = new Button(this);
+        b.setText(label);
+        b.setAllCaps(false);
+        b.setTextColor(GOLD);
+        b.setTextSize(14);
+        b.setMinWidth(0);
+        b.setMinHeight(0);
+        b.setIncludeFontPadding(false);
+        b.setFocusable(true);
+        b.setFocusableInTouchMode(false);
+        b.setStateListAnimator(null);
+        b.setBackground(shape(PANEL, 0));
+        // Keep the focus outline inside the button bounds. Scaling caused the
+        // highlight to overlap neighbouring rows and made the sidebar look oversized.
         b.setOnFocusChangeListener((v, focus) -> {
-            v.setBackground(shape(focus ? Color.rgb(65, 72, 73) : PANEL, focus ? GOLD : 0));
-            v.setScaleX(focus ? 1.035f : 1f); v.setScaleY(focus ? 1.035f : 1f);
+            v.setBackground(shape(focus ? Color.rgb(65, 72, 73) : PANEL,
+                    focus ? GOLD : 0));
+            v.setScaleX(1f);
+            v.setScaleY(1f);
+            v.setElevation(0f);
         });
         return b;
     }
@@ -159,9 +173,15 @@ public class MainActivity extends Activity {
     }
 
     private void addMenu(String label, Runnable action) {
-        Button b = button(label); b.setGravity(Gravity.CENTER_VERTICAL | Gravity.LEFT);
+        Button b = button(label);
+        b.setGravity(Gravity.CENTER_VERTICAL | Gravity.LEFT);
+        b.setTextSize(14);
         b.setPadding(dp(14), 0, dp(8), 0);
-        LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(-1, dp(47)); p.bottomMargin = dp(3);
+        b.setMaxLines(1);
+        b.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(47));
+        p.bottomMargin = dp(3);
         menuItems.addView(b, p); b.setOnClickListener(v -> action.run());
     }
 
