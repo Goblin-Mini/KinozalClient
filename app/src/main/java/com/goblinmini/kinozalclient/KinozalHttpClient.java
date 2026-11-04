@@ -191,6 +191,14 @@ public final class KinozalHttpClient {
         return html;
     }
 
+    /** Submit a site category/filter form while preserving its original fields. */
+    public synchronized String fetchPost(String url, String body) throws Exception {
+        String target = url.startsWith("http") ? url : baseUrl + "/" + url.replaceFirst("^/+", "");
+        String html = request(target, "POST", body, true);
+        if (isLoginPage(html)) throw new SecurityException("Сессия Kinozal завершилась. Войдите снова.");
+        return html;
+    }
+
     private String request(String target, String method, String body, boolean formPost) throws Exception {
         String current = target;
         String currentMethod = method;
