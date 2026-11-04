@@ -261,60 +261,48 @@ public class MainActivity extends Activity {
     private void showCategories() {
         if (webView == null) return;
         String script = "(function(){"
-                + "var out=[],seen={};"
-                + "document.querySelectorAll('a[href]').forEach(function(a){"
-                + "var t=(a.innerText||a.textContent||'').trim().replace(/\\s+/g,' ');"
-                + "var h=a.getAttribute('href')||'';"
-                + "if(!t||t.length>70||!h||h.charAt(0)==='#')return;"
-                + "if(/(?:cat|category|browse|section)=/i.test(h)||/browse\\.php/i.test(h)){"
-                + "var k=t+'|'+h;if(!seen[k]){seen[k]=1;out.push({title:t,href:h});}}"
-                + "});return JSON.stringify(out.slice(0,100));})()";
+                + "var selects=Array.from(document.querySelectorAll('select'));"
+                + "var data=selects.map(function(s){"
+                + "var row=s.closest('tr,fieldset,div')||s.parentElement;"
+                + "var label=(s.getAttribute('aria-label')||s.getAttribute('name')||s.id||'').trim();"
+                + "if(s.labels&&s.labels.length)label=s.labels[0].innerText.trim()+' '+label;"
+                + "var context=row?(row.innerText||row.textContent||'').replace(/\\\\s+/g,' ').trim():'';"
+                + "return {name:s.name||'',id:s.id||'',label:label,context:context,"
+                + "options:Array.from(s.options).map(function(o){return {text:(o.textContent||'').trim(),value:o.value};})"
+                + ".filter(function(o){return o.text&&o.value!=='';})};"
+                + "});"
+                + "var chosen=data.find(function(x){return /(?:cat|category|section|razdel)/i.test(x.name+' '+x.id+' '+x.label+' '+x.context);});"
+                + "if(!chosen)chosen=data.find(function(x){return x.options.length>1;});"
+                + "return JSON.stringify({selectCount:selects.length,chosen:chosen||null,all:data});"
+                + "})()";
         webView.evaluateJavascript(script, value -> {
             try {
                 Object decoded = new org.json.JSONTokener(value).nextValue();
-                org.json.JSONArray items = new org.json.JSONArray(String.valueOf(decoded));
-                if (items.length() == 0) {
-                    Toast.makeText(this,
-                            "На этой странице категории не обнаружены. Открой главную страницу сайта и попробуй снова.",
+                org.json.JSONObject result = new org.json.JSONObject(String.valueOf(decoded));
+                org.json.JSONObject chosen = result.optJSONObject("chosen");
+                if (chosen == null) {
+                    Toast.makeText(this, "На странице не найден выпадающий список разделов. Сначала открой «Раздачи».",
+                            Toast.LENGTH_LONG).show();
+                    return;
+                }
+                org.json.JSONArray options = chosen.optJSONArray("options");
+                if (options == null || options.length() == 0) {
+                    Toast.makeText(this, "В списке разделов нет доступных пунктов.",
                             Toast.LENGTH_LONG).show();
                     return;
                 }
                 java.util.ArrayList<String> labels = new java.util.ArrayList<>();
-                java.util.ArrayList<String> links = new java.util.ArrayList<>();
-                for (int i = 0; i < items.length(); i++) {
-                    org.json.JSONObject item = items.getJSONObject(i);
-                    String label = item.optString("title", "").trim();
-                    String href = item.optString("href", "").trim();
-                    if (!label.isEmpty() && !href.isEmpty()) {
-                        labels.add(label);
-                        links.add(href);
-                    }
+                for (int i = 0; i < options.length(); i++) {
+                    String label = options.getJSONObject(i).optString("text", "").trim();
+                    if (!label.isEmpty()) labels.add(label);
                 }
-                if (labels.isEmpty()) return;
                 new AlertDialog.Builder(this)
-                        .setTitle("Категории сайта")
-                        .setItems(labels.toArray(new String[0]), (dialog, which) -> {
-                            try {
-                                java.net.URI base = java.net.URI.create(mirror + "/");
-                                java.net.URI target = base.resolve(links.get(which));
-                                if (target.getHost() != null
-                                        && target.getHost().equalsIgnoreCase(base.getHost())
-                                        && ("https".equalsIgnoreCase(target.getScheme())
-                                        || "http".equalsIgnoreCase(target.getScheme()))) {
-                                    webView.loadUrl(target.toString());
-                                } else {
-                                    Toast.makeText(this, "Ссылка категории ведёт на другой домен",
-                                            Toast.LENGTH_LONG).show();
-                                }
-                            } catch (Exception ex) {
-                                Toast.makeText(this, "Некорректная ссылка категории",
-                                        Toast.LENGTH_LONG).show();
-                            }
-                        })
+                        .setTitle("Разделы Kinozal (" + labels.size() + ")")
+                        .setItems(labels.toArray(new String[0]), (dialog, which) -> { })
                         .setNegativeButton("Закрыть", null)
                         .show();
             } catch (Exception e) {
-                Toast.makeText(this, "Не удалось прочитать категории этой страницы",
+                Toast.makeText(this, "Не удалось прочитать список разделов Kinozal",
                         Toast.LENGTH_LONG).show();
             }
         });
