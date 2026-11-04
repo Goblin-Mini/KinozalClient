@@ -74,14 +74,17 @@ public class MainActivity extends Activity {
 
         Button mirrors = makeButton("Зеркало");
         Button home = makeButton("Главная");
+        Button results = makeButton("Список");
         Button refresh = makeButton("Обновить");
 
         mirrors.setId(View.generateViewId());
         home.setId(View.generateViewId());
         refresh.setId(View.generateViewId());
+        results.setId(View.generateViewId());
 
         mirrors.setOnClickListener(v -> showMirrors());
         home.setOnClickListener(v -> loadHome());
+        results.setOnClickListener(v -> showNativeResults());
         refresh.setOnClickListener(v -> {
             if (webView != null) webView.reload();
         });
@@ -89,12 +92,15 @@ public class MainActivity extends Activity {
         // Explicit D-pad focus order for Android TV remotes.
         mirrors.setNextFocusRightId(home.getId());
         home.setNextFocusLeftId(mirrors.getId());
-        home.setNextFocusRightId(refresh.getId());
-        refresh.setNextFocusLeftId(home.getId());
+        home.setNextFocusRightId(results.getId());
+        results.setNextFocusLeftId(home.getId());
+        results.setNextFocusRightId(refresh.getId());
+        refresh.setNextFocusLeftId(results.getId());
 
         header.addView(mirrors, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, dp(44)));
         header.addView(home, spacedButtonParams());
+        header.addView(results, spacedButtonParams());
         header.addView(refresh, spacedButtonParams());
         root.addView(header);
 
@@ -170,6 +176,7 @@ public class MainActivity extends Activity {
         webView.setNextFocusUpId(searchButton.getId());
         mirrors.setNextFocusDownId(webView.getId());
         home.setNextFocusDownId(webView.getId());
+        results.setNextFocusDownId(webView.getId());
         refresh.setNextFocusDownId(categoriesButton.getId());
         categoriesButton.setNextFocusDownId(webView.getId());
         searchInput.setNextFocusDownId(webView.getId());
@@ -321,6 +328,102 @@ public class MainActivity extends Activity {
             if ("\"NO_SEARCH_FIELD\"".equals(result)
                     || "\"NO_SEARCH_FORM\"".equals(result)) {
                 inspectSearchMarkup();
+            }
+        });
+    }
+
+    // Extract visible result rows from the current Kinozal page.
+    // Values are read from result cells only; cookies and account data are not accessed.
+    private void showNativeResults() {
+        if (webView == null) return;
+        String script = "(function(){"
+                + "var out=[],seen={};"
+                + "Array.from(document.querySelectorAll('tr')).forEach(function(row){"
+                + "var cells=Array.from(row.querySelectorAll('td'));"
+                + "if(cells.length<4)return;"
+                + "var text=(row.innerText||row.textContent||'').replace(/\\s+/g,' ').trim();"
+                + "if(!text||!/(?:ГБ|МБ|GB|MB)/i.test(text))return;"
+                + "var links=Array.from(row.querySelectorAll('a[href]'));"
+                + "var a=links.filter(function(x){return (x.innerText||x.textContent||'').trim().length>12;})"
+                + ".sort(function(x,y){return (y.innerText||y.textContent||'').trim().length-(x.innerText||x.textContent||'').trim().length;})[0];"
+                + "if(!a)return;"
+                + "var title=(a.innerText||a.textContent||'').replace(/\\s+/g,' ').trim();"
+                + "var href=a.href||'';if(!title||!href||seen[href])return;seen[href]=1;"
+                + "var meta=cells.map(function(c){return (c.innerText||c.textContent||'').replace(/\\s+/g,' ').trim();}).filter(Boolean).join('  •  ');"
+                + "var img=row.querySelector('img');"
+                + "out.push({title:title,href:href,meta:meta,image:img?(img.src||''):''});"
+                + "});return JSON.stringify(out.slice(0,150));})()";
+        webView.evaluateJavascript(script, value -> {
+            try {
+                Object decoded = new org.json.JSONTokener(value).nextValue();
+                org.json.JSONArray items = new org.json.JSONArray(String.valueOf(decoded));
+                if (items.length() == 0) {
+                    Toast.makeText(this, "На этой странице не удалось распознать строки раздач. Открой страницу результатов поиска и повтори.",
+                            Toast.LENGTH_LONG).show();
+                    return;
+                }
+                android.widget.ScrollView scroll = new android.widget.ScrollView(this);
+                LinearLayout list = new LinearLayout(this);
+                list.setOrientation(LinearLayout.VERTICAL);
+                list.setPadding(dp(10), dp(8), dp(10), dp(8));
+                for (int i = 0; i < items.length(); i++) {
+                    org.json.JSONObject item = items.getJSONObject(i);
+                    String itemTitle = item.optString("title", "Без названия");
+                    String itemUrl = item.optString("href", "");
+                    String meta = item.optString("meta", "");
+                    LinearLayout card = new LinearLayout(this);
+                    card.setOrientation(LinearLayout.VERTICAL);
+                    card.setPadding(dp(14), dp(12), dp(14), dp(12));
+                    card.setFocusable(true);
+                    card.setFocusableInTouchMode(true);
+                    GradientDrawable bg = new GradientDrawable();
+                    bg.setColor(panel);
+                    bg.setCornerRadius(dp(10));
+                    bg.setStroke(dp(1), Color.rgb(65, 67, 82));
+                    card.setBackground(bg);
+                    TextView name = new TextView(this);
+                    name.setText(itemTitle);
+                    name.setTextColor(Color.WHITE);
+                    name.setTextSize(16);
+                    name.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+                    TextView info = new TextView(this);
+                    info.setText(meta);
+                    info.setTextColor(Color.LTGRAY);
+                    info.setTextSize(12);
+                    info.setPadding(0, dp(6), 0, 0);
+                    card.addView(name);
+                    card.addView(info);
+                    card.setOnClickListener(v -> {
+                        if (!itemUrl.isEmpty()) webView.loadUrl(itemUrl);
+                    });
+                    card.setOnFocusChangeListener((v, focused) -> {
+                        GradientDrawable state = new GradientDrawable();
+                        state.setColor(focused ? Color.rgb(63, 53, 112) : panel);
+                        state.setCornerRadius(dp(10));
+                        state.setStroke(dp(focused ? 3 : 1),
+                                focused ? Color.WHITE : Color.rgb(65, 67, 82));
+                        v.setBackground(state);
+                    });
+                    LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+                    lp.bottomMargin = dp(8);
+                    list.addView(card, lp);
+                }
+                scroll.addView(list);
+                AlertDialog dialog = new AlertDialog.Builder(this)
+                        .setTitle("Найденные раздачи (" + items.length() + ")")
+                        .setView(scroll)
+                        .setNegativeButton("Закрыть", null)
+                        .create();
+                dialog.show();
+                if (dialog.getWindow() != null) {
+                    dialog.getWindow().setLayout(
+                            ViewGroup.LayoutParams.MATCH_PARENT,
+                            ViewGroup.LayoutParams.MATCH_PARENT);
+                }
+            } catch (Exception e) {
+                Toast.makeText(this, "Не удалось обработать результаты Kinozal",
+                        Toast.LENGTH_LONG).show();
             }
         });
     }
