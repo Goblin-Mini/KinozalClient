@@ -444,6 +444,63 @@ public class MainActivity extends Activity {
         });
     }
 
+
+    private void downloadAndSendTorrent(String torrentLink) {
+        final String userAgent = webView.getSettings().getUserAgentString();
+        final String referer = webView.getUrl();
+        final String cookies = CookieManager.getInstance().getCookie(torrentLink);
+        Toast.makeText(this, "Скачиваю торрент с авторизацией Kinozal…", Toast.LENGTH_SHORT).show();
+        new Thread(() -> {
+            java.net.HttpURLConnection connection = null;
+            try {
+                java.net.URL url = new java.net.URL(torrentLink);
+                connection = (java.net.HttpURLConnection) url.openConnection();
+                connection.setConnectTimeout(15000);
+                connection.setReadTimeout(20000);
+                connection.setInstanceFollowRedirects(true);
+                connection.setRequestProperty("User-Agent", userAgent);
+                connection.setRequestProperty("Accept", "application/x-bittorrent,application/octet-stream,*/*");
+                if (referer != null) connection.setRequestProperty("Referer", referer);
+                if (cookies != null) connection.setRequestProperty("Cookie", cookies);
+                int code = connection.getResponseCode();
+                if (code < 200 || code >= 300) throw new java.io.IOException("HTTP " + code);
+                java.io.File target = new java.io.File(getCacheDir(), "kinozal-transfer.torrent");
+                try (java.io.InputStream input = connection.getInputStream();
+                     java.io.FileOutputStream output = new java.io.FileOutputStream(target)) {
+                    byte[] buffer = new byte[8192];
+                    int count;
+                    while ((count = input.read(buffer)) != -1) output.write(buffer, 0, count);
+                }
+                if (target.length() < 20) throw new java.io.IOException("Сервер вернул пустой или слишком маленький файл");
+                try (java.io.FileInputStream check = new java.io.FileInputStream(target)) {
+                    int first = check.read();
+                    if (first != 'd') throw new java.io.IOException(
+                            "Вместо .torrent получен ответ сайта. Проверь авторизацию Kinozal.");
+                }
+                Uri fileUri = Uri.parse("content://" + getPackageName() + ".torrentprovider/torrent");
+                Intent send = new Intent(Intent.ACTION_SEND);
+                send.setPackage("ru.yourok.torrserve");
+                send.setType("application/x-bittorrent");
+                send.putExtra(Intent.EXTRA_STREAM, fileUri);
+                send.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                send.setClipData(android.content.ClipData.newUri(getContentResolver(), "torrent", fileUri));
+                runOnUiThread(() -> {
+                    try {
+                        startActivity(send);
+                    } catch (android.content.ActivityNotFoundException e) {
+                        Toast.makeText(this, "TorrServe MatriX не принимает файл через ACTION_SEND",
+                                Toast.LENGTH_LONG).show();
+                    }
+                });
+            } catch (Exception e) {
+                runOnUiThread(() -> Toast.makeText(this,
+                        "Не удалось скачать торрент: " + e.getMessage(), Toast.LENGTH_LONG).show());
+            } finally {
+                if (connection != null) connection.disconnect();
+            }
+        }).start();
+    }
+
     // Build a structured first-pass detail view from labeled fields on the torrent page.
     private void showNativeDetails() {
         if (webView == null) return;
@@ -686,28 +743,17 @@ public class MainActivity extends Activity {
                     }
                     try {
                         Uri torrentUri = Uri.parse(torrentLink);
-                        Intent viewIntent = new Intent(Intent.ACTION_VIEW);
-                        viewIntent.setPackage("ru.yourok.torrserve");
                         if ("magnet".equalsIgnoreCase(torrentUri.getScheme())) {
-                            viewIntent.setData(torrentUri);
+                            Intent intent = new Intent(Intent.ACTION_VIEW, torrentUri);
+                            intent.setPackage("ru.yourok.torrserve");
+                            startActivity(intent);
                         } else {
-                            viewIntent.setDataAndType(torrentUri, "application/x-bittorrent");
-                        }
-                        try {
-                            startActivity(viewIntent);
-                        } catch (android.content.ActivityNotFoundException firstError) {
-                            Intent sendIntent = new Intent(Intent.ACTION_SEND);
-                            sendIntent.setPackage("ru.yourok.torrserve");
-                            sendIntent.setType("text/plain");
-                            sendIntent.putExtra(Intent.EXTRA_TEXT, torrentLink);
-                            startActivity(sendIntent);
+                            downloadAndSendTorrent(torrentLink);
                         }
                     } catch (android.content.ActivityNotFoundException e) {
-                        Toast.makeText(this, "TorrServe MatriX не найден или не поддерживает передачу этой ссылки",
-                                Toast.LENGTH_LONG).show();
+                        Toast.makeText(this, "TorrServe MatriX не установлен", Toast.LENGTH_LONG).show();
                     } catch (Exception e) {
-                        Toast.makeText(this, "Ошибка передачи в TorrServe: " + e.getClass().getSimpleName()
-                                        + (e.getMessage() != null ? " — " + e.getMessage() : ""),
+                        Toast.makeText(this, "Не удалось передать торрент: " + e.getMessage(),
                                 Toast.LENGTH_LONG).show();
                     }
                 });
