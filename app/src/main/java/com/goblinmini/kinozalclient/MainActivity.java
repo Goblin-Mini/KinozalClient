@@ -753,7 +753,7 @@ public class MainActivity extends Activity {
         // Remove the platform Button tint so our custom focus colors stay visible.
         button.setBackgroundTintList(null);
         button.setFocusable(true);
-        button.setFocusableInTouchMode(true);
+        button.setFocusableInTouchMode(false);
         button.setMinHeight(dp(44));
         button.setElevation(dp(2));
         button.setOnFocusChangeListener((view, hasFocus) -> {
