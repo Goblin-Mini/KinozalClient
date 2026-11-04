@@ -48,7 +48,7 @@ public class MainActivity extends Activity {
     private String mirror;
     private String currentPath = "browse.php";
     private String currentTitle = "Все раздачи";
-    private LinearLayout root, sidebar, content, list;
+    private LinearLayout root, sidebar, content, list, menuItems;
     private TextView heading, status;
     private ProgressBar progress;
     private EditText search;
@@ -106,6 +106,14 @@ public class MainActivity extends Activity {
         TextView logo = text("KINOZAL", 23, GOLD, true); brand.addView(logo);
         TextView sub = text("  NATIVE TV", 11, TEAL, true); brand.addView(sub);
         sidebar.addView(brand, new LinearLayout.LayoutParams(-1, dp(58)));
+        ScrollView menuScroll = new ScrollView(this);
+        menuScroll.setFillViewport(false);
+        menuScroll.setVerticalScrollBarEnabled(true);
+        menuScroll.setScrollbarFadingEnabled(false);
+        menuItems = new LinearLayout(this);
+        menuItems.setOrientation(LinearLayout.VERTICAL);
+        menuScroll.addView(menuItems, new ScrollView.LayoutParams(-1, -2));
+        sidebar.addView(menuScroll, new LinearLayout.LayoutParams(-1, 0, 1));
         addMenu("Поиск", () -> focusSearch());
         addMenu("Все раздачи", () -> load("browse.php", "Все раздачи"));
         addMenu("Фильмы", () -> categories());
@@ -118,9 +126,10 @@ public class MainActivity extends Activity {
         addMenu("Избранное", () -> showFavorites());
         addMenu("Авторизация", () -> showLogin());
         addMenu("Зеркало", () -> chooseMirror());
-        View spacer = new View(this); sidebar.addView(spacer, new LinearLayout.LayoutParams(1, 0, 1));
         status = text("Подключение…", 11, TEAL, false);
-        sidebar.addView(status);
+        LinearLayout.LayoutParams statusParams = new LinearLayout.LayoutParams(-1, dp(28));
+        statusParams.topMargin = dp(4);
+        sidebar.addView(status, statusParams);
 
         heading = text("Все раздачи", 25, GOLD, true);
         main.addView(heading, new LinearLayout.LayoutParams(-1, dp(48)));
@@ -153,7 +162,7 @@ public class MainActivity extends Activity {
         Button b = button(label); b.setGravity(Gravity.CENTER_VERTICAL | Gravity.LEFT);
         b.setPadding(dp(14), 0, dp(8), 0);
         LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(-1, dp(47)); p.bottomMargin = dp(3);
-        sidebar.addView(b, p); b.setOnClickListener(v -> action.run());
+        menuItems.addView(b, p); b.setOnClickListener(v -> action.run());
     }
 
     private void focusSearch() { search.requestFocus(); }
