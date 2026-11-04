@@ -256,21 +256,37 @@ public final class KinozalHttpClient {
                     && (bytes[1] & 0xff) == 0xbb && (bytes[2] & 0xff) == 0xbf) {
                 return new String(bytes, 3, bytes.length - 3, StandardCharsets.UTF_8);
             }
-            String header = contentType == null ? "" : contentType;
-            java.util.regex.Matcher declared = java.util.regex.Pattern
-                    .compile("(?i)charset\\s*=\\s*['\\\"]?([a-z0-9._-]+)").matcher(header);
-            String charset = declared.find() ? declared.group(1) : null;
+
+            String prefix = new String(bytes, 0, Math.min(bytes.length, 8192), StandardCharsets.ISO_8859_1);
+            java.util.regex.Matcher meta = java.util.regex.Pattern
+                    .compile("(?i)<meta[^>]+charset\\s*=\\s*['\\\"]?([a-z0-9._-]+)").matcher(prefix);
+            String charset = meta.find() ? meta.group(1) : null;
+
             if (charset == null) {
-                // HTML meta declarations are ASCII-compatible, so inspect a short
-                // prefix before choosing the legacy Kinozal Windows-1251 default.
-                String prefix = new String(bytes, 0, Math.min(bytes.length, 4096), StandardCharsets.ISO_8859_1);
-                java.util.regex.Matcher meta = java.util.regex.Pattern
-                        .compile("(?i)<meta[^>]+charset\\s*=\\s*['\\\"]?([a-z0-9._-]+)").matcher(prefix);
-                if (meta.find()) charset = meta.group(1);
+                java.util.regex.Matcher declared = java.util.regex.Pattern
+                        .compile("(?i)charset\\s*=\\s*['\\\"]?([a-z0-9._-]+)")
+                        .matcher(contentType == null ? "" : contentType);
+                if (declared.find()) charset = declared.group(1);
             }
-            if (charset == null || charset.isEmpty()) charset = "windows-1251";
-            try { return new String(bytes, java.nio.charset.Charset.forName(charset)); }
-            catch (Exception unsupported) { return new String(bytes, StandardCharsets.UTF_8); }
+
+            // Some Kinozal mirrors send a misleading UTF-8 header while the
+            // page body is Windows-1251. Validate UTF-8 strictly before trusting it.
+            if (charset == null || charset.equalsIgnoreCase("utf-8")
+                    || charset.equalsIgnoreCase("utf8")) {
+                try {
+                    return StandardCharsets.UTF_8.newDecoder()
+                            .onMalformedInput(java.nio.charset.CodingErrorAction.REPORT)
+                            .onUnmappableCharacter(java.nio.charset.CodingErrorAction.REPORT)
+                            .decode(java.nio.ByteBuffer.wrap(bytes)).toString();
+                } catch (java.nio.charset.CharacterCodingException invalidUtf8) {
+                    return new String(bytes, java.nio.charset.Charset.forName("windows-1251"));
+                }
+            }
+
+            try {
+                return new String(bytes, java.nio.charset.Charset.forName(charset));
+            } catch (Exception unsupported) {
+                return new String(bytes, StandardCharsets.UTF_8);
+            }
         }
-    }
-}
+    }}
