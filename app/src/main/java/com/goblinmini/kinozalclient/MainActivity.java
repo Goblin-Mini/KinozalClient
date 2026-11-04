@@ -799,6 +799,7 @@ public class MainActivity extends Activity {
                             ViewGroup.LayoutParams.MATCH_PARENT,
                             ViewGroup.LayoutParams.MATCH_PARENT);
                 }
+                posterColumn.post(() -> watchButton.requestFocus());
             } catch (Exception e) {
                 Toast.makeText(this, "Не удалось обработать сведения о раздаче",
                         Toast.LENGTH_LONG).show();
