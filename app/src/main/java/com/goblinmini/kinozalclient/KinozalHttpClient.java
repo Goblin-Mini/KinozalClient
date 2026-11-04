@@ -104,6 +104,37 @@ public final class KinozalHttpClient {
         persistCookies();
     }
 
+    /**
+     * Imports cookies from the user's completed WebView login/challenge.
+     * Cookies remain scoped to the selected HTTPS mirror and are encrypted
+     * with Android Keystore before persistence.
+     */
+    public synchronized void importBrowserSession(String cookieHeader, String browserUserAgent) throws Exception {
+        if (cookieHeader == null || cookieHeader.trim().isEmpty()) {
+            throw new SecurityException("Браузер не вернул cookies. Убедитесь, что проверка и вход завершены.");
+        }
+        URI origin = URI.create(baseUrl);
+        String host = origin.getHost();
+        for (String part : cookieHeader.split(";")) {
+            String item = part.trim();
+            int equals = item.indexOf('=');
+            if (equals <= 0) continue;
+            String name = item.substring(0, equals).trim();
+            String value = item.substring(equals + 1).trim();
+            if (name.isEmpty()) continue;
+            HttpCookie cookie = new HttpCookie(name, value);
+            cookie.setDomain(host);
+            cookie.setPath("/");
+            cookie.setSecure(true);
+            cookies.getCookieStore().add(origin, cookie);
+        }
+        if (browserUserAgent != null && !browserUserAgent.trim().isEmpty()) {
+            context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                    .edit().putString("browser_user_agent", browserUserAgent).apply();
+        }
+        persistCookies();
+    }
+
     public synchronized void logout() {
         cookies.getCookieStore().removeAll();
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().remove(COOKIE_KEY).apply();
@@ -127,7 +158,7 @@ public final class KinozalHttpClient {
             connection.setReadTimeout(20000);
             connection.setInstanceFollowRedirects(false);
             connection.setRequestMethod(currentMethod);
-            connection.setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/120.0 Mobile Safari/537.36");
+            connection.setRequestProperty("User-Agent", context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString("browser_user_agent", "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/120.0 Mobile Safari/537.36"));
             connection.setRequestProperty("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8");
             connection.setRequestProperty("Accept-Language", "ru-RU,ru;q=0.9,en;q=0.7");
             URI uri = URI.create(current);
