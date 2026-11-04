@@ -396,7 +396,7 @@ public class MainActivity extends Activity {
                     card.addView(info);
                     card.setOnClickListener(v -> {
                         if (!itemUrl.isEmpty()) {
-                            dialog.dismiss();
+                            if (listDialog[0] != null) listDialog[0].dismiss();
                             webView.post(() -> webView.loadUrl(itemUrl));
                         }
                     });
