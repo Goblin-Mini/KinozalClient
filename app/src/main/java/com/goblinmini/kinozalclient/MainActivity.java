@@ -38,7 +38,7 @@ public class MainActivity extends Activity {
 
     private int background = Color.rgb(16, 17, 22);
     private int panel = Color.rgb(27, 29, 37);
-    private int accent = Color.rgb(139, 128, 249);
+    private int accent = Color.rgb(241, 210, 156);
     private WebView webView;
     private TextView title;
     private TextView address;
@@ -411,7 +411,7 @@ public class MainActivity extends Activity {
                     });
                     card.setOnFocusChangeListener((v, focused) -> {
                         GradientDrawable state = new GradientDrawable();
-                        state.setColor(focused ? Color.rgb(63, 53, 112) : panel);
+                        state.setColor(focused ? Color.rgb(74, 63, 45) : panel);
                         state.setCornerRadius(dp(10));
                         state.setStroke(dp(focused ? 3 : 1),
                                 focused ? Color.WHITE : Color.rgb(65, 67, 82));
@@ -494,7 +494,7 @@ public class MainActivity extends Activity {
                 GradientDrawable posterBackground = new GradientDrawable();
                 posterBackground.setColor(Color.rgb(24, 25, 32));
                 posterBackground.setCornerRadius(dp(10));
-                posterBackground.setStroke(dp(1), Color.rgb(75, 77, 91));
+                posterBackground.setStroke(dp(1), accent);
                 posterColumn.setBackground(posterBackground);
                 ImageView posterView = new ImageView(this);
                 posterView.setScaleType(ImageView.ScaleType.FIT_CENTER);
@@ -555,11 +555,14 @@ public class MainActivity extends Activity {
                                     "Ошибка: " + e.getClass().getSimpleName()));
                         }
                     }).start();
-                }                root.addView(tabs);
+                }
+                root.addView(tabs);
                 mainArea.addView(scroll, new LinearLayout.LayoutParams(0,
                         ViewGroup.LayoutParams.MATCH_PARENT, 1f));
-                root.addView(mainArea, new LinearLayout.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
+                LinearLayout.LayoutParams mainAreaParams = new LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f);
+                mainAreaParams.topMargin = dp(16);
+                root.addView(mainArea, mainAreaParams);
                 //
                 /*                root.addView(tabs);
                 root.addView(scroll, new LinearLayout.LayoutParams(
@@ -792,11 +795,11 @@ public class MainActivity extends Activity {
         button.setOnFocusChangeListener((view, hasFocus) -> {
             GradientDrawable stateBackground = new GradientDrawable();
             stateBackground.setColor(hasFocus
-                    ? Color.rgb(91, 75, 170)
+                    ? Color.rgb(74, 63, 45)
                     : panel);
             stateBackground.setCornerRadius(dp(10));
             stateBackground.setStroke(dp(hasFocus ? 3 : 1),
-                    hasFocus ? Color.WHITE : Color.rgb(75, 77, 91));
+                    hasFocus ? accent : Color.rgb(75, 77, 91));
             view.setBackground(stateBackground);
             view.setElevation(dp(hasFocus ? 10 : 2));
             view.setScaleX(hasFocus ? 1.06f : 1.0f);
