@@ -49,6 +49,7 @@ public class MainActivity extends Activity {
     private Button categoriesButton;
     private Button searchButton;
     private String mirror;
+    private boolean showSectionResultsWhenLoaded;
 
     @Override
     protected void onCreate(Bundle state) {
@@ -258,6 +259,10 @@ public class MainActivity extends Activity {
             @Override
             public void onPageFinished(WebView view, String url) {
                 address.setText(url);
+                if (showSectionResultsWhenLoaded) {
+                    showSectionResultsWhenLoaded = false;
+                    view.postDelayed(() -> showNativeResults(), 250);
+                }
             }
         });
         root.addView(webView, new LinearLayout.LayoutParams(
@@ -400,7 +405,19 @@ public class MainActivity extends Activity {
                 + "var meta=cells.map(function(c){return (c.innerText||c.textContent||'').replace(/\\s+/g,' ').trim();}).filter(Boolean).join('  •  ');"
                 + "var img=row.querySelector('img');"
                 + "out.push({title:title,href:href,meta:meta,image:img?(img.src||''):''});"
-                + "});return JSON.stringify(out.slice(0,150));})()";
+                + "});"
+                + "if(out.length===0){"
+                + "Array.from(document.querySelectorAll('a[href*="details.php?id="]')).forEach(function(a){"
+                + "var title=(a.innerText||a.textContent||'').replace(/\\s+/g,' ').trim();"
+                + "var href=a.href||'';if(!title||title.length<8||!href||seen[href])return;"
+                + "var box=a.closest('tr,article,li,.item,.block,.torrent,.post,.movie,.film,div')||a.parentElement;"
+                + "var meta=box?(box.innerText||box.textContent||'').replace(/\\s+/g,' ').trim():title;"
+                + "meta=meta.replace(title,'').trim();"
+                + "var img=box?box.querySelector('img'):null;"
+                + "seen[href]=1;out.push({title:title,href:href,meta:meta,image:img?(img.src||''):''});"
+                + "});"
+                + "}"
+                + "return JSON.stringify(out.slice(0,150));})()";
         webView.evaluateJavascript(script, value -> {
             try {
                 Object decoded = new org.json.JSONTokener(value).nextValue();
@@ -999,6 +1016,7 @@ public class MainActivity extends Activity {
         String base = mirror == null ? DEFAULT_MIRROR : mirror;
         base = base.replaceAll("/+$", "");
         String url = base + "/" + path;
+        showSectionResultsWhenLoaded = true;
         address.setText(url);
         webView.loadUrl(url);
     }
