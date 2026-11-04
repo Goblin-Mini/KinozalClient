@@ -1080,7 +1080,7 @@ public class MainActivity extends Activity {
 
     private void loadHome() {
         showHomeDashboard();
-        if (webView != null && webView.getUrl() == null) webView.loadUrl(mirror);
+        if (webView != null) webView.loadUrl(mirror);
     }
 
     private int dp(float value) {
