@@ -446,18 +446,15 @@ public class MainActivity extends Activity {
         String script = "(function(){"
                 + "var body=document.body?document.body.innerText:'';"
                 + "body=body.replace(/\\r/g,'').replace(/[ \\t]+/g,' ').replace(/\\n{2,}/g,'\\n').trim();"
-                + "var labels=['Название','Оригинальное название','Год выпуска','Жанр','Выпущено','Режиссер','В ролях','О фильме','Характеристика','Вес','Залит','Обновлен','Раздают','Скачивают','Скачали','Список файлов','Комментариев','IMDb','Кинопоиск','Оценка'];"
+                + "var labels=['Название','Оригинальное название','Год выпуска','Жанр','Выпущено','Режиссер','В ролях','О фильме','Качество','Видео','Аудио','Субтитры','Продолжительность','Перевод','Размер','Характеристика','Вес','Залит','Обновлен','Раздают','Скачивают','Скачали','Список файлов','Комментариев','IMDb','Кинопоиск','Оценка'];"
                 + "var positions=[];"
-                + "labels.forEach(function(label){"
-                + "var re=new RegExp('(?:^|[\\\\n ])'+label+'\\\\s*:', 'gi');"
-                + "var m;while((m=re.exec(body))!==null){var p=m.index+(m[0].length-label.length-1);positions.push({label:label,start:p,valueStart:re.lastIndex});}"
-                + "});"
+                + "labels.forEach(function(label){var re=new RegExp('(?:^|[\\\\n ])'+label+'\\\\s*:', 'gi');"
+                + "var m;while((m=re.exec(body))!==null){var p=m.index+(m[0].length-label.length-1);positions.push({label:label,start:p,valueStart:re.lastIndex});}});"
                 + "positions.sort(function(a,b){return a.start-b.start;});"
                 + "var fields={},seen={};"
-                + "positions.forEach(function(p,i){if(seen[p.label])return;seen[p.label]=1;"
-                + "var next=body.length;for(var j=i+1;j<positions.length;j++){if(positions[j].start>p.valueStart){next=positions[j].start;break;}}"
-                + "var v=body.slice(p.valueStart,next).replace(/^[\\s:]+|[\\s]+$/g,'').trim();"
-                + "if(v.length>0)fields[p.label]=v.slice(0,3500);});"
+                + "positions.forEach(function(p,i){if(seen[p.label])return;seen[p.label]=1;var next=body.length;"
+                + "for(var j=i+1;j<positions.length;j++){if(positions[j].start>p.valueStart){next=positions[j].start;break;}}"
+                + "var v=body.slice(p.valueStart,next).replace(/^[\\s:]+|[\\s]+$/g,'').trim();if(v)fields[p.label]=v.slice(0,3500);});"
                 + "return JSON.stringify({title:document.title||'',fields:fields});})()";
         webView.evaluateJavascript(script, value -> {
             try {
@@ -469,39 +466,89 @@ public class MainActivity extends Activity {
                             Toast.LENGTH_LONG).show();
                     return;
                 }
+
+                LinearLayout root = new LinearLayout(this);
+                root.setOrientation(LinearLayout.VERTICAL);
+                root.setPadding(dp(10), dp(8), dp(10), dp(8));
+                LinearLayout tabs = new LinearLayout(this);
+                tabs.setOrientation(LinearLayout.HORIZONTAL);
+                tabs.setGravity(Gravity.CENTER_VERTICAL);
                 android.widget.ScrollView scroll = new android.widget.ScrollView(this);
                 LinearLayout content = new LinearLayout(this);
                 content.setOrientation(LinearLayout.VERTICAL);
-                content.setPadding(dp(16), dp(12), dp(16), dp(16));
-                String[] order = {"Название","Оригинальное название","Год выпуска","Жанр",
-                        "Выпущено","Режиссер","В ролях","О фильме","Характеристика","Вес",
-                        "Залит","Обновлен","Раздают","Скачивают","Скачали","Список файлов",
-                        "Комментариев","IMDb","Кинопоиск","Оценка"};
-                for (String key : order) {
-                    String valueText = fields.optString(key, "").trim();
-                    if (valueText.isEmpty()) continue;
-                    TextView label = new TextView(this);
-                    label.setText(key);
-                    label.setTextColor(accent);
-                    label.setTextSize(14);
-                    label.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
-                    label.setPadding(0, dp(10), 0, dp(2));
-                    TextView valueView = new TextView(this);
-                    valueView.setText(valueText);
-                    valueView.setTextColor(Color.WHITE);
-                    valueView.setTextSize(16);
-                    valueView.setPadding(0, 0, 0, dp(6));
-                    content.addView(label);
-                    content.addView(valueView);
-                    View divider = new View(this);
-                    divider.setBackgroundColor(Color.rgb(65, 67, 82));
-                    content.addView(divider, new LinearLayout.LayoutParams(
-                            ViewGroup.LayoutParams.MATCH_PARENT, dp(1)));
-                }
+                content.setPadding(dp(16), dp(12), dp(16), dp(18));
                 scroll.addView(content);
+                root.addView(tabs);
+                root.addView(scroll, new LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
+
+                String[][] groups = {
+                        {"Описание","Название","Оригинальное название","Год выпуска","Жанр","Выпущено","Режиссер","В ролях","О фильме"},
+                        {"Техданные","Качество","Видео","Аудио","Субтитры","Продолжительность","Перевод"},
+                        {"Релиз","Характеристика","Вес","Размер","Залит","Обновлен","Раздают","Скачивают","Скачали"},
+                        {"Оценки","IMDb","Кинопоиск","Оценка","Комментариев"}
+                };
+                final int[] active = {0};
+                Runnable[] render = new Runnable[1];
+                render[0] = () -> {
+                    content.removeAllViews();
+                    String[] group = groups[active[0]];
+                    boolean added = false;
+                    for (int k = 1; k < group.length; k++) {
+                        String key = group[k];
+                        String valueText = fields.optString(key, "").trim();
+                        if (valueText.isEmpty()) continue;
+                        added = true;
+                        TextView label = new TextView(this);
+                        label.setText(key);
+                        label.setTextColor(accent);
+                        label.setTextSize(14);
+                        label.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+                        label.setPadding(0, dp(10), 0, dp(3));
+                        TextView valueView = new TextView(this);
+                        valueView.setText(valueText);
+                        valueView.setTextColor(Color.WHITE);
+                        valueView.setTextSize(16);
+                        valueView.setPadding(0, 0, 0, dp(8));
+                        content.addView(label);
+                        content.addView(valueView);
+                        View divider = new View(this);
+                        divider.setBackgroundColor(Color.rgb(65, 67, 82));
+                        content.addView(divider, new LinearLayout.LayoutParams(
+                                ViewGroup.LayoutParams.MATCH_PARENT, dp(1)));
+                    }
+                    if (!added) {
+                        TextView empty = new TextView(this);
+                        empty.setText("В этом разделе пока нет извлечённых данных. Полную версию можно открыть на сайте.");
+                        empty.setTextColor(Color.LTGRAY);
+                        empty.setTextSize(16);
+                        empty.setPadding(dp(8), dp(18), dp(8), dp(18));
+                        content.addView(empty);
+                    }
+                    for (int n = 0; n < tabs.getChildCount(); n++) {
+                        View child = tabs.getChildAt(n);
+                        if (child instanceof Button) {
+                            ((Button) child).setTextColor(n == active[0] ? Color.WHITE : Color.LTGRAY);
+                            child.setBackgroundTintList(null);
+                        }
+                    }
+                    scroll.scrollTo(0, 0);
+                };
+                for (int n = 0; n < groups.length; n++) {
+                    final int index = n;
+                    Button tab = makeButton(groups[n][0]);
+                    tab.setTextSize(13);
+                    tab.setOnClickListener(v -> {
+                        active[0] = index;
+                        render[0].run();
+                    });
+                    tabs.addView(tab, spacedButtonParams());
+                }
+                render[0].run();
+
                 AlertDialog dialog = new AlertDialog.Builder(this)
                         .setTitle("Подробности раздачи")
-                        .setView(scroll)
+                        .setView(root)
                         .setPositiveButton("Открыть страницу сайта", (d, w) -> { })
                         .setNegativeButton("Закрыть", null)
                         .create();
