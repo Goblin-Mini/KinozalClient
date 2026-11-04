@@ -666,27 +666,42 @@ public class MainActivity extends Activity {
 
         String[][] groups = {
                 {"Название", "Оригинальное название", "Год выпуска", "Жанр", "Выпущено", "Режиссер", "В ролях", "О фильме"},
-                {"Качество", "Видео", "Аудио", "Субтитры", "Продолжительность", "Перевод", "Размер"}
+                {"Качество", "Видео", "Аудио", "Субтитры", "Продолжительность", "Перевод", "Размер", "Язык"}
         };
         final int[] active = {0};
         Runnable render = () -> {
             detailContent.removeAllViews();
             String[] keys = groups[active[0]];
             boolean any = false;
-            for (int i = 0; i < keys.length; i++) {
-                String key = keys[i];
+            int index = 0;
+            while (index < keys.length) {
+                String key = keys[index];
                 String value = data.fields.get(key);
-                if (value == null || value.trim().isEmpty()) continue;
+                if (value == null || value.trim().isEmpty()) { index++; continue; }
                 any = true;
-                LinearLayout block = new LinearLayout(this);
-                block.setOrientation(LinearLayout.VERTICAL);
-                block.setPadding(dp(8), dp(5), dp(8), dp(8));
-                TextView label = text(key, 12, TEAL, true);
-                TextView valueView = text(value, 14, Color.WHITE, false);
-                valueView.setLineSpacing(dp(1), 1f);
-                block.addView(label);
-                block.addView(valueView);
-                detailContent.addView(block);
+                boolean fullWidth = active[0] == 0
+                        && ("В ролях".equals(key) || "О фильме".equals(key));
+                if (fullWidth) {
+                    addDetailField(detailContent, key, value, -1);
+                    index++;
+                    continue;
+                }
+                LinearLayout pair = new LinearLayout(this);
+                pair.setOrientation(LinearLayout.HORIZONTAL);
+                pair.setGravity(Gravity.TOP);
+                addDetailField(pair, key, value, 0);
+                index++;
+                if (index < keys.length) {
+                    String nextKey = keys[index];
+                    String nextValue = data.fields.get(nextKey);
+                    boolean nextFullWidth = active[0] == 0
+                            && ("В ролях".equals(nextKey) || "О фильме".equals(nextKey));
+                    if (!nextFullWidth && nextValue != null && !nextValue.trim().isEmpty()) {
+                        addDetailField(pair, nextKey, nextValue, 1);
+                        index++;
+                    }
+                }
+                detailContent.addView(pair, new LinearLayout.LayoutParams(-1, -2));
                 View divider = new View(this);
                 divider.setBackgroundColor(Color.rgb(65, 70, 74));
                 detailContent.addView(divider, new LinearLayout.LayoutParams(-1, dp(1)));
@@ -720,6 +735,24 @@ public class MainActivity extends Activity {
             });
         }
         watch.requestFocus();
+    }
+
+    private void addDetailField(LinearLayout parent, String key, String value, int column) {
+        LinearLayout block = new LinearLayout(this);
+        block.setOrientation(LinearLayout.VERTICAL);
+        block.setPadding(dp(8), dp(7), dp(10), dp(9));
+        TextView label = text(key, 12, TEAL, true);
+        TextView valueView = text(value, 14, Color.WHITE, false);
+        valueView.setLineSpacing(dp(1), 1f);
+        block.addView(label);
+        block.addView(valueView);
+        if (column < 0) {
+            parent.addView(block, new LinearLayout.LayoutParams(-1, -2));
+        } else {
+            LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(0, -2, 1f);
+            if (column == 1) params.leftMargin = dp(8);
+            parent.addView(block, params);
+        }
     }
 
     private void playTorrent(TorrentDetails data) {
