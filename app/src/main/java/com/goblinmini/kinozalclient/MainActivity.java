@@ -18,6 +18,10 @@ import android.widget.ProgressBar;
 import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
+import android.webkit.CookieManager;
+import android.webkit.WebChromeClient;
+import android.webkit.WebView;
+import android.webkit.WebViewClient;
 
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
@@ -370,20 +374,66 @@ public class MainActivity extends Activity {
     }
 
     private void showLogin() {
-        LinearLayout form = new LinearLayout(this); form.setOrientation(LinearLayout.VERTICAL); form.setPadding(dp(20), dp(8), dp(20), dp(8));
-        EditText user = new EditText(this); user.setSingleLine(true); user.setHint("Логин Kinozal"); user.setTextColor(Color.WHITE); user.setHintTextColor(TEAL);
-        EditText pass = new EditText(this); pass.setSingleLine(true); pass.setHint("Пароль"); pass.setInputType(129); pass.setTextColor(Color.WHITE); pass.setHintTextColor(TEAL);
-        form.addView(user); form.addView(pass);
-        new AlertDialog.Builder(this).setTitle("Авторизация Kinozal").setView(form)
-                .setPositiveButton("Войти", (d, w) -> {
-                    progress.setVisibility(View.VISIBLE);
-                    io.execute(() -> {
-                        try { client.login(user.getText().toString(), pass.getText().toString());
-                            runOnUiThread(() -> { progress.setVisibility(View.GONE); status.setText("Авторизован"); showMessage("Вход выполнен"); load("browse.php", "Все раздачи"); });
-                        } catch (Exception e) { runOnUiThread(() -> { progress.setVisibility(View.GONE); showMessage("Вход не выполнен: " + safe(e.getMessage())); }); }
-                    });
-                }).setNeutralButton("Выйти", (d,w) -> { client.logout(); status.setText("Не авторизован"); showMessage("Сессия очищена"); })
-                .setNegativeButton("Отмена", null).show();
+        openBrowserSession();
+    }
+
+    /**
+     * Opens the real Kinozal login page in an embedded browser so JavaScript
+     * and Cloudflare's legitimate interactive security check can run.
+     * The catalogue itself remains native and is fetched by KinozalHttpClient.
+     */
+    private void openBrowserSession() {
+        WebView web = new WebView(this);
+        web.setBackgroundColor(BG);
+        web.getSettings().setJavaScriptEnabled(true);
+        web.getSettings().setDomStorageEnabled(true);
+        web.getSettings().setDatabaseEnabled(true);
+        web.getSettings().setUserAgentString(web.getSettings().getUserAgentString());
+        CookieManager cookies = CookieManager.getInstance();
+        cookies.setAcceptCookie(true);
+        cookies.setAcceptThirdPartyCookies(web, true);
+        web.setWebChromeClient(new WebChromeClient());
+        web.setWebViewClient(new WebViewClient());
+        LinearLayout container = new LinearLayout(this);
+        container.setOrientation(LinearLayout.VERTICAL);
+        TextView hint = text("Войдите на Kinozal и дождитесь завершения проверки Cloudflare. После успешного входа нажмите «Готово».", 14, GOLD, false);
+        hint.setPadding(dp(14), dp(10), dp(14), dp(10));
+        container.addView(hint, new LinearLayout.LayoutParams(-1, -2));
+        container.addView(web, new LinearLayout.LayoutParams(-1, 0, 1));
+        AlertDialog dialog = new AlertDialog.Builder(this)
+                .setTitle("Вход и проверка безопасности")
+                .setView(container)
+                .setPositiveButton("Готово", null)
+                .setNeutralButton("Очистить сессию", null)
+                .setNegativeButton("Закрыть", null)
+                .create();
+        dialog.setOnShowListener(ignored -> {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
+                cookies.flush();
+                String cookieHeader = cookies.getCookie(mirror);
+                String browserAgent = web.getSettings().getUserAgentString();
+                try {
+                    client.importBrowserSession(cookieHeader, browserAgent);
+                    dialog.dismiss();
+                    status.setText("Сессия браузера сохранена");
+                    showMessage("Данные сессии переданы. Проверяю доступ к каталогу…");
+                    load("browse.php", "Все раздачи");
+                } catch (Exception e) {
+                    showMessage("Не удалось передать сессию: " + safe(e.getMessage()));
+                }
+            });
+            dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener(v -> {
+                cookies.removeAllCookies(null);
+                cookies.flush();
+                client.logout();
+                web.clearCache(true);
+                web.clearHistory();
+                hint.setText("Сессия очищена. Войдите заново и пройдите проверку Cloudflare.");
+            });
+        });
+        dialog.setOnDismissListener(ignored -> web.destroy());
+        dialog.show();
+        web.loadUrl(mirror + "/login.php?m=5");
     }
 
     private void chooseMirror() {
