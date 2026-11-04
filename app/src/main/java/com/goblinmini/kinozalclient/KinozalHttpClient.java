@@ -69,15 +69,37 @@ public final class KinozalHttpClient {
             throw new IllegalArgumentException("Введите логин и пароль");
         }
         cookies.getCookieStore().removeAll();
-        String form = "username=" + enc(username.trim()) + "&password=" + enc(password);
-        String response = request(baseUrl + "/takelogin.php", "POST", form, true);
-        if (isLoginPage(response) || cookies.getCookieStore().getCookies().isEmpty()) {
-            throw new SecurityException("Kinozal не подтвердил вход. Проверьте логин и пароль.");
+        String loginUrl = baseUrl + "/login.php?m=5";
+        String loginHtml = request(loginUrl, "GET", null, false);
+        org.jsoup.nodes.Document doc = org.jsoup.Jsoup.parse(loginHtml, loginUrl);
+        org.jsoup.nodes.Element form = doc.select("form").stream()
+                .filter(f -> !f.select("input[type=password]").isEmpty())
+                .findFirst().orElseThrow(() -> new SecurityException("Не найдена форма входа на выбранном зеркале"));
+        java.util.LinkedHashMap<String, String> fields = new java.util.LinkedHashMap<>();
+        for (org.jsoup.nodes.Element input : form.select("input[name]")) {
+            String type = input.attr("type").toLowerCase(java.util.Locale.ROOT);
+            if (type.equals("submit") || type.equals("button") || type.equals("file")) continue;
+            fields.put(input.attr("name"), input.hasAttr("value") ? input.attr("value") : "");
         }
+        org.jsoup.nodes.Element userField = form.select("input[type=text],input[type=email],input:not([type])").stream()
+                .filter(e -> !e.attr("name").isEmpty()).findFirst()
+                .orElseThrow(() -> new SecurityException("Не найдено поле логина"));
+        org.jsoup.nodes.Element passField = form.select("input[type=password][name]").first();
+        if (passField == null) throw new SecurityException("Не найдено поле пароля");
+        fields.put(userField.attr("name"), username.trim());
+        fields.put(passField.attr("name"), password);
+        StringBuilder body = new StringBuilder();
+        for (java.util.Map.Entry<String, String> entry : fields.entrySet()) {
+            if (body.length() > 0) body.append('&');
+            body.append(enc(entry.getKey())).append('=').append(enc(entry.getValue()));
+        }
+        String action = form.hasAttr("action") ? form.absUrl("action") : loginUrl;
+        if (action.isEmpty()) action = loginUrl;
+        String response = request(action, "POST", body.toString(), true);
         String probe = request(baseUrl + "/browse.php", "GET", null, false);
-        if (isLoginPage(probe)) {
+        if (isLoginPage(probe) || probe.isEmpty()) {
             cookies.getCookieStore().removeAll();
-            throw new SecurityException("Сайт вернул страницу авторизации. Возможно, требуется дополнительная проверка.");
+            throw new SecurityException("Вход не подтверждён сайтом. Проверьте логин и пароль; возможно, зеркало требует дополнительную проверку.");
         }
         persistCookies();
     }
