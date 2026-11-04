@@ -188,7 +188,7 @@ public class MainActivity extends Activity {
         addMenu("Российские сериалы", () -> load("browse.php?c=45", "Российские сериалы"));
         addMenu("Все фильмы", () -> load("browse.php?c=1002", "Все фильмы"));
         addMenu("Советские фильмы", () -> load("browse.php?c=10", "Советские фильмы"));
-        addMenu("Мультфильмы", () -> load("browse.php?c=37", "Мультфильмы"));
+        addMenu("Мультфильмы", () -> load("browse.php?c=1003", "Мультфильмы"));
         addMenu("Российские мульты", () -> load("browse.php?c=22", "Российские мульты"));
         addMenu("Зарубежные мульты", () -> load("browse.php?c=21", "Зарубежные мульты"));
         addMenu("Аниме", () -> load("browse.php?c=20", "Аниме"));
