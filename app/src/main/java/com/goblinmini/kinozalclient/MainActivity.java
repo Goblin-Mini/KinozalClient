@@ -127,7 +127,7 @@ public class MainActivity extends Activity {
         // Reserve a narrow gutter for the scrollbar instead of drawing it
         // over the right edge of focused menu buttons.
         menuScroll.setScrollBarStyle(View.SCROLLBARS_INSIDE_INSET);
-        menuScroll.setPadding(0, 0, dp(9), 0);
+        menuScroll.setPadding(0, 0, dp(22), 0);
         menuItems = new LinearLayout(this);
         menuItems.setOrientation(LinearLayout.VERTICAL);
         menuScroll.addView(menuItems, new ScrollView.LayoutParams(-1, -2));
