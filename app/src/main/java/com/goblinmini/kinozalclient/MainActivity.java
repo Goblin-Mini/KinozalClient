@@ -362,6 +362,7 @@ public class MainActivity extends Activity {
                             Toast.LENGTH_LONG).show();
                     return;
                 }
+                final AlertDialog[] listDialog = new AlertDialog[1];
                 android.widget.ScrollView scroll = new android.widget.ScrollView(this);
                 LinearLayout list = new LinearLayout(this);
                 list.setOrientation(LinearLayout.VERTICAL);
@@ -394,7 +395,10 @@ public class MainActivity extends Activity {
                     card.addView(name);
                     card.addView(info);
                     card.setOnClickListener(v -> {
-                        if (!itemUrl.isEmpty()) webView.loadUrl(itemUrl);
+                        if (!itemUrl.isEmpty()) {
+                            dialog.dismiss();
+                            webView.post(() -> webView.loadUrl(itemUrl));
+                        }
                     });
                     card.setOnFocusChangeListener((v, focused) -> {
                         GradientDrawable state = new GradientDrawable();
@@ -415,6 +419,7 @@ public class MainActivity extends Activity {
                         .setView(scroll)
                         .setNegativeButton("Закрыть", null)
                         .create();
+                listDialog[0] = dialog;
                 dialog.show();
                 if (dialog.getWindow() != null) {
                     dialog.getWindow().setLayout(
