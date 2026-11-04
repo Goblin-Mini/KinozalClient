@@ -152,12 +152,24 @@ public class MainActivity extends Activity {
         heading = text("Все раздачи", 25, GOLD, true);
         main.addView(heading, new LinearLayout.LayoutParams(-1, dp(48)));
         LinearLayout searchBar = new LinearLayout(this); searchBar.setGravity(Gravity.CENTER_VERTICAL);
-        search = new EditText(this); search.setSingleLine(true); search.setTextColor(Color.WHITE);
-        search.setHintTextColor(TEAL); search.setHint("Название фильма или раздачи");
-        search.setTextSize(16); search.setImeOptions(EditorInfo.IME_ACTION_SEARCH);
-        search.setBackground(shape(PANEL, TEAL)); search.setPadding(dp(14), 0, dp(14), 0);
-        searchBar.addView(search, new LinearLayout.LayoutParams(0, dp(48), 1));
-        Button find = button("Найти"); searchBar.addView(find, new LinearLayout.LayoutParams(dp(110), dp(48)));
+        search = new EditText(this);
+        search.setSingleLine(true);
+        search.setMinWidth(0);
+        search.setMinEms(0);
+        search.setTextColor(Color.WHITE);
+        search.setHintTextColor(TEAL);
+        search.setHint("Название фильма или раздачи");
+        search.setTextSize(16);
+        search.setImeOptions(EditorInfo.IME_ACTION_SEARCH);
+        search.setBackground(shape(PANEL, TEAL));
+        search.setPadding(dp(14), 0, dp(14), 0);
+        LinearLayout.LayoutParams searchParams = new LinearLayout.LayoutParams(0, dp(48), 1f);
+        searchParams.rightMargin = dp(8);
+        searchBar.addView(search, searchParams);
+        Button find = button("Найти");
+        find.setMinWidth(0);
+        LinearLayout.LayoutParams findParams = new LinearLayout.LayoutParams(dp(104), dp(48));
+        searchBar.addView(find, findParams);
         find.setOnClickListener(v -> submitSearch());
         search.setOnEditorActionListener((v, action, event) -> {
             if (action == EditorInfo.IME_ACTION_SEARCH || (event != null && event.getKeyCode() == KeyEvent.KEYCODE_ENTER)) { submitSearch(); return true; }
