@@ -67,18 +67,28 @@ public class MainActivity extends Activity {
         header.addView(title, new LinearLayout.LayoutParams(0, dp(48), 1));
 
         Button mirrors = makeButton("Зеркало");
-        mirrors.setOnClickListener(v -> showMirrors());
-        header.addView(mirrors, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT, dp(44)));
-
         Button home = makeButton("Главная");
-        home.setOnClickListener(v -> loadHome());
-        header.addView(home, spacedButtonParams());
-
         Button refresh = makeButton("Обновить");
+
+        mirrors.setId(View.generateViewId());
+        home.setId(View.generateViewId());
+        refresh.setId(View.generateViewId());
+
+        mirrors.setOnClickListener(v -> showMirrors());
+        home.setOnClickListener(v -> loadHome());
         refresh.setOnClickListener(v -> {
             if (webView != null) webView.reload();
         });
+
+        // Explicit D-pad focus order for Android TV remotes.
+        mirrors.setNextFocusRightId(home.getId());
+        home.setNextFocusLeftId(mirrors.getId());
+        home.setNextFocusRightId(refresh.getId());
+        refresh.setNextFocusLeftId(home.getId());
+
+        header.addView(mirrors, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, dp(44)));
+        header.addView(home, spacedButtonParams());
         header.addView(refresh, spacedButtonParams());
         root.addView(header);
 
@@ -97,6 +107,11 @@ public class MainActivity extends Activity {
                 ViewGroup.LayoutParams.MATCH_PARENT, dp(3)));
 
         webView = new WebView(this);
+        webView.setId(View.generateViewId());
+        webView.setNextFocusUpId(refresh.getId());
+        mirrors.setNextFocusDownId(webView.getId());
+        home.setNextFocusDownId(webView.getId());
+        refresh.setNextFocusDownId(webView.getId());
         webView.setBackgroundColor(background);
         webView.getSettings().setJavaScriptEnabled(true);
         webView.getSettings().setDomStorageEnabled(true);
@@ -131,6 +146,13 @@ public class MainActivity extends Activity {
         root.addView(webView, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, 0, 1));
         setContentView(root);
+
+        // Give TV users a visible, predictable starting focus.
+        mirrors.post(() -> {
+            if (!isFinishing() && mirrors.isShown()) {
+                mirrors.requestFocus();
+            }
+        });
     }
 
     private LinearLayout.LayoutParams spacedButtonParams() {
@@ -153,6 +175,17 @@ public class MainActivity extends Activity {
         button.setBackground(shape);
         button.setFocusable(true);
         button.setFocusableInTouchMode(true);
+        button.setMinHeight(dp(44));
+        button.setOnFocusChangeListener((view, hasFocus) -> {
+            GradientDrawable focused = new GradientDrawable();
+            focused.setColor(hasFocus ? Color.rgb(57, 53, 83) : panel);
+            focused.setCornerRadius(dp(10));
+            focused.setStroke(dp(hasFocus ? 2 : 1),
+                    hasFocus ? accent : Color.rgb(55, 57, 68));
+            view.setBackground(focused);
+            view.setScaleX(hasFocus ? 1.04f : 1.0f);
+            view.setScaleY(hasFocus ? 1.04f : 1.0f);
+        });
         return button;
     }
 
