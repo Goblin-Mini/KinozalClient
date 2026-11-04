@@ -445,7 +445,7 @@ public class MainActivity extends Activity {
     }
 
 
-    private void downloadAndSendTorrent(String torrentLink) {
+    private void downloadAndSendTorrent(String torrentLink, String posterUrl, String torrentTitle) {
         final String userAgent = webView.getSettings().getUserAgentString();
         final String referer = webView.getUrl();
         final String cookies = CookieManager.getInstance().getCookie(torrentLink);
@@ -482,6 +482,8 @@ public class MainActivity extends Activity {
                 send.setPackage("ru.yourok.torrserve");
                 send.setType("application/x-bittorrent");
                 send.putExtra(Intent.EXTRA_STREAM, fileUri);
+                send.putExtra("poster", posterUrl == null ? "" : posterUrl);
+                send.putExtra("title", torrentTitle == null ? "" : torrentTitle);
                 send.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
                 send.setClipData(android.content.ClipData.newUri(getContentResolver(), "torrent", fileUri));
                 runOnUiThread(() -> {
@@ -746,9 +748,12 @@ public class MainActivity extends Activity {
                         if ("magnet".equalsIgnoreCase(torrentUri.getScheme())) {
                             Intent intent = new Intent(Intent.ACTION_VIEW, torrentUri);
                             intent.setPackage("ru.yourok.torrserve");
+                            intent.putExtra("poster", data.optString("poster", ""));
+                            intent.putExtra("title", data.optString("title", ""));
                             startActivity(intent);
                         } else {
-                            downloadAndSendTorrent(torrentLink);
+                            downloadAndSendTorrent(torrentLink,
+                                    data.optString("poster", ""), data.optString("title", ""));
                         }
                     } catch (android.content.ActivityNotFoundException e) {
                         Toast.makeText(this, "TorrServe MatriX не установлен", Toast.LENGTH_LONG).show();
