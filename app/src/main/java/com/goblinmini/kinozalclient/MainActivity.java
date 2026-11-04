@@ -197,6 +197,8 @@ public class MainActivity extends Activity {
         b.setEllipsize(android.text.TextUtils.TruncateAt.END);
         LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, dp(47));
+        // Make the focused button frame 5dp narrower on the scrollbar side.
+        p.rightMargin = dp(5);
         p.bottomMargin = dp(3);
         menuItems.addView(b, p); b.setOnClickListener(v -> action.run());
     }
