@@ -457,11 +457,12 @@ public class MainActivity extends Activity {
                 + "positions.forEach(function(p,i){if(seen[p.label])return;seen[p.label]=1;var next=body.length;"
                 + "for(var j=i+1;j<positions.length;j++){if(positions[j].start>p.valueStart){next=positions[j].start;break;}}"
                 + "var v=body.slice(p.valueStart,next).replace(/^[\\s:]+|[\\s]+$/g,'').trim();var stop=['Техданные','Релиз','Содержание','Скриншоты','Подобные','Топ по жанрам','Топ по персонам','Топ раздающего','Подобные раздачи не найдены','Комментарии ( Комментировать )'];stop.forEach(function(x){var q=v.toLowerCase().indexOf(x.toLowerCase());if(q>=0)v=v.slice(0,q).trim();});if(v)fields[p.label]=v.slice(0,3500);});"
-                + "var imgs=Array.from(document.images).filter(function(im){var w=im.naturalWidth||im.width,h=im.naturalHeight||im.height;return w>=160&&h>=220&&h>w*1.15;});"
-                + "imgs.sort(function(a,b){return (b.naturalWidth||b.width)*(b.naturalHeight||b.height)-(a.naturalWidth||a.width)*(a.naturalHeight||a.height);});"
-                + "var poster=imgs.length?imgs[0].src:'';"
-                + "return JSON.stringify({title:document.title||'',fields:fields,poster:poster});})()";
-        webView.evaluateJavascript(script, value -> {
+                + "var candidates=[];function addImage(u,w,h,alt){if(!u)return;try{u=new URL(u,location.href).href;}catch(e){return;}if(!/^https?:/i.test(u))return;var ratio=h>0?w/h:0,score=0,txt=(u+' '+(alt||'')).toLowerCase();if(/poster|cover|облож|film|kino|pic|image/i.test(txt))score+=5;if(ratio>0.48&&ratio<0.82)score+=8;else if(ratio>0.35&&ratio<0.95)score+=3;if(w>=100&&h>=140)score+=3;if(w>0&&h>0)score+=Math.min(4,(w*h)/100000);candidates.push({url:u,score:score,area:w*h});}"
+                + "Array.from(document.images).forEach(function(im){var w=im.naturalWidth||im.width||0,h=im.naturalHeight||im.height||0,alt=im.alt||im.title||'';addImage(im.currentSrc||im.src,w,h,alt);['data-src','data-original','data-lazy-src','data-image','data-original-src'].forEach(function(k){addImage(im.getAttribute(k),w,h,alt);});});"
+                + "Array.from(document.querySelectorAll('[style*=background]')).forEach(function(el){var bg=getComputedStyle(el).backgroundImage||el.style.backgroundImage,m=bg.match(/url\\([\\\"']?(.*?)[\\\"']?\\)/i);if(m)addImage(m[1],el.clientWidth||0,el.clientHeight||0,el.className||'');});"
+                + "candidates.sort(function(a,b){return b.score-a.score||b.area-a.area;});var unique=[],seenUrls={};candidates.forEach(function(c){if(!seenUrls[c.url]){seenUrls[c.url]=1;unique.push(c);}});"
+                + "var poster=unique.length?unique[0].url:'';"
+                + "return JSON.stringify({title:document.title||'',fields:fields,poster:poster,posterCandidates:unique.slice(0,8).map(function(c){return c.url;})});})()"        webView.evaluateJavascript(script, value -> {
             try {
                 Object decoded = new org.json.JSONTokener(value).nextValue();
                 org.json.JSONObject data = new org.json.JSONObject(String.valueOf(decoded));
@@ -485,12 +486,26 @@ public class MainActivity extends Activity {
                 scroll.addView(content);
                 LinearLayout mainArea = new LinearLayout(this);
                 mainArea.setOrientation(LinearLayout.HORIZONTAL);
+                LinearLayout posterColumn = new LinearLayout(this);
+                posterColumn.setOrientation(LinearLayout.VERTICAL);
+                posterColumn.setGravity(Gravity.TOP | Gravity.CENTER_HORIZONTAL);
                 ImageView posterView = new ImageView(this);
                 posterView.setScaleType(ImageView.ScaleType.FIT_CENTER);
                 posterView.setAdjustViewBounds(true);
+                TextView posterStatus = new TextView(this);
+                posterStatus.setTextColor(Color.LTGRAY);
+                posterStatus.setTextSize(11);
+                posterStatus.setGravity(Gravity.CENTER);
+                posterStatus.setPadding(dp(4), dp(6), dp(4), dp(6));
                 String posterUrl = data.optString("poster", "");
+                org.json.JSONArray posterCandidates = data.optJSONArray("posterCandidates");
+                int candidateCount = posterCandidates == null ? 0 : posterCandidates.length();
                 if (!posterUrl.isEmpty() && (posterUrl.startsWith("https://") || posterUrl.startsWith("http://"))) {
-                    mainArea.addView(posterView, new LinearLayout.LayoutParams(dp(180),
+                    posterStatus.setText("Загрузка постера…");
+                    posterColumn.addView(posterView, new LinearLayout.LayoutParams(
+                            ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
+                    posterColumn.addView(posterStatus);
+                    mainArea.addView(posterColumn, new LinearLayout.LayoutParams(dp(180),
                             ViewGroup.LayoutParams.MATCH_PARENT));
                     new Thread(() -> {
                         try {
@@ -513,14 +528,24 @@ public class MainActivity extends Activity {
                                         ? BitmapFactory.decodeStream(input) : null;
                             } finally { conn.disconnect(); }
                             if (bitmap != null) {
-                                runOnUiThread(() -> posterView.setImageBitmap(bitmap));
+                                runOnUiThread(() -> {
+                                    posterView.setImageBitmap(bitmap);
+                                    posterStatus.setText("Постер загружен");
+                                });
                             } else {
-                                runOnUiThread(() -> Toast.makeText(this,
-                                        "Не удалось загрузить постер (HTTP " + responseCode + ")",
-                                        Toast.LENGTH_LONG).show());
+                                runOnUiThread(() -> posterStatus.setText("HTTP " + responseCode + " — постер недоступен"));
                             }
-                        } catch (Exception ignored) { }
+                        } catch (Exception e) {
+                            runOnUiThread(() -> posterStatus.setText("Ошибка: " + e.getClass().getSimpleName()));
+                        }
                     }).start();
+                } else {
+                    posterStatus.setText("Постер не найден в разметке (" + candidateCount + " кандидатов)");
+                    posterColumn.addView(posterView, new LinearLayout.LayoutParams(
+                            ViewGroup.LayoutParams.MATCH_PARENT, dp(210)));
+                    posterColumn.addView(posterStatus);
+                    mainArea.addView(posterColumn, new LinearLayout.LayoutParams(dp(180),
+                            ViewGroup.LayoutParams.MATCH_PARENT));
                 }
                 root.addView(tabs);
                 mainArea.addView(scroll, new LinearLayout.LayoutParams(0,
