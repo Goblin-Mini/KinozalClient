@@ -418,8 +418,10 @@ public class MainActivity extends Activity {
         credentials.setPadding(dp(10), dp(4), dp(10), dp(4));
         EditText loginInput = new EditText(this);
         loginInput.setSingleLine(true);
-        loginInput.setTextColor(Color.WHITE);
+        loginInput.setTextColor(GOLD);
         loginInput.setHintTextColor(TEAL);
+        loginInput.setBackground(shape(PANEL, TEAL));
+        loginInput.setPadding(dp(12), 0, dp(12), 0);
         loginInput.setHint("Логин");
         loginInput.setTextSize(14);
         loginInput.setFocusable(true);
@@ -428,8 +430,10 @@ public class MainActivity extends Activity {
                 | android.text.InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD);
         EditText passwordInput = new EditText(this);
         passwordInput.setSingleLine(true);
-        passwordInput.setTextColor(Color.WHITE);
+        passwordInput.setTextColor(GOLD);
         passwordInput.setHintTextColor(TEAL);
+        passwordInput.setBackground(shape(PANEL, TEAL));
+        passwordInput.setPadding(dp(12), 0, dp(12), 0);
         passwordInput.setHint("Пароль");
         passwordInput.setTextSize(14);
         passwordInput.setFocusable(true);
