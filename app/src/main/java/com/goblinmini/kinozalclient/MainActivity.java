@@ -490,24 +490,35 @@ public class MainActivity extends Activity {
                 LinearLayout posterColumn = new LinearLayout(this);
                 posterColumn.setOrientation(LinearLayout.VERTICAL);
                 posterColumn.setGravity(Gravity.TOP | Gravity.CENTER_HORIZONTAL);
+                posterColumn.setPadding(dp(8), dp(8), dp(8), dp(8));
+                GradientDrawable posterBackground = new GradientDrawable();
+                posterBackground.setColor(Color.rgb(24, 25, 32));
+                posterBackground.setCornerRadius(dp(10));
+                posterBackground.setStroke(dp(1), Color.rgb(75, 77, 91));
+                posterColumn.setBackground(posterBackground);
                 ImageView posterView = new ImageView(this);
                 posterView.setScaleType(ImageView.ScaleType.FIT_CENTER);
-                posterView.setAdjustViewBounds(true);
+                posterView.setBackgroundColor(Color.rgb(18, 19, 24));
                 TextView posterStatus = new TextView(this);
-                posterStatus.setTextColor(Color.LTGRAY);
-                posterStatus.setTextSize(11);
+                posterStatus.setTextColor(Color.WHITE);
+                posterStatus.setTextSize(12);
                 posterStatus.setGravity(Gravity.CENTER);
-                posterStatus.setPadding(dp(4), dp(6), dp(4), dp(6));
+                posterStatus.setPadding(dp(4), dp(8), dp(4), dp(8));
                 String posterUrl = data.optString("poster", "");
                 org.json.JSONArray posterCandidates = data.optJSONArray("posterCandidates");
                 int candidateCount = posterCandidates == null ? 0 : posterCandidates.length();
+                String posterLabel = posterUrl.isEmpty() ? "Постер не найден" : "Найден адрес постера";
+                posterStatus.setText(posterLabel + "\\nКандидатов: " + candidateCount);
+                posterColumn.addView(posterStatus, new LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+                posterColumn.addView(posterView, new LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT, dp(260)));
+                LinearLayout.LayoutParams posterParams = new LinearLayout.LayoutParams(dp(200),
+                        ViewGroup.LayoutParams.MATCH_PARENT);
+                posterParams.rightMargin = dp(10);
+                mainArea.addView(posterColumn, posterParams);
                 if (!posterUrl.isEmpty() && (posterUrl.startsWith("https://") || posterUrl.startsWith("http://"))) {
-                    posterStatus.setText("Загрузка постера…");
-                    posterColumn.addView(posterView, new LinearLayout.LayoutParams(
-                            ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
-                    posterColumn.addView(posterStatus);
-                    mainArea.addView(posterColumn, new LinearLayout.LayoutParams(dp(180),
-                            ViewGroup.LayoutParams.MATCH_PARENT));
+                    posterStatus.setText("Загрузка постера…\\nКандидатов: " + candidateCount);
                     new Thread(() -> {
                         try {
                             java.net.HttpURLConnection conn = (java.net.HttpURLConnection)
@@ -534,21 +545,15 @@ public class MainActivity extends Activity {
                                     posterStatus.setText("Постер загружен");
                                 });
                             } else {
-                                runOnUiThread(() -> posterStatus.setText("HTTP " + responseCode + " — постер недоступен"));
+                                runOnUiThread(() -> posterStatus.setText(
+                                        "HTTP " + responseCode + " — загрузка не удалась"));
                             }
                         } catch (Exception e) {
-                            runOnUiThread(() -> posterStatus.setText("Ошибка: " + e.getClass().getSimpleName()));
+                            runOnUiThread(() -> posterStatus.setText(
+                                    "Ошибка: " + e.getClass().getSimpleName()));
                         }
                     }).start();
-                } else {
-                    posterStatus.setText("Постер не найден в разметке (" + candidateCount + " кандидатов)");
-                    posterColumn.addView(posterView, new LinearLayout.LayoutParams(
-                            ViewGroup.LayoutParams.MATCH_PARENT, dp(210)));
-                    posterColumn.addView(posterStatus);
-                    mainArea.addView(posterColumn, new LinearLayout.LayoutParams(dp(180),
-                            ViewGroup.LayoutParams.MATCH_PARENT));
-                }
-                root.addView(tabs);
+                }                root.addView(tabs);
                 mainArea.addView(scroll, new LinearLayout.LayoutParams(0,
                         ViewGroup.LayoutParams.MATCH_PARENT, 1f));
                 root.addView(mainArea, new LinearLayout.LayoutParams(
