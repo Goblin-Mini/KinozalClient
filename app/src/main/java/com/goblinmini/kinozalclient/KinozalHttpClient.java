@@ -117,36 +117,64 @@ public final class KinozalHttpClient {
     }
 
     private String request(String target, String method, String body, boolean formPost) throws Exception {
-        URL url = new URL(target);
-        HttpURLConnection c = (HttpURLConnection) url.openConnection();
-        c.setConnectTimeout(15000);
-        c.setReadTimeout(20000);
-        c.setInstanceFollowRedirects(true);
-        c.setRequestMethod(method);
-        c.setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/120.0 Mobile Safari/537.36");
-        c.setRequestProperty("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8");
-        c.setRequestProperty("Accept-Language", "ru-RU,ru;q=0.9,en;q=0.7");
-        URI uri = URI.create(target);
-        List<String> cookieHeaders = cookies.get(uri, new java.util.HashMap<>()).get("Cookie");
-        if (cookieHeaders != null && !cookieHeaders.isEmpty()) c.setRequestProperty("Cookie", cookieHeaders.get(0));
-        if (formPost) {
-            c.setDoOutput(true);
-            c.setRequestProperty("Content-Type", "application/x-www-form-urlencoded");
-            byte[] data = body.getBytes(StandardCharsets.UTF_8);
-            try (OutputStream out = c.getOutputStream()) { out.write(data); }
+        String current = target;
+        String currentMethod = method;
+        String currentBody = body;
+        for (int redirect = 0; redirect < 9; redirect++) {
+            URL url = new URL(current);
+            HttpURLConnection connection = (HttpURLConnection) url.openConnection();
+            connection.setConnectTimeout(15000);
+            connection.setReadTimeout(20000);
+            connection.setInstanceFollowRedirects(false);
+            connection.setRequestMethod(currentMethod);
+            connection.setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/120.0 Mobile Safari/537.36");
+            connection.setRequestProperty("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8");
+            connection.setRequestProperty("Accept-Language", "ru-RU,ru;q=0.9,en;q=0.7");
+            URI uri = URI.create(current);
+            List<String> cookieHeaders = cookies.get(uri, new java.util.HashMap<>()).get("Cookie");
+            if (cookieHeaders != null && !cookieHeaders.isEmpty()) connection.setRequestProperty("Cookie", cookieHeaders.get(0));
+            if ("POST".equals(currentMethod) && currentBody != null) {
+                connection.setDoOutput(true);
+                connection.setRequestProperty("Content-Type", "application/x-www-form-urlencoded");
+                byte[] data = currentBody.getBytes(StandardCharsets.UTF_8);
+                try (OutputStream out = connection.getOutputStream()) { out.write(data); }
+            }
+            int code = connection.getResponseCode();
+            cookies.put(uri, connection.getHeaderFields());
+            String location = connection.getHeaderField("Location");
+            if (code == 301 || code == 302 || code == 303 || code == 307 || code == 308) {
+                connection.disconnect();
+                if (location == null || redirect == 8) throw new java.io.IOException("Слишком много перенаправлений");
+                current = new URL(url, location).toString();
+                if (code == 303 || ((code == 301 || code == 302) && "POST".equals(currentMethod))) {
+                    currentMethod = "GET";
+                    currentBody = null;
+                }
+                continue;
+            }
+            InputStream input = code >= 400 ? connection.getErrorStream() : connection.getInputStream();
+            String result = input == null ? "" : readAll(input);
+            connection.disconnect();
+            if (code >= 400) throw new java.io.IOException("HTTP " + code + " при запросе Kinozal");
+            return result;
         }
-        int code = c.getResponseCode();
-        cookies.put(uri, c.getHeaderFields());
-        InputStream in = code >= 400 ? c.getErrorStream() : c.getInputStream();
-        String result = in == null ? "" : readAll(in);
-        c.disconnect();
-        return result;
+        throw new java.io.IOException("Не удалось выполнить запрос к Kinozal");
     }
 
     private boolean isLoginPage(String html) {
-        String s = html == null ? "" : html.toLowerCase(java.util.Locale.ROOT);
-        return s.contains("name=\"password\"") && (s.contains("вход") || s.contains("login"))
-                || s.contains("login.php?m=5") || s.contains("takelogin.php");
+        if (html == null || html.isEmpty()) return false;
+        org.jsoup.nodes.Document document = org.jsoup.Jsoup.parse(html);
+        // A link to takelogin.php can appear in ordinary page navigation.
+        // Only classify a page as a login screen when an actual password form exists.
+        org.jsoup.select.Elements passwordForms = document.select("form:has(input[type=password])");
+        if (passwordForms.isEmpty()) return false;
+        for (org.jsoup.nodes.Element form : passwordForms) {
+            String action = form.attr("action").toLowerCase(java.util.Locale.ROOT);
+            String text = form.text().toLowerCase(java.util.Locale.ROOT);
+            if (action.contains("login") || text.contains("войти") || text.contains("вход")
+                    || text.contains("login")) return true;
+        }
+        return false;
     }
 
     private void persistCookies() throws Exception {
