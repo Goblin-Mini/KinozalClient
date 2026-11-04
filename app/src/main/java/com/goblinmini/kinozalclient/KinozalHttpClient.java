@@ -135,6 +135,41 @@ public final class KinozalHttpClient {
         persistCookies();
     }
 
+    private static final String SAVED_LOGIN_KEY = "encrypted_saved_login";
+    private static final String SAVED_PASSWORD_KEY = "encrypted_saved_password";
+
+    /** Save credentials encrypted with the same Android Keystore AES-GCM key. */
+    public synchronized void saveCredentials(String username, String password) throws Exception {
+        if (username == null || username.trim().isEmpty() || password == null || password.isEmpty()) {
+            throw new IllegalArgumentException("Логин и пароль не могут быть пустыми");
+        }
+        SharedPreferences prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+        String login = Base64.encodeToString(encrypt(username.trim().getBytes(StandardCharsets.UTF_8)), Base64.NO_WRAP);
+        String pass = Base64.encodeToString(encrypt(password.getBytes(StandardCharsets.UTF_8)), Base64.NO_WRAP);
+        prefs.edit().putString(SAVED_LOGIN_KEY, login).putString(SAVED_PASSWORD_KEY, pass).apply();
+    }
+
+    /** Returns decrypted saved credentials, or null when none were saved. */
+    public synchronized String[] getSavedCredentials() {
+        try {
+            SharedPreferences prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+            String login = prefs.getString(SAVED_LOGIN_KEY, null);
+            String pass = prefs.getString(SAVED_PASSWORD_KEY, null);
+            if (login == null || pass == null) return null;
+            String username = new String(decrypt(Base64.decode(login, Base64.NO_WRAP)), StandardCharsets.UTF_8);
+            String password = new String(decrypt(Base64.decode(pass, Base64.NO_WRAP)), StandardCharsets.UTF_8);
+            if (username.isEmpty() || password.isEmpty()) return null;
+            return new String[]{username, password};
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    public synchronized void clearSavedCredentials() {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+                .remove(SAVED_LOGIN_KEY).remove(SAVED_PASSWORD_KEY).apply();
+    }
+
     public synchronized void logout() {
         cookies.getCookieStore().removeAll();
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().remove(COOKIE_KEY).apply();
