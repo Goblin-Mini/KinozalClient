@@ -260,34 +260,22 @@ public class MainActivity extends Activity {
 
     private void showCategories() {
         if (webView == null) return;
+        // On browse.php the first select is the "Выбор раздела" filter.
+        // The following selects are format, year, search filter and sorting.
         String script = "(function(){"
-                + "var selects=Array.from(document.querySelectorAll('select'));"
-                + "var data=selects.map(function(s){"
-                + "var row=s.closest('tr,fieldset,div')||s.parentElement;"
-                + "var label=(s.getAttribute('aria-label')||s.getAttribute('name')||s.id||'').trim();"
-                + "if(s.labels&&s.labels.length)label=s.labels[0].innerText.trim()+' '+label;"
-                + "var context=row?(row.innerText||row.textContent||'').replace(/\\s+/g,' ').trim():'';"
-                + "return {name:s.name||'',id:s.id||'',label:label,context:context,"
-                + "options:Array.from(s.options).map(function(o){return {text:(o.textContent||'').trim(),value:o.value};})"
-                + ".filter(function(o){return o.text&&o.value!=='';})};"
-                + "});"
-                + "var chosen=data.find(function(x){return /(?:cat|category|section|razdel)/i.test(x.name+' '+x.id+' '+x.label+' '+x.context);});"
-                + "if(!chosen)chosen=data.find(function(x){return x.options.length>1;});"
-                + "return JSON.stringify({selectCount:selects.length,chosen:chosen||null,all:data});"
+                + "var select=document.querySelector('select');"
+                + "if(!select)return JSON.stringify([]);"
+                + "return JSON.stringify(Array.from(select.options).map(function(o){"
+                + "return {text:(o.textContent||'').replace(/\\s+/g,' ').trim(),value:o.value||''};"
+                + "}).filter(function(o){return o.text.length>0;}));"
                 + "})()";
         webView.evaluateJavascript(script, value -> {
             try {
                 Object decoded = new org.json.JSONTokener(value).nextValue();
-                org.json.JSONObject result = new org.json.JSONObject(String.valueOf(decoded));
-                org.json.JSONObject chosen = result.optJSONObject("chosen");
-                if (chosen == null) {
-                    Toast.makeText(this, "На странице не найден выпадающий список разделов. Сначала открой «Раздачи».",
-                            Toast.LENGTH_LONG).show();
-                    return;
-                }
-                org.json.JSONArray options = chosen.optJSONArray("options");
-                if (options == null || options.length() == 0) {
-                    Toast.makeText(this, "В списке разделов нет доступных пунктов.",
+                org.json.JSONArray options = new org.json.JSONArray(String.valueOf(decoded));
+                if (options.length() == 0) {
+                    Toast.makeText(this,
+                            "Не удалось прочитать первый фильтр «Выбор раздела». Открой страницу «Раздачи» и повтори.",
                             Toast.LENGTH_LONG).show();
                     return;
                 }
@@ -297,12 +285,12 @@ public class MainActivity extends Activity {
                     if (!label.isEmpty()) labels.add(label);
                 }
                 new AlertDialog.Builder(this)
-                        .setTitle("Разделы Kinozal (" + labels.size() + ")")
+                        .setTitle("Выбор раздела (" + labels.size() + ")")
                         .setItems(labels.toArray(new String[0]), (dialog, which) -> { })
                         .setNegativeButton("Закрыть", null)
                         .show();
             } catch (Exception e) {
-                Toast.makeText(this, "Не удалось прочитать список разделов Kinozal",
+                Toast.makeText(this, "Не удалось прочитать категории Kinozal",
                         Toast.LENGTH_LONG).show();
             }
         });
