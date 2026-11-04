@@ -410,6 +410,75 @@ public class MainActivity extends Activity {
         hint.setBackgroundColor(Color.WHITE);
         hint.setPadding(dp(14), dp(10), dp(14), dp(10));
         container.addView(hint, new LinearLayout.LayoutParams(-1, -2));
+
+        // Native fields make login entry reliable on Android TV devices
+        // whose WebView fields do not summon the on-screen keyboard.
+        LinearLayout credentials = new LinearLayout(this);
+        credentials.setOrientation(LinearLayout.HORIZONTAL);
+        credentials.setPadding(dp(10), dp(4), dp(10), dp(4));
+        EditText loginInput = new EditText(this);
+        loginInput.setSingleLine(true);
+        loginInput.setTextColor(Color.WHITE);
+        loginInput.setHintTextColor(TEAL);
+        loginInput.setHint("Логин");
+        loginInput.setTextSize(14);
+        loginInput.setFocusable(true);
+        loginInput.setFocusableInTouchMode(true);
+        loginInput.setInputType(android.text.InputType.TYPE_CLASS_TEXT
+                | android.text.InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD);
+        EditText passwordInput = new EditText(this);
+        passwordInput.setSingleLine(true);
+        passwordInput.setTextColor(Color.WHITE);
+        passwordInput.setHintTextColor(TEAL);
+        passwordInput.setHint("Пароль");
+        passwordInput.setTextSize(14);
+        passwordInput.setFocusable(true);
+        passwordInput.setFocusableInTouchMode(true);
+        passwordInput.setInputType(android.text.InputType.TYPE_CLASS_TEXT
+                | android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD);
+        credentials.addView(loginInput, new LinearLayout.LayoutParams(0, dp(48), 1f));
+        credentials.addView(passwordInput, new LinearLayout.LayoutParams(0, dp(48), 1f));
+        Button fillLogin = button("Вставить в форму");
+        credentials.addView(fillLogin, new LinearLayout.LayoutParams(dp(170), dp(48)));
+        container.addView(credentials, new LinearLayout.LayoutParams(-1, -2));
+        fillLogin.setOnClickListener(v -> {
+            String userValue = loginInput.getText().toString();
+            String passValue = passwordInput.getText().toString();
+            if (userValue.isEmpty() || passValue.isEmpty()) {
+                showMessage("Введите логин и пароль в поля над страницей.");
+                return;
+            }
+            String script = "(function(){"
+                    + "var u=document.querySelector('input[type=text],input[type=email],input:not([type])');"
+                    + "var p=document.querySelector('input[type=password]');"
+                    + "if(!u||!p)return 'Поля входа на странице не найдены';"
+                    + "u.value=" + org.json.JSONObject.quote(userValue) + ";"
+                    + "p.value=" + org.json.JSONObject.quote(passValue) + ";"
+                    + "u.dispatchEvent(new Event('input',{bubbles:true}));"
+                    + "p.dispatchEvent(new Event('input',{bubbles:true}));"
+                    + "u.dispatchEvent(new Event('change',{bubbles:true}));"
+                    + "p.dispatchEvent(new Event('change',{bubbles:true}));"
+                    + "return 'ok';})()";
+            web.evaluateJavascript(script, result -> {
+                if (result != null && result.contains("не найдены")) {
+                    showMessage("Поля входа на странице не найдены.");
+                } else {
+                    showMessage("Данные вставлены. Нажмите «Войти» на странице Kinozal.");
+                }
+            });
+            android.view.inputmethod.InputMethodManager imm =
+                    (android.view.inputmethod.InputMethodManager)getSystemService(INPUT_METHOD_SERVICE);
+            imm.hideSoftInputFromWindow(loginInput.getWindowToken(), 0);
+            imm.hideSoftInputFromWindow(passwordInput.getWindowToken(), 0);
+        });
+        android.view.inputmethod.InputMethodManager imm =
+                (android.view.inputmethod.InputMethodManager)getSystemService(INPUT_METHOD_SERVICE);
+        View.OnFocusChangeListener showKeyboard = (v, focused) -> {
+            if (focused) v.postDelayed(() -> imm.showSoftInput(v,
+                    android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT), 200);
+        };
+        loginInput.setOnFocusChangeListener(showKeyboard);
+        passwordInput.setOnFocusChangeListener(showKeyboard);
         container.addView(web, new LinearLayout.LayoutParams(-1, 0, 1f));
 
         web.setWebChromeClient(new WebChromeClient() {
@@ -462,7 +531,11 @@ public class MainActivity extends Activity {
             android.util.DisplayMetrics metrics = getResources().getDisplayMetrics();
             int width = Math.min((int)(metrics.widthPixels * 0.94f), dp(1200));
             int height = (int)(metrics.heightPixels * 0.86f);
-            if (dialog.getWindow() != null) dialog.getWindow().setLayout(width, height);
+            if (dialog.getWindow() != null) {
+                dialog.getWindow().setLayout(width, height);
+                dialog.getWindow().setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE
+                        | android.view.WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN);
+            }
             dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
                 cookies.flush();
                 String pageUrl = web.getUrl();
