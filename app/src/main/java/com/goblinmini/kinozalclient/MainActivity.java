@@ -234,7 +234,7 @@ public class MainActivity extends Activity {
                 address.setText(url);
                 if (showSectionResultsWhenLoaded) {
                     showSectionResultsWhenLoaded = false;
-                    view.postDelayed(() -> showNativeResults(), 250);
+                    view.postDelayed(() -> showNativeResults(), 900);
                 }
             }
         });
