@@ -437,7 +437,6 @@ public class MainActivity extends Activity {
                             ViewGroup.LayoutParams.MATCH_PARENT,
                             ViewGroup.LayoutParams.MATCH_PARENT);
                 }
-                watchButton.requestFocus();
             } catch (Exception e) {
                 Toast.makeText(this, "Не удалось обработать результаты Kinozal",
                         Toast.LENGTH_LONG).show();
