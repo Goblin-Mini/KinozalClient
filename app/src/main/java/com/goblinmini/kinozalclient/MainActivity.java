@@ -177,12 +177,12 @@ public class MainActivity extends Activity {
         sidebar.addView(menuScroll, new LinearLayout.LayoutParams(-1, 0, 1));
         addMenu("Поиск", () -> focusSearch());
         addMenu("Все раздачи", () -> load("browse.php", "Все раздачи"));
-        addMenu("Фильмы", () -> categories());
-        addMenu("Сериалы", () -> categories());
-        addMenu("Наше кино", () -> categories());
-        addMenu("Зарубежные сериалы", () -> categories());
-        addMenu("Российские сериалы", () -> categories());
-        addMenu("Телевидение", () -> categories());
+        addMenu("Фильмы", () -> categories("Все фильмы"));
+        addMenu("Сериалы", () -> categories("Все сериалы"));
+        addMenu("Наше кино", () -> categories("Наше кино"));
+        addMenu("Зарубежные сериалы", () -> categories("Сериал - Буржуйский"));
+        addMenu("Российские сериалы", () -> categories("Сериал - Русский"));
+        addMenu("Телевидение", () -> categories("Телевидение"));
         addMenu("Спорт", () -> categories());
         addMenu("Избранное", () -> showFavorites());
         addMenu("Авторизация", () -> showLogin());
@@ -371,7 +371,9 @@ public class MainActivity extends Activity {
         catch (Exception e) { showMessage("Ошибка поиска"); }
     }
 
-    private void categories() {
+    private void categories() { categories(null); }
+
+    private void categories(String preferredTitle) {
         // Reuse the catalogue response instead of requesting browse.php again.
         // This avoids unnecessary duplicate traffic and reduces HTTP 429 responses.
         String cached = lastHtml;
@@ -461,6 +463,22 @@ public class MainActivity extends Activity {
                     if (found.isEmpty()) {
                         showMessage("На странице зеркала не найдены ссылки разделов Kinozal. Проверьте выбранное зеркало и авторизацию.");
                         return;
+                    }
+                    if (preferredTitle != null && !preferredTitle.trim().isEmpty()) {
+                        String wanted = preferredTitle.trim().replaceAll("\\s+", " ");
+                        Category match = null;
+                        for (Category candidate : found) {
+                            String actual = candidate.title.trim().replaceAll("\\s+", " ");
+                            if (actual.equalsIgnoreCase(wanted)) {
+                                match = candidate;
+                                break;
+                            }
+                        }
+                        if (match != null) {
+                            if ("POST".equals(match.method)) load(match.href, match.title, match.body);
+                            else load(match.href, match.title);
+                            return;
+                        }
                     }
                     String[] labels = new String[found.size()];
                     for (int i = 0; i < found.size(); i++) labels[i] = found.get(i).title;
