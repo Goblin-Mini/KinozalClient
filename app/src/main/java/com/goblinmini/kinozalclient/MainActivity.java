@@ -464,8 +464,7 @@ public class MainActivity extends Activity {
                 + "Array.from(document.querySelectorAll('[style*=background]')).forEach(function(el){var bg=getComputedStyle(el).backgroundImage||el.style.backgroundImage,m=bg.match(/url\\([\\\"']?(.*?)[\\\"']?\\)/i);if(m)addImage(m[1],el.clientWidth||0,el.clientHeight||0,el.className||'');});"
                 + "candidates.sort(function(a,b){return b.score-a.score||b.area-a.area;});var unique=[],seenUrls={};candidates.forEach(function(c){if(!seenUrls[c.url]){seenUrls[c.url]=1;unique.push(c);}});"
                 + "var poster=unique.length?unique[0].url:'';"
-                + "var torrentLinks=[];Array.from(document.querySelectorAll('a[href]')).forEach(function(a){var h=a.href||'',t=(a.innerText||a.textContent||'').trim(),raw=(a.getAttribute('href')||'');if(/^magnet:/i.test(raw)||/\\.torrent(?:[?#]|$)/i.test(h)||/(скачать|download).*(торрент|torrent)|(торрент|torrent).*(скачать|download)/i.test(t+' '+a.className)){var score=/^magnet:/i.test(raw)?100:0;if(/\\.torrent(?:[?#]|$)/i.test(h))score+=80;if(/скачать торрент|download torrent/i.test(t))score+=30;if(/download/i.test(h))score+=10;torrentLinks.push({url:h,score:score});}});torrentLinks.sort(function(a,b){return b.score-a.score;});"
-                + "return JSON.stringify({title:document.title||'',fields:fields,poster:poster,posterCandidates:unique.slice(0,8).map(function(c){return c.url;}),torrentLink:torrentLinks.length?torrentLinks[0].url:''});})()";
+                + "var torrentLinks=[];function addTorrent(u,t,meta){if(!u)return;try{u=new URL(u,location.href).href;}catch(e){return;}if(!/^https?:|^magnet:/i.test(u))return;var x=(u+" "+(t||"")+" "+(meta||"")).toLowerCase(),score=0;if(/^magnet:/i.test(u))score+=200;if(/\.torrent(?:[?#]|$)/i.test(u))score+=160;if(/(?:get_srv_details|download|torrent|\bget\b|\bdl\b)/i.test(x))score+=70;if(/скачать|download|torrent|торрент/i.test(x))score+=35;if(/download|torrent|tor|dl/i.test(meta||""))score+=15;if(score>0)torrentLinks.push({url:u,score:score});}Array.from(document.querySelectorAll("a[href]")).forEach(function(a){var h=a.href||"",raw=a.getAttribute("href")||"",t=(a.innerText||a.textContent||"").trim(),img=a.querySelector("img"),meta=[a.title,a.className,a.id,a.getAttribute("rel"),img?(img.alt+" "+img.title):""].join(" ");addTorrent(/^magnet:/i.test(raw)?raw:h,t,meta);var oc=a.getAttribute("onclick")||"";var m=oc.match(/(?:location(?:\.href)?\s*=|open\s*\()\s*['"]([^'"]+)/i);if(m)addTorrent(m[1],t,meta+" "+oc);});Array.from(document.querySelectorAll("[data-href],[data-url],[onclick]")).forEach(function(el){addTorrent(el.getAttribute("data-href")||el.getAttribute("data-url"),el.innerText||el.textContent,[el.className,el.id,el.getAttribute("onclick")].join(" "));});torrentLinks.sort(function(a,b){return b.score-a.score;});return JSON.stringify({title:document.title||'',fields:fields,poster:poster,posterCandidates:unique.slice(0,8).map(function(c){return c.url;}),torrentLink:torrentLinks.length?torrentLinks[0].url:''});})()";
         webView.evaluateJavascript(script, value -> {
             try {
                 Object decoded = new org.json.JSONTokener(value).nextValue();
@@ -493,15 +492,10 @@ public class MainActivity extends Activity {
                 LinearLayout posterColumn = new LinearLayout(this);
                 posterColumn.setOrientation(LinearLayout.VERTICAL);
                 posterColumn.setGravity(Gravity.TOP | Gravity.CENTER_HORIZONTAL);
-                posterColumn.setPadding(dp(8), dp(8), dp(8), dp(8));
-                GradientDrawable posterBackground = new GradientDrawable();
-                posterBackground.setColor(Color.rgb(24, 25, 32));
-                posterBackground.setCornerRadius(dp(10));
-                posterBackground.setStroke(dp(1), accent);
-                posterColumn.setBackground(posterBackground);
+                posterColumn.setPadding(0, 0, 0, 0);
                 ImageView posterView = new ImageView(this);
                 posterView.setScaleType(ImageView.ScaleType.FIT_CENTER);
-                posterView.setBackgroundColor(Color.rgb(18, 19, 24));
+                posterView.setBackgroundColor(Color.TRANSPARENT);
                 TextView posterStatus = new TextView(this);
                 posterStatus.setTextColor(Color.WHITE);
                 posterStatus.setTextSize(12);
@@ -512,8 +506,6 @@ public class MainActivity extends Activity {
                 int candidateCount = posterCandidates == null ? 0 : posterCandidates.length();
                 String posterLabel = posterUrl.isEmpty() ? "Постер не найден" : "Найден адрес постера";
                 posterStatus.setText(posterLabel + "\\nКандидатов: " + candidateCount);
-                posterColumn.addView(posterStatus, new LinearLayout.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
                 posterColumn.addView(posterView, new LinearLayout.LayoutParams(
                         ViewGroup.LayoutParams.MATCH_PARENT, dp(260)));
                 LinearLayout.LayoutParams posterParams = new LinearLayout.LayoutParams(dp(200),
@@ -521,7 +513,6 @@ public class MainActivity extends Activity {
                 posterParams.rightMargin = dp(10);
                 mainArea.addView(posterColumn, posterParams);
                 if (!posterUrl.isEmpty() && (posterUrl.startsWith("https://") || posterUrl.startsWith("http://"))) {
-                    posterStatus.setText("Загрузка постера…\\nКандидатов: " + candidateCount);
                     // Read WebView and cookie values on the UI thread before starting the worker.
                     final String posterUserAgent = webView.getSettings().getUserAgentString();
                     final String posterPageUrl = webView.getUrl();
@@ -547,15 +538,10 @@ public class MainActivity extends Activity {
                             if (bitmap != null) {
                                 runOnUiThread(() -> {
                                     posterView.setImageBitmap(bitmap);
-                                    posterStatus.setText("Постер загружен");
                                 });
                             } else {
-                                runOnUiThread(() -> posterStatus.setText(
-                                        "HTTP " + responseCode + " — загрузка не удалась"));
                             }
                         } catch (Exception e) {
-                            runOnUiThread(() -> posterStatus.setText(
-                                    "Ошибка: " + e.getClass().getSimpleName()));
                         }
                     }).start();
                 }
@@ -683,6 +669,30 @@ public class MainActivity extends Activity {
                     }
                     scroll.scrollTo(0, 0);
                 };
+                Button watchButton = makeButton("Просмотр");
+                watchButton.setTextSize(12);
+                watchButton.setMinHeight(dp(40));
+                watchButton.setPadding(dp(10), dp(5), dp(10), dp(5));
+                watchButton.setOnClickListener(v -> {
+                    String torrentLink = data.optString("torrentLink", "").trim();
+                    if (torrentLink.isEmpty()) {
+                        Toast.makeText(this, "Не удалось определить ссылку скачивания на странице раздачи",
+                                Toast.LENGTH_LONG).show();
+                        return;
+                    }
+                    try {
+                        Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(torrentLink));
+                        intent.setPackage("ru.yourok.torrserve");
+                        startActivity(intent);
+                    } catch (android.content.ActivityNotFoundException e) {
+                        Toast.makeText(this, "TorrServe MatriX не установлен или не принимает эту ссылку",
+                                Toast.LENGTH_LONG).show();
+                    } catch (Exception e) {
+                        Toast.makeText(this, "Не удалось передать торрент: " + e.getClass().getSimpleName(),
+                                Toast.LENGTH_LONG).show();
+                    }
+                });
+                tabs.addView(watchButton, spacedButtonParams());
                 for (int n = 0; n < groups.length; n++) {
                     final int index = n;
                     Button tab = makeButton(groups[n][0]);
@@ -700,36 +710,9 @@ public class MainActivity extends Activity {
                 AlertDialog dialog = new AlertDialog.Builder(this)
                         .setTitle("Подробности раздачи")
                         .setView(root)
-                        .setPositiveButton("Просмотр", (d, w) -> { })
-                        .setNeutralButton("Открыть страницу сайта", (d, w) -> { })
                         .setNegativeButton("Закрыть", null)
                         .create();
                 dialog.show();
-                dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
-                    String torrentLink = data.optString("torrentLink", "").trim();
-                    if (torrentLink.isEmpty()) {
-                        Toast.makeText(this, "Ссылка на торрент не найдена на странице",
-                                Toast.LENGTH_LONG).show();
-                        return;
-                    }
-                    try {
-                        Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(torrentLink));
-                        intent.setPackage("ru.yourok.torrserve");
-                        startActivity(intent);
-                        dialog.dismiss();
-                    } catch (android.content.ActivityNotFoundException e) {
-                        Toast.makeText(this, "TorrServe MatriX не установлен или не принимает эту ссылку",
-                                Toast.LENGTH_LONG).show();
-                    } catch (Exception e) {
-                        Toast.makeText(this, "Не удалось передать торрент: " + e.getClass().getSimpleName(),
-                                Toast.LENGTH_LONG).show();
-                    }
-                });
-                dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener(v -> {
-                    String pageUrl = webView.getUrl();
-                    if (pageUrl != null) webView.loadUrl(pageUrl);
-                    dialog.dismiss();
-                });
                 if (dialog.getWindow() != null) {
                     dialog.getWindow().setLayout(
                             ViewGroup.LayoutParams.MATCH_PARENT,
