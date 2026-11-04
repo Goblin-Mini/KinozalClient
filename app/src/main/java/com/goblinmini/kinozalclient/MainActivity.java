@@ -440,55 +440,80 @@ public class MainActivity extends Activity {
         });
     }
 
-    // First native detail view: reads the current torrent detail page's visible text.
+    // Build a structured first-pass detail view from labeled fields on the torrent page.
     private void showNativeDetails() {
         if (webView == null) return;
         String script = "(function(){"
-                + "var clean=function(e){return (e.innerText||e.textContent||'').replace(/\\s+/g,' ').trim();};"
-                + "var title=document.title||'';"
-                + "var candidates=Array.from(document.querySelectorAll('td,div,table,section,article'));"
-                + "var best='',score=0;"
-                + "candidates.forEach(function(e){var t=clean(e);if(t.length<100||t.length>14000)return;"
-                + "var n=(t.match(/Название:|Год выпуска:|Жанр:|О фильме:|Качество:|Видео:|Аудио:/gi)||[]).length;"
-                + "var v=n*100+Math.min(t.length,3000)/100;if(v>score){score=v;best=t;}});"
-                + "if(!best)best=clean(document.body).slice(0,9000);"
-                + "var imgs=Array.from(document.images).filter(function(i){return i.naturalWidth>100&&i.naturalHeight>140;})"
-                + ".sort(function(a,b){return (b.naturalWidth*b.naturalHeight)-(a.naturalWidth*a.naturalHeight);});"
-                + "return JSON.stringify({title:title,text:best,poster:imgs.length?imgs[0].src:''});})()";
+                + "var body=document.body?document.body.innerText:'';"
+                + "body=body.replace(/\\r/g,'').replace(/[ \\t]+/g,' ').replace(/\\n{2,}/g,'\\n').trim();"
+                + "var labels=['Название','Оригинальное название','Год выпуска','Жанр','Выпущено','Режиссер','В ролях','О фильме','Характеристика','Вес','Залит','Обновлен','Раздают','Скачивают','Скачали','Список файлов','Комментариев','IMDb','Кинопоиск','Оценка'];"
+                + "var positions=[];"
+                + "labels.forEach(function(label){"
+                + "var re=new RegExp('(?:^|[\\\\n ])'+label+'\\\\s*:', 'gi');"
+                + "var m;while((m=re.exec(body))!==null){var p=m.index+(m[0].length-label.length-1);positions.push({label:label,start:p,valueStart:re.lastIndex});}"
+                + "});"
+                + "positions.sort(function(a,b){return a.start-b.start;});"
+                + "var fields={},seen={};"
+                + "positions.forEach(function(p,i){if(seen[p.label])return;seen[p.label]=1;"
+                + "var next=body.length;for(var j=i+1;j<positions.length;j++){if(positions[j].start>p.valueStart){next=positions[j].start;break;}}"
+                + "var v=body.slice(p.valueStart,next).replace(/^[\\s:]+|[\\s]+$/g,'').trim();"
+                + "if(v.length>0)fields[p.label]=v.slice(0,3500);});"
+                + "return JSON.stringify({title:document.title||'',fields:fields});})()";
         webView.evaluateJavascript(script, value -> {
             try {
                 Object decoded = new org.json.JSONTokener(value).nextValue();
                 org.json.JSONObject data = new org.json.JSONObject(String.valueOf(decoded));
-                String pageTitle = data.optString("title", "Подробности раздачи");
-                String text = data.optString("text", "").trim();
-                if (text.isEmpty()) {
-                    Toast.makeText(this, "Не удалось извлечь описание этой раздачи",
+                org.json.JSONObject fields = data.optJSONObject("fields");
+                if (fields == null || fields.length() == 0) {
+                    Toast.makeText(this, "Не удалось найти подписанные поля на странице раздачи",
                             Toast.LENGTH_LONG).show();
                     return;
                 }
-                TextView contentText = new TextView(this);
-                contentText.setText(text);
-                contentText.setTextColor(Color.WHITE);
-                contentText.setTextSize(16);
-                contentText.setPadding(dp(18), dp(14), dp(18), dp(18));
                 android.widget.ScrollView scroll = new android.widget.ScrollView(this);
-                scroll.addView(contentText);
+                LinearLayout content = new LinearLayout(this);
+                content.setOrientation(LinearLayout.VERTICAL);
+                content.setPadding(dp(16), dp(12), dp(16), dp(16));
+                String[] order = {"Название","Оригинальное название","Год выпуска","Жанр",
+                        "Выпущено","Режиссер","В ролях","О фильме","Характеристика","Вес",
+                        "Залит","Обновлен","Раздают","Скачивают","Скачали","Список файлов",
+                        "Комментариев","IMDb","Кинопоиск","Оценка"};
+                for (String key : order) {
+                    String valueText = fields.optString(key, "").trim();
+                    if (valueText.isEmpty()) continue;
+                    TextView label = new TextView(this);
+                    label.setText(key);
+                    label.setTextColor(accent);
+                    label.setTextSize(14);
+                    label.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+                    label.setPadding(0, dp(10), 0, dp(2));
+                    TextView valueView = new TextView(this);
+                    valueView.setText(valueText);
+                    valueView.setTextColor(Color.WHITE);
+                    valueView.setTextSize(16);
+                    valueView.setPadding(0, 0, 0, dp(6));
+                    content.addView(label);
+                    content.addView(valueView);
+                    View divider = new View(this);
+                    divider.setBackgroundColor(Color.rgb(65, 67, 82));
+                    content.addView(divider, new LinearLayout.LayoutParams(
+                            ViewGroup.LayoutParams.MATCH_PARENT, dp(1)));
+                }
+                scroll.addView(content);
                 AlertDialog dialog = new AlertDialog.Builder(this)
                         .setTitle("Подробности раздачи")
                         .setView(scroll)
                         .setPositiveButton("Открыть страницу сайта", (d, w) -> { })
                         .setNegativeButton("Закрыть", null)
                         .create();
-                dialog.setOnShowListener(d -> dialog.getButton(AlertDialog.BUTTON_POSITIVE)
-                        .setOnClickListener(v -> dialog.dismiss()));
                 dialog.show();
+                dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> dialog.dismiss());
                 if (dialog.getWindow() != null) {
                     dialog.getWindow().setLayout(
                             ViewGroup.LayoutParams.MATCH_PARENT,
                             ViewGroup.LayoutParams.MATCH_PARENT);
                 }
             } catch (Exception e) {
-                Toast.makeText(this, "Не удалось прочитать подробности раздачи",
+                Toast.makeText(this, "Не удалось обработать сведения о раздаче",
                         Toast.LENGTH_LONG).show();
             }
         });
