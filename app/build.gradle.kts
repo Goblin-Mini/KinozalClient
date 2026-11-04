@@ -10,8 +10,8 @@ android {
         applicationId = "com.goblinmini.kinozalclient"
         minSdk = 23
         targetSdk = 28
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = 2
+        versionName = "0.2.0-native"
     }
 
     compileOptions {
@@ -24,4 +24,8 @@ android {
             isMinifyEnabled = false
         }
     }
+}
+
+dependencies {
+    implementation("org.jsoup:jsoup:1.18.3")
 }
