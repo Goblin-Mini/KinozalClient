@@ -173,18 +173,25 @@ public class MainActivity extends Activity {
         shape.setColor(panel);
         shape.setCornerRadius(dp(10));
         button.setBackground(shape);
+        // Remove the platform Button tint so our custom focus colors stay visible.
+        button.setBackgroundTintList(null);
         button.setFocusable(true);
         button.setFocusableInTouchMode(true);
         button.setMinHeight(dp(44));
+        button.setElevation(dp(2));
         button.setOnFocusChangeListener((view, hasFocus) -> {
-            GradientDrawable focused = new GradientDrawable();
-            focused.setColor(hasFocus ? Color.rgb(57, 53, 83) : panel);
-            focused.setCornerRadius(dp(10));
-            focused.setStroke(dp(hasFocus ? 2 : 1),
-                    hasFocus ? accent : Color.rgb(55, 57, 68));
-            view.setBackground(focused);
-            view.setScaleX(hasFocus ? 1.04f : 1.0f);
-            view.setScaleY(hasFocus ? 1.04f : 1.0f);
+            GradientDrawable stateBackground = new GradientDrawable();
+            stateBackground.setColor(hasFocus
+                    ? Color.rgb(91, 75, 170)
+                    : panel);
+            stateBackground.setCornerRadius(dp(10));
+            stateBackground.setStroke(dp(hasFocus ? 3 : 1),
+                    hasFocus ? Color.WHITE : Color.rgb(75, 77, 91));
+            view.setBackground(stateBackground);
+            view.setElevation(dp(hasFocus ? 10 : 2));
+            view.setScaleX(hasFocus ? 1.06f : 1.0f);
+            view.setScaleY(hasFocus ? 1.06f : 1.0f);
+            button.setTextColor(Color.WHITE);
         });
         return button;
     }
