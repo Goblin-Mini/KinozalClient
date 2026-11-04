@@ -168,42 +168,15 @@ public class MainActivity extends Activity {
         searchButton.setNextFocusUpId(refresh.getId());
         root.addView(catalogBar);
 
-        LinearLayout sectionsBar = new LinearLayout(this);
-        sectionsBar.setGravity(Gravity.CENTER_VERTICAL);
-        sectionsBar.setOrientation(LinearLayout.HORIZONTAL);
-        sectionsBar.setPadding(0, dp(2), 0, dp(4));
-
         Button torrentsSection = makeButton("Раздачи");
-        Button topSection = makeButton("Топ раздач");
-        Button newSection = makeButton("Новинки кино");
         torrentsSection.setId(View.generateViewId());
-        topSection.setId(View.generateViewId());
-        newSection.setId(View.generateViewId());
         torrentsSection.setOnClickListener(v -> openSection("browse.php"));
-        topSection.setOnClickListener(v -> openSection("top.php"));
-        newSection.setOnClickListener(v -> openSection("novinki.php"));
-
-        LinearLayout.LayoutParams sectionParams = new LinearLayout.LayoutParams(0, dp(42), 1);
-        sectionsBar.addView(torrentsSection, sectionParams);
-        LinearLayout.LayoutParams topParams = new LinearLayout.LayoutParams(0, dp(42), 1);
-        topParams.leftMargin = dp(6);
-        sectionsBar.addView(topSection, topParams);
-        LinearLayout.LayoutParams newParams = new LinearLayout.LayoutParams(0, dp(42), 1);
-        newParams.leftMargin = dp(6);
-        sectionsBar.addView(newSection, newParams);
-
-        torrentsSection.setNextFocusRightId(topSection.getId());
-        topSection.setNextFocusLeftId(torrentsSection.getId());
-        topSection.setNextFocusRightId(newSection.getId());
-        newSection.setNextFocusLeftId(topSection.getId());
         categoriesButton.setNextFocusDownId(torrentsSection.getId());
         searchInput.setNextFocusDownId(torrentsSection.getId());
         searchButton.setNextFocusDownId(torrentsSection.getId());
         torrentsSection.setNextFocusUpId(searchButton.getId());
-        topSection.setNextFocusUpId(searchButton.getId());
-        newSection.setNextFocusUpId(searchButton.getId());
-
-        root.addView(sectionsBar);
+        root.addView(torrentsSection, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, dp(42)));
 
         address = new TextView(this);
         address.setTextColor(Color.LTGRAY);
