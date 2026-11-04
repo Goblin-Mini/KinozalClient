@@ -72,7 +72,7 @@ public class MainActivity extends Activity {
         mirror = getSharedPreferences(PREFS, MODE_PRIVATE).getString("mirror", MIRRORS[0]);
         client = new KinozalHttpClient(this, mirror);
         buildShell();
-        load("browse.php", "Все раздачи");
+        restoreSessionAndLoad();
     }
 
     private int dp(float n) { return (int)(n * getResources().getDisplayMetrics().density + .5f); }
@@ -214,6 +214,35 @@ public class MainActivity extends Activity {
     private void focusSearch() { search.requestFocus(); }
     private void showMessage(String message) { Toast.makeText(this, message, Toast.LENGTH_LONG).show(); }
 
+    private void restoreSessionAndLoad() {
+        String[] saved = client.getSavedCredentials();
+        if (saved == null) {
+            load("browse.php", "Все раздачи");
+            return;
+        }
+        progress.setVisibility(View.VISIBLE);
+        status.setText("Проверка авторизации…");
+        io.execute(() -> {
+            try {
+                // Reuse a valid persisted cookie session; only log in again if it expired.
+                if (!client.isAuthenticated()) {
+                    client.login(saved[0], saved[1]);
+                }
+                runOnUiThread(() -> {
+                    status.setText("Авторизован");
+                    load("browse.php", "Все раздачи");
+                });
+            } catch (Exception e) {
+                runOnUiThread(() -> {
+                    progress.setVisibility(View.GONE);
+                    status.setText("Требуется вход");
+                    addEmpty("Не удалось автоматически восстановить вход: " + safe(e.getMessage()));
+                    showNativeLoginForm(saved);
+                });
+            }
+        });
+    }
+
     private void load(String path, String title) {
         currentPath = path; currentTitle = title; heading.setText(title);
         progress.setVisibility(View.VISIBLE); list.removeAllViews();
@@ -281,17 +310,37 @@ public class MainActivity extends Activity {
     }
 
     private void renderTorrents(List<Torrent> items) {
-        TextView header = text("  НАЗВАНИЕ РАЗДАЧИ                                      РАЗМЕР       СИДЫ   ЛИЧИ", 11, TEAL, true);
-        header.setPadding(dp(12), dp(8), dp(12), dp(8)); list.addView(header);
+        LinearLayout header = new LinearLayout(this);
+        header.setGravity(Gravity.CENTER_VERTICAL);
+        header.setPadding(dp(14), dp(8), dp(14), dp(8));
+        TextView titleHeader = text("НАЗВАНИЕ РАЗДАЧИ", 11, TEAL, true);
+        header.addView(titleHeader, new LinearLayout.LayoutParams(0, -2, 1f));
+        TextView sizeHeader = text("РАЗМЕР", 11, TEAL, true);
+        sizeHeader.setGravity(Gravity.CENTER);
+        header.addView(sizeHeader, new LinearLayout.LayoutParams(dp(85), -2));
+        TextView seedsHeader = text("СИДЫ", 11, TEAL, true);
+        seedsHeader.setGravity(Gravity.CENTER);
+        header.addView(seedsHeader, new LinearLayout.LayoutParams(dp(55), -2));
+        TextView leechesHeader = text("ЛИЧИ", 11, TEAL, true);
+        leechesHeader.setGravity(Gravity.CENTER);
+        header.addView(leechesHeader, new LinearLayout.LayoutParams(dp(55), -2));
+        list.addView(header);
+
         for (Torrent t : items) {
             LinearLayout row = new LinearLayout(this); row.setGravity(Gravity.CENTER_VERTICAL);
             row.setPadding(dp(14), dp(8), dp(14), dp(8)); row.setBackground(shape(PANEL, 0));
             LinearLayout.LayoutParams rp = new LinearLayout.LayoutParams(-1, dp(66)); rp.bottomMargin = dp(5);
             TextView name = text(t.title, 16, Color.WHITE, true); name.setMaxLines(2);
-            row.addView(name, new LinearLayout.LayoutParams(0, -2, 1));
-            row.addView(text(t.size, 13, GOLD, false), new LinearLayout.LayoutParams(dp(85), -2));
-            row.addView(text(t.seeds, 13, TEAL, true), new LinearLayout.LayoutParams(dp(55), -2));
-            row.addView(text(t.leeches, 13, RED, true), new LinearLayout.LayoutParams(dp(55), -2));
+            row.addView(name, new LinearLayout.LayoutParams(0, -2, 1f));
+            TextView size = text(t.size, 13, GOLD, false);
+            size.setGravity(Gravity.CENTER);
+            row.addView(size, new LinearLayout.LayoutParams(dp(85), -2));
+            TextView seeds = text(t.seeds, 13, TEAL, true);
+            seeds.setGravity(Gravity.CENTER);
+            row.addView(seeds, new LinearLayout.LayoutParams(dp(55), -2));
+            TextView leeches = text(t.leeches, 13, RED, true);
+            leeches.setGravity(Gravity.CENTER);
+            row.addView(leeches, new LinearLayout.LayoutParams(dp(55), -2));
             row.setFocusable(true); row.setOnFocusChangeListener((v, f) -> v.setBackground(shape(f ? Color.rgb(57, 68, 70) : PANEL, f ? GOLD : 0)));
             row.setOnClickListener(v -> showTorrent(t)); list.addView(row, rp);
         }
@@ -810,6 +859,6 @@ public class MainActivity extends Activity {
 
     private String safe(String s) { return s == null ? "Ошибка сети" : s; }
 
-    @Override public void onBackPressed() { load("browse.php", "Все раздачи"); }
+    @Override public void onBackPressed() { finish(); }
     @Override protected void onDestroy() { io.shutdownNow(); super.onDestroy(); }
 }
