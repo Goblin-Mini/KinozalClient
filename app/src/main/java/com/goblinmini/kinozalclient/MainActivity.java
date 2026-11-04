@@ -3,6 +3,8 @@ package com.goblinmini.kinozalclient;
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.graphics.Color;
+import android.graphics.BitmapFactory;
+import android.widget.ImageView;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Bundle;
@@ -455,7 +457,10 @@ public class MainActivity extends Activity {
                 + "positions.forEach(function(p,i){if(seen[p.label])return;seen[p.label]=1;var next=body.length;"
                 + "for(var j=i+1;j<positions.length;j++){if(positions[j].start>p.valueStart){next=positions[j].start;break;}}"
                 + "var v=body.slice(p.valueStart,next).replace(/^[\\s:]+|[\\s]+$/g,'').trim();var stop=['Техданные','Релиз','Содержание','Скриншоты','Подобные','Топ по жанрам','Топ по персонам','Топ раздающего','Подобные раздачи не найдены','Комментарии ( Комментировать )'];stop.forEach(function(x){var q=v.toLowerCase().indexOf(x.toLowerCase());if(q>=0)v=v.slice(0,q).trim();});if(v)fields[p.label]=v.slice(0,3500);});"
-                + "return JSON.stringify({title:document.title||'',fields:fields});})()";
+                + "var imgs=Array.from(document.images).filter(function(im){var w=im.naturalWidth||im.width,h=im.naturalHeight||im.height;return w>=160&&h>=220&&h>w*1.15;});"
+                + "imgs.sort(function(a,b){return (b.naturalWidth||b.width)*(b.naturalHeight||b.height)-(a.naturalWidth||a.width)*(a.naturalHeight||a.height);});"
+                + "var poster=imgs.length?imgs[0].src:'';"
+                + "return JSON.stringify({title:document.title||'',fields:fields,poster:poster});})()";
         webView.evaluateJavascript(script, value -> {
             try {
                 Object decoded = new org.json.JSONTokener(value).nextValue();
@@ -478,9 +483,41 @@ public class MainActivity extends Activity {
                 content.setOrientation(LinearLayout.VERTICAL);
                 content.setPadding(dp(14), dp(8), dp(14), dp(12));
                 scroll.addView(content);
+                LinearLayout mainArea = new LinearLayout(this);
+                mainArea.setOrientation(LinearLayout.HORIZONTAL);
+                ImageView posterView = new ImageView(this);
+                posterView.setScaleType(ImageView.ScaleType.FIT_CENTER);
+                posterView.setAdjustViewBounds(true);
+                String posterUrl = data.optString("poster", "");
+                if (!posterUrl.isEmpty() && (posterUrl.startsWith("https://") || posterUrl.startsWith("http://"))) {
+                    mainArea.addView(posterView, new LinearLayout.LayoutParams(dp(180),
+                            ViewGroup.LayoutParams.MATCH_PARENT));
+                    new Thread(() -> {
+                        try {
+                            java.net.HttpURLConnection conn = (java.net.HttpURLConnection)
+                                    new java.net.URL(posterUrl).openConnection();
+                            conn.setConnectTimeout(7000);
+                            conn.setReadTimeout(10000);
+                            conn.setRequestProperty("User-Agent", webView.getSettings().getUserAgentString());
+                            String cookie = CookieManager.getInstance().getCookie(posterUrl);
+                            if (cookie != null) conn.setRequestProperty("Cookie", cookie);
+                            android.graphics.Bitmap bitmap;
+                            try (java.io.InputStream input = conn.getInputStream()) {
+                                bitmap = BitmapFactory.decodeStream(input);
+                            } finally { conn.disconnect(); }
+                            if (bitmap != null) runOnUiThread(() -> posterView.setImageBitmap(bitmap));
+                        } catch (Exception ignored) { }
+                    }).start();
+                }
                 root.addView(tabs);
-                root.addView(scroll, new LinearLayout.LayoutParams(
+                mainArea.addView(scroll, new LinearLayout.LayoutParams(0,
+                        ViewGroup.LayoutParams.MATCH_PARENT, 1f));
+                root.addView(mainArea, new LinearLayout.LayoutParams(
                         ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
+                //
+                /*                root.addView(tabs);
+                root.addView(scroll, new LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f)); */
 
                 String[][] groups = {
                         {"Описание","Название","Оригинальное название","Год выпуска","Жанр","Выпущено","Режиссер","В ролях","О фильме"},
