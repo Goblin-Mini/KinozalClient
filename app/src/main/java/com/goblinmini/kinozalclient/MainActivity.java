@@ -55,6 +55,8 @@ public class MainActivity extends Activity {
     private final List<Torrent> torrents = new ArrayList<>();
     private int page = 0;
 
+    private static class Category { String title, href; }
+
     private static class Torrent {
         String title, href, size, seeds, leeches;
     }
@@ -286,22 +288,76 @@ public class MainActivity extends Activity {
         progress.setVisibility(View.VISIBLE);
         io.execute(() -> {
             try {
-                Document d = Jsoup.parse(client.fetch("browse.php"), client.getMirror());
-                Element select = d.select("select").stream().filter(s -> s.select("option").stream()
-                        .anyMatch(o -> o.text().trim().equalsIgnoreCase("Поиск по разделам"))).findFirst().orElse(null);
-                List<String> names = new ArrayList<>(), ids = new ArrayList<>();
-                if (select != null) for (Element o : select.select("option")) {
-                    String id = o.attr("value").trim(), name = o.text().trim();
-                    if (id.matches("\\d+") && !name.isEmpty()) { names.add(name); ids.add(id); }
+                String html = client.fetch("browse.php");
+                Document d = Jsoup.parse(html, client.getMirror() + "/");
+                List<Category> found = new ArrayList<>();
+                java.util.LinkedHashMap<String, Category> unique = new java.util.LinkedHashMap<>();
+
+                // Kinozal exposes category navigation as ordinary links on some mirrors
+                // and as query-parameter links on others. Keep the original href intact.
+                for (Element a : d.select("a[href]")) {
+                    String label = a.text().replaceAll("\\s+", " ").trim();
+                    String href = a.attr("href").trim();
+                    if (label.isEmpty() || label.length() > 90 || href.isEmpty()
+                            || href.startsWith("#") || href.toLowerCase(java.util.Locale.ROOT).startsWith("javascript:")) continue;
+                    String lower = href.toLowerCase(java.util.Locale.ROOT);
+                    boolean categoryLink = lower.matches(".*(?:[?&](?:cat|category|browse|section|c)=|/browse\\.php\\?).*");
+                    if (!categoryLink) continue;
+                    String absolute = a.absUrl("href");
+                    if (absolute.isEmpty()) absolute = java.net.URI.create(client.getMirror() + "/").resolve(href).toString();
+                    try {
+                        java.net.URI base = java.net.URI.create(client.getMirror());
+                        java.net.URI target = java.net.URI.create(absolute);
+                        if (!base.getHost().equalsIgnoreCase(target.getHost())) continue;
+                    } catch (Exception ignored) { continue; }
+                    if (lower.contains("page=") || lower.contains("sort=") || lower.contains("s=")) continue;
+                    Category item = new Category(); item.title = label; item.href = absolute;
+                    unique.putIfAbsent(absolute, item);
                 }
+
+                // Also support mirrors that render the section list as a select menu.
+                for (Element select : d.select("select")) {
+                    String field = select.attr("name").trim();
+                    if (field.isEmpty()) continue;
+                    for (Element option : select.select("option[value]")) {
+                        String value = option.attr("value").trim();
+                        String label = option.text().replaceAll("\\s+", " ").trim();
+                        if (value.isEmpty() || label.isEmpty() || label.length() > 90
+                                || value.equals("0") || value.equals("-1")) continue;
+                        Element form = select.closest("form");
+                        String action = form == null || form.attr("action").isEmpty()
+                                ? "browse.php" : form.absUrl("action");
+                        if (action.isEmpty()) action = client.getMirror() + "/browse.php";
+                        String separator = action.contains("?") ? "&" : "?";
+                        String target = action + separator
+                                + java.net.URLEncoder.encode(field, "UTF-8") + "="
+                                + java.net.URLEncoder.encode(value, "UTF-8");
+                        Category item = new Category(); item.title = label; item.href = target;
+                        unique.putIfAbsent(target, item);
+                    }
+                }
+
+                found.addAll(unique.values());
                 runOnUiThread(() -> {
                     progress.setVisibility(View.GONE);
-                    if (names.isEmpty()) { showMessage("Категории не найдены на зеркале"); return; }
-                    new AlertDialog.Builder(this).setTitle("Разделы Kinozal")
-                            .setItems(names.toArray(new String[0]), (di, which) -> load("browse.php?c=" + ids.get(which), names.get(which)))
-                            .setNegativeButton("Закрыть", null).show();
+                    if (found.isEmpty()) {
+                        showMessage("На странице зеркала не найдены ссылки разделов Kinozal. Проверьте выбранное зеркало и авторизацию.");
+                        return;
+                    }
+                    String[] labels = new String[found.size()];
+                    for (int i = 0; i < found.size(); i++) labels[i] = found.get(i).title;
+                    new AlertDialog.Builder(this).setTitle("Категории Kinozal")
+                            .setItems(labels, (dialog, which) -> {
+                                Category selected = found.get(which);
+                                load(selected.href, selected.title);
+                            }).setNegativeButton("Закрыть", null).show();
                 });
-            } catch (Exception e) { runOnUiThread(() -> { progress.setVisibility(View.GONE); showMessage(safe(e.getMessage())); }); }
+            } catch (Exception e) {
+                runOnUiThread(() -> {
+                    progress.setVisibility(View.GONE);
+                    showMessage("Не удалось получить категории: " + safe(e.getMessage()));
+                });
+            }
         });
     }
 
