@@ -437,6 +437,7 @@ public class MainActivity extends Activity {
                             ViewGroup.LayoutParams.MATCH_PARENT,
                             ViewGroup.LayoutParams.MATCH_PARENT);
                 }
+                watchButton.requestFocus();
             } catch (Exception e) {
                 Toast.makeText(this, "Не удалось обработать результаты Kinozal",
                         Toast.LENGTH_LONG).show();
@@ -449,7 +450,6 @@ public class MainActivity extends Activity {
         final String userAgent = webView.getSettings().getUserAgentString();
         final String referer = webView.getUrl();
         final String cookies = CookieManager.getInstance().getCookie(torrentLink);
-        Toast.makeText(this, "Скачиваю торрент с авторизацией Kinozal…", Toast.LENGTH_SHORT).show();
         new Thread(() -> {
             java.net.HttpURLConnection connection = null;
             try {
@@ -571,6 +571,48 @@ public class MainActivity extends Activity {
                 posterStatus.setText(posterLabel + "\\nКандидатов: " + candidateCount);
                 posterColumn.addView(posterView, new LinearLayout.LayoutParams(
                         ViewGroup.LayoutParams.MATCH_PARENT, dp(260)));
+                Button watchButton = makeButton("Просмотр");
+                watchButton.setTextSize(12);
+                watchButton.setMinHeight(dp(40));
+                watchButton.setPadding(dp(10), dp(5), dp(10), dp(5));
+                watchButton.setOnClickListener(v -> {
+                    String torrentLink = data.optString("torrentLink", "").trim();
+                    if (torrentLink.isEmpty()) {
+                        Toast.makeText(this, "Не удалось определить ссылку скачивания на странице раздачи",
+                                Toast.LENGTH_LONG).show();
+                        return;
+                    }
+                    try {
+                        Uri torrentUri = Uri.parse(torrentLink);
+                        if ("magnet".equalsIgnoreCase(torrentUri.getScheme())) {
+                            Intent intent = new Intent(Intent.ACTION_VIEW, torrentUri);
+                            intent.setPackage("ru.yourok.torrserve");
+                            intent.putExtra("poster", data.optString("poster", ""));
+                            intent.putExtra("title", data.optString("title", ""));
+                            startActivity(intent);
+                        } else {
+                            downloadAndSendTorrent(torrentLink,
+                                    data.optString("poster", ""), data.optString("title", ""));
+                        }
+                    } catch (android.content.ActivityNotFoundException e) {
+                        Toast.makeText(this, "TorrServe MatriX не установлен", Toast.LENGTH_LONG).show();
+                    } catch (Exception e) {
+                        Toast.makeText(this, "Не удалось передать торрент: " + e.getMessage(),
+                                Toast.LENGTH_LONG).show();
+                    }
+                });
+                watchButton.setBackgroundTintList(null);
+                watchButton.setBackground(buttonBackground(Color.rgb(174, 55, 18), Color.rgb(174, 55, 18)));
+                watchButton.setTextColor(Color.WHITE);
+                watchButton.setOnFocusChangeListener((view, hasFocus) -> {
+                    view.setBackground(buttonBackground(Color.rgb(174, 55, 18),
+                            hasFocus ? Color.WHITE : Color.rgb(174, 55, 18)));
+                    view.setElevation(dp(hasFocus ? 10 : 2));
+                });
+                LinearLayout.LayoutParams watchParams = new LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT, dp(44));
+                watchParams.topMargin = dp(10);
+                posterColumn.addView(watchButton, watchParams);
                 LinearLayout.LayoutParams posterParams = new LinearLayout.LayoutParams(dp(200),
                         ViewGroup.LayoutParams.MATCH_PARENT);
                 posterParams.rightMargin = dp(10);
@@ -732,37 +774,6 @@ public class MainActivity extends Activity {
                     }
                     scroll.scrollTo(0, 0);
                 };
-                Button watchButton = makeButton("Просмотр");
-                watchButton.setTextSize(12);
-                watchButton.setMinHeight(dp(40));
-                watchButton.setPadding(dp(10), dp(5), dp(10), dp(5));
-                watchButton.setOnClickListener(v -> {
-                    String torrentLink = data.optString("torrentLink", "").trim();
-                    if (torrentLink.isEmpty()) {
-                        Toast.makeText(this, "Не удалось определить ссылку скачивания на странице раздачи",
-                                Toast.LENGTH_LONG).show();
-                        return;
-                    }
-                    try {
-                        Uri torrentUri = Uri.parse(torrentLink);
-                        if ("magnet".equalsIgnoreCase(torrentUri.getScheme())) {
-                            Intent intent = new Intent(Intent.ACTION_VIEW, torrentUri);
-                            intent.setPackage("ru.yourok.torrserve");
-                            intent.putExtra("poster", data.optString("poster", ""));
-                            intent.putExtra("title", data.optString("title", ""));
-                            startActivity(intent);
-                        } else {
-                            downloadAndSendTorrent(torrentLink,
-                                    data.optString("poster", ""), data.optString("title", ""));
-                        }
-                    } catch (android.content.ActivityNotFoundException e) {
-                        Toast.makeText(this, "TorrServe MatriX не установлен", Toast.LENGTH_LONG).show();
-                    } catch (Exception e) {
-                        Toast.makeText(this, "Не удалось передать торрент: " + e.getMessage(),
-                                Toast.LENGTH_LONG).show();
-                    }
-                });
-                tabs.addView(watchButton, spacedButtonParams());
                 for (int n = 0; n < groups.length; n++) {
                     final int index = n;
                     Button tab = makeButton(groups[n][0]);
@@ -890,6 +901,13 @@ public class MainActivity extends Activity {
         return button;
     }
 
+    private GradientDrawable buttonBackground(int fillColor, int strokeColor) {
+        GradientDrawable drawable = new GradientDrawable();
+        drawable.setColor(fillColor);
+        drawable.setCornerRadius(dp(10));
+        drawable.setStroke(dp(2), strokeColor);
+        return drawable;
+    }
     private void showMirrors() {
         String[] options = {
                 "Kinozal CloudNS (по умолчанию)",
