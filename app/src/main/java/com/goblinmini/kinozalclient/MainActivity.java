@@ -188,8 +188,10 @@ public class MainActivity extends Activity {
         addMenu("Наше кино", () -> categories("Наше кино"));
         addMenu("Зарубежные сериалы", () -> categories("Сериал - Буржуйский"));
         addMenu("Российские сериалы", () -> categories("Сериал - Русский"));
-        addMenu("Телевидение", () -> categories("Телевидение"));
-        addMenu("Спорт", () -> categories());
+        addMenu("Телевидение", () -> load("browse.php?c=49", "Телевидение"));
+        addMenu("Зарубежное ТВ", () -> load("browse.php?c=50", "Зарубежное ТВ"));
+        addMenu("Спорт", () -> load("browse.php?c=37", "Спорт"));
+        addMenu("Шоу, концерты, спорт", () -> load("browse.php?c=1006", "Шоу, концерты, спорт"));
         addMenu("Избранное", () -> showFavorites());
         addMenu("Авторизация", () -> showLogin());
         addMenu("Зеркало", () -> chooseMirror());
