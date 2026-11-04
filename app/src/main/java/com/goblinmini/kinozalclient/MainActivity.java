@@ -453,8 +453,10 @@ public class MainActivity extends Activity {
                 return;
             }
             String script = "(function(){"
-                    + "var u=document.querySelector('input[type=text],input[type=email],input:not([type])');"
-                    + "var p=document.querySelector('input[type=password]');"
+                    + "var p=Array.from(document.querySelectorAll('input[type=password]')).find(e=>e.getClientRects().length);"
+                    + "var f=p&&(p.form||p.closest('form'))||document;"
+                    + "var a=Array.from(f.querySelectorAll('input')).filter(e=>e!==p&&e.getClientRects().length&&!['hidden','submit','button','checkbox','radio','password','file'].includes((e.type||'text').toLowerCase()));"
+                    + "var u=a.find(e=>/user|login|email|nick|name/i.test(e.name+' '+e.id+' '+e.autocomplete+' '+e.placeholder))||a[0];"
                     + "if(!u||!p)return 'Поля входа на странице не найдены';"
                     + "u.value=" + org.json.JSONObject.quote(userValue) + ";"
                     + "p.value=" + org.json.JSONObject.quote(passValue) + ";"
