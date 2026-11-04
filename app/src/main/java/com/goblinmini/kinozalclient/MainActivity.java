@@ -685,14 +685,29 @@ public class MainActivity extends Activity {
                         return;
                     }
                     try {
-                        Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(torrentLink));
-                        intent.setPackage("ru.yourok.torrserve");
-                        startActivity(intent);
+                        Uri torrentUri = Uri.parse(torrentLink);
+                        Intent viewIntent = new Intent(Intent.ACTION_VIEW);
+                        viewIntent.setPackage("ru.yourok.torrserve");
+                        if ("magnet".equalsIgnoreCase(torrentUri.getScheme())) {
+                            viewIntent.setData(torrentUri);
+                        } else {
+                            viewIntent.setDataAndType(torrentUri, "application/x-bittorrent");
+                        }
+                        try {
+                            startActivity(viewIntent);
+                        } catch (android.content.ActivityNotFoundException firstError) {
+                            Intent sendIntent = new Intent(Intent.ACTION_SEND);
+                            sendIntent.setPackage("ru.yourok.torrserve");
+                            sendIntent.setType("text/plain");
+                            sendIntent.putExtra(Intent.EXTRA_TEXT, torrentLink);
+                            startActivity(sendIntent);
+                        }
                     } catch (android.content.ActivityNotFoundException e) {
-                        Toast.makeText(this, "TorrServe MatriX не установлен или не принимает эту ссылку",
+                        Toast.makeText(this, "TorrServe MatriX не найден или не поддерживает передачу этой ссылки",
                                 Toast.LENGTH_LONG).show();
                     } catch (Exception e) {
-                        Toast.makeText(this, "Не удалось передать торрент: " + e.getClass().getSimpleName(),
+                        Toast.makeText(this, "Ошибка передачи в TorrServe: " + e.getClass().getSimpleName()
+                                        + (e.getMessage() != null ? " — " + e.getMessage() : ""),
                                 Toast.LENGTH_LONG).show();
                     }
                 });
