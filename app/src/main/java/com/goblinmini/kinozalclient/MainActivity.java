@@ -519,6 +519,10 @@ public class MainActivity extends Activity {
                 mainArea.addView(posterColumn, posterParams);
                 if (!posterUrl.isEmpty() && (posterUrl.startsWith("https://") || posterUrl.startsWith("http://"))) {
                     posterStatus.setText("Загрузка постера…\\nКандидатов: " + candidateCount);
+                    // Read WebView and cookie values on the UI thread before starting the worker.
+                    final String posterUserAgent = webView.getSettings().getUserAgentString();
+                    final String posterPageUrl = webView.getUrl();
+                    final String posterCookie = CookieManager.getInstance().getCookie(posterUrl);
                     new Thread(() -> {
                         try {
                             java.net.HttpURLConnection conn = (java.net.HttpURLConnection)
@@ -526,12 +530,10 @@ public class MainActivity extends Activity {
                             conn.setConnectTimeout(7000);
                             conn.setReadTimeout(10000);
                             conn.setInstanceFollowRedirects(true);
-                            conn.setRequestProperty("User-Agent", webView.getSettings().getUserAgentString());
+                            conn.setRequestProperty("User-Agent", posterUserAgent);
                             conn.setRequestProperty("Accept", "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8");
-                            String pageUrl = webView.getUrl();
-                            if (pageUrl != null) conn.setRequestProperty("Referer", pageUrl);
-                            String cookie = CookieManager.getInstance().getCookie(posterUrl);
-                            if (cookie != null) conn.setRequestProperty("Cookie", cookie);
+                            if (posterPageUrl != null) conn.setRequestProperty("Referer", posterPageUrl);
+                            if (posterCookie != null) conn.setRequestProperty("Cookie", posterCookie);
                             android.graphics.Bitmap bitmap;
                             int responseCode = conn.getResponseCode();
                             try (java.io.InputStream input = responseCode >= 200 && responseCode < 300
