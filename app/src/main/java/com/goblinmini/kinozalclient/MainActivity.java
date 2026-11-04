@@ -111,6 +111,7 @@ public class MainActivity extends Activity {
                 ViewGroup.LayoutParams.WRAP_CONTENT, dp(44)));
 
         searchInput = new EditText(this);
+        searchInput.setId(View.generateViewId());
         searchInput.setSingleLine(true);
         searchInput.setTextSize(14);
         searchInput.setTextColor(Color.WHITE);
@@ -261,14 +262,29 @@ public class MainActivity extends Activity {
                 new AlertDialog.Builder(this)
                         .setTitle("Категории сайта")
                         .setItems(labels.toArray(new String[0]), (dialog, which) -> {
-                            Uri target = Uri.parse(mirror).resolve(links.get(which));
-                            if (target != null && target.getHost() != null
+                            try {
+                                java.net.URI base = java.net.URI.create(mirror + "/");
+                                java.net.URI target = base.resolve(links.get(which));
+                                if (target.getHost() != null
+                                        && target.getHost().equalsIgnoreCase(base.getHost())
+                                        && ("https".equalsIgnoreCase(target.getScheme())
+                                        || "http".equalsIgnoreCase(target.getScheme()))) {
+                                    webView.loadUrl(target.toString());
+                                } else {
+                                    Toast.makeText(this, "Ссылка категории ведёт на другой домен",
+                                            Toast.LENGTH_LONG).show();
+                                }
+                            } catch (Exception ex) {
+                                Toast.makeText(this, "Некорректная ссылка категории",
+                                        Toast.LENGTH_LONG).show();
+                            }
+                            /*if (target != null && target.getHost() != null
                                     && target.getHost().equalsIgnoreCase(Uri.parse(mirror).getHost())) {
                                 webView.loadUrl(target.toString());
                             } else {
                                 Toast.makeText(this, "Ссылка категории ведёт на другой домен",
                                         Toast.LENGTH_LONG).show();
-                            }
+                            }*/
                         })
                         .setNegativeButton("Закрыть", null)
                         .show();
