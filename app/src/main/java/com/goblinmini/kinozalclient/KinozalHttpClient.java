@@ -144,6 +144,46 @@ public final class KinozalHttpClient {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().remove(COOKIE_KEY).apply();
     }
 
+    /** Download a protected image or torrent using the same authenticated HTTP cookie jar. */
+    public synchronized byte[] fetchBytes(String target, String accept) throws Exception {
+        String current = target.startsWith("http") ? target : baseUrl + "/" + target.replaceFirst("^/+", "");
+        for (int redirect = 0; redirect < 9; redirect++) {
+            URL url = new URL(current);
+            HttpURLConnection connection = (HttpURLConnection) url.openConnection();
+            connection.setConnectTimeout(15000);
+            connection.setReadTimeout(25000);
+            connection.setInstanceFollowRedirects(false);
+            connection.setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 Chrome/120.0 Mobile Safari/537.36");
+            connection.setRequestProperty("Accept", accept == null ? "*/*" : accept);
+            connection.setRequestProperty("Referer", baseUrl + "/");
+            URI uri = URI.create(current);
+            List<String> cookieHeaders = cookies.get(uri, new java.util.HashMap<>()).get("Cookie");
+            if (cookieHeaders != null && !cookieHeaders.isEmpty()) connection.setRequestProperty("Cookie", cookieHeaders.get(0));
+            int code = connection.getResponseCode();
+            cookies.put(uri, connection.getHeaderFields());
+            String location = connection.getHeaderField("Location");
+            if (code == 301 || code == 302 || code == 303 || code == 307 || code == 308) {
+                connection.disconnect();
+                if (location == null || redirect == 8) throw new java.io.IOException("Слишком много перенаправлений");
+                current = new URL(url, location).toString();
+                continue;
+            }
+            if (code < 200 || code >= 300) {
+                connection.disconnect();
+                throw new java.io.IOException("HTTP " + code + " при загрузке файла");
+            }
+            try (InputStream in = connection.getInputStream(); ByteArrayOutputStream out = new ByteArrayOutputStream()) {
+                byte[] buffer = new byte[8192];
+                int n;
+                while ((n = in.read(buffer)) != -1) out.write(buffer, 0, n);
+                return out.toByteArray();
+            } finally {
+                connection.disconnect();
+            }
+        }
+        throw new java.io.IOException("Не удалось загрузить файл");
+    }
+
     public synchronized String fetch(String pathOrUrl) throws Exception {
         String target = pathOrUrl.startsWith("http") ? pathOrUrl : baseUrl + "/" + pathOrUrl.replaceFirst("^/+", "");
         String html = request(target, "GET", null, false);
