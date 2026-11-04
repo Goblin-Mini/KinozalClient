@@ -507,6 +507,64 @@ public class MainActivity extends Activity {
                         commentsView.setLineSpacing(dp(2), 1.0f);
                         commentsView.setPadding(dp(4), dp(8), dp(4), dp(12));
                         content.addView(commentsView);
+                    } else if (active[0] == 0) {
+                        String[] compactKeys = {"Название","Оригинальное название","Год выпуска","Жанр","Выпущено","Режиссер"};
+                        for (int k = 0; k < compactKeys.length; k += 2) {
+                            LinearLayout row = new LinearLayout(this);
+                            row.setOrientation(LinearLayout.HORIZONTAL);
+                            row.setGravity(Gravity.TOP);
+                            for (int c = 0; c < 2; c++) {
+                                String key = compactKeys[k + c];
+                                String valueText = fields.optString(key, "").trim();
+                                LinearLayout block = new LinearLayout(this);
+                                block.setOrientation(LinearLayout.VERTICAL);
+                                block.setPadding(dp(8), dp(5), dp(8), dp(7));
+                                TextView label = new TextView(this);
+                                label.setText(key);
+                                label.setTextColor(accent);
+                                label.setTextSize(12);
+                                label.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+                                TextView valueView = new TextView(this);
+                                valueView.setText(valueText.isEmpty() ? "—" : valueText);
+                                valueView.setTextColor(Color.WHITE);
+                                valueView.setTextSize(14);
+                                valueView.setLineSpacing(dp(1), 1.0f);
+                                block.addView(label);
+                                block.addView(valueView);
+                                row.addView(block, new LinearLayout.LayoutParams(0,
+                                        ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+                            }
+                            content.addView(row);
+                            View divider = new View(this);
+                            divider.setBackgroundColor(Color.rgb(65, 67, 82));
+                            content.addView(divider, new LinearLayout.LayoutParams(
+                                    ViewGroup.LayoutParams.MATCH_PARENT, dp(1)));
+                        }
+                        String[] wideKeys = {"В ролях","О фильме"};
+                        for (String key : wideKeys) {
+                            String valueText = fields.optString(key, "").trim();
+                            if (valueText.isEmpty()) continue;
+                            LinearLayout block = new LinearLayout(this);
+                            block.setOrientation(LinearLayout.VERTICAL);
+                            block.setPadding(dp(8), dp(7), dp(8), dp(9));
+                            TextView label = new TextView(this);
+                            label.setText(key);
+                            label.setTextColor(accent);
+                            label.setTextSize(12);
+                            label.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+                            TextView valueView = new TextView(this);
+                            valueView.setText(valueText);
+                            valueView.setTextColor(Color.WHITE);
+                            valueView.setTextSize(14);
+                            valueView.setLineSpacing(dp(1), 1.0f);
+                            block.addView(label);
+                            block.addView(valueView);
+                            content.addView(block);
+                            View divider = new View(this);
+                            divider.setBackgroundColor(Color.rgb(65, 67, 82));
+                            content.addView(divider, new LinearLayout.LayoutParams(
+                                    ViewGroup.LayoutParams.MATCH_PARENT, dp(1)));
+                        }
                     } else {
                         String[] group = groups[active[0]];
                         boolean added = false;
@@ -517,17 +575,16 @@ public class MainActivity extends Activity {
                             added = true;
                             LinearLayout block = new LinearLayout(this);
                             block.setOrientation(LinearLayout.VERTICAL);
-                            block.setPadding(dp(2), dp(5), dp(2), dp(6));
+                            block.setPadding(dp(8), dp(5), dp(8), dp(7));
                             TextView label = new TextView(this);
                             label.setText(key);
                             label.setTextColor(accent);
                             label.setTextSize(12);
                             label.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
-                            label.setPadding(0, 0, 0, dp(2));
                             TextView valueView = new TextView(this);
                             valueView.setText(valueText);
                             valueView.setTextColor(Color.WHITE);
-                            valueView.setTextSize(15);
+                            valueView.setTextSize(14);
                             valueView.setLineSpacing(dp(1), 1.0f);
                             block.addView(label);
                             block.addView(valueView);
