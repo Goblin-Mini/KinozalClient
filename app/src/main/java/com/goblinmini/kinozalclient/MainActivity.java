@@ -418,31 +418,9 @@ public class MainActivity extends Activity {
     }
 
     private void showLogin() {
-        String[] saved = client.getSavedCredentials();
-        if (saved != null) {
-            progress.setVisibility(View.VISIBLE);
-            status.setText("Восстановление сессии…");
-            io.execute(() -> {
-                try {
-                    client.login(saved[0], saved[1]);
-                    runOnUiThread(() -> {
-                        progress.setVisibility(View.GONE);
-                        status.setText("Авторизован");
-                        showMessage("Вход выполнен. Сессия сохранена.");
-                        load("browse.php", "Все раздачи");
-                    });
-                } catch (Exception e) {
-                    runOnUiThread(() -> {
-                        progress.setVisibility(View.GONE);
-                        status.setText("Требуется вход");
-                        showMessage("Не удалось восстановить сессию: " + safe(e.getMessage()));
-                        showNativeLoginForm(saved);
-                    });
-                }
-            });
-            return;
-        }
-        showNativeLoginForm(null);
+        // Never fire a background login attempt just by opening the authorization screen.
+        // The user submits exactly one request sequence from the visible native form.
+        showNativeLoginForm(client.getSavedCredentials());
     }
 
     private void showNativeLoginForm(String[] saved) {
