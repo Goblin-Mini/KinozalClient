@@ -72,7 +72,7 @@ public class MainActivity extends Activity {
         mirror = getSharedPreferences(PREFS, MODE_PRIVATE).getString("mirror", MIRRORS[0]);
         client = new KinozalHttpClient(this, mirror);
         buildShell();
-        restoreSessionAndLoad();
+        load("browse.php", "Все раздачи");
     }
 
     private int dp(float n) { return (int)(n * getResources().getDisplayMetrics().density + .5f); }
@@ -213,35 +213,6 @@ public class MainActivity extends Activity {
 
     private void focusSearch() { search.requestFocus(); }
     private void showMessage(String message) { Toast.makeText(this, message, Toast.LENGTH_LONG).show(); }
-
-    private void restoreSessionAndLoad() {
-        String[] saved = client.getSavedCredentials();
-        if (saved == null) {
-            load("browse.php", "Все раздачи");
-            return;
-        }
-        progress.setVisibility(View.VISIBLE);
-        status.setText("Проверка авторизации…");
-        io.execute(() -> {
-            try {
-                // Reuse a valid persisted cookie session; only log in again if it expired.
-                if (!client.isAuthenticated()) {
-                    client.login(saved[0], saved[1]);
-                }
-                runOnUiThread(() -> {
-                    status.setText("Авторизован");
-                    load("browse.php", "Все раздачи");
-                });
-            } catch (Exception e) {
-                runOnUiThread(() -> {
-                    progress.setVisibility(View.GONE);
-                    status.setText("Требуется вход");
-                    addEmpty("Не удалось автоматически восстановить вход: " + safe(e.getMessage()));
-                    showNativeLoginForm(saved);
-                });
-            }
-        });
-    }
 
     private void load(String path, String title) {
         currentPath = path; currentTitle = title; heading.setText(title);
