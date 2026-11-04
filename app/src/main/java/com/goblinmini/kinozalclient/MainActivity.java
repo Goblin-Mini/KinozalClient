@@ -266,7 +266,7 @@ public class MainActivity extends Activity {
                 + "var row=s.closest('tr,fieldset,div')||s.parentElement;"
                 + "var label=(s.getAttribute('aria-label')||s.getAttribute('name')||s.id||'').trim();"
                 + "if(s.labels&&s.labels.length)label=s.labels[0].innerText.trim()+' '+label;"
-                + "var context=row?(row.innerText||row.textContent||'').replace(/\\\\s+/g,' ').trim():'';"
+                + "var context=row?(row.innerText||row.textContent||'').replace(/\\s+/g,' ').trim():'';"
                 + "return {name:s.name||'',id:s.id||'',label:label,context:context,"
                 + "options:Array.from(s.options).map(function(o){return {text:(o.textContent||'').trim(),value:o.value};})"
                 + ".filter(function(o){return o.text&&o.value!=='';})};"
