@@ -1,6 +1,8 @@
 package com.goblinmini.kinozalclient;
 
 import android.app.Activity;
+import android.content.Intent;
+import android.net.Uri;
 import android.app.AlertDialog;
 import android.graphics.Color;
 import android.graphics.BitmapFactory;
@@ -462,7 +464,8 @@ public class MainActivity extends Activity {
                 + "Array.from(document.querySelectorAll('[style*=background]')).forEach(function(el){var bg=getComputedStyle(el).backgroundImage||el.style.backgroundImage,m=bg.match(/url\\([\\\"']?(.*?)[\\\"']?\\)/i);if(m)addImage(m[1],el.clientWidth||0,el.clientHeight||0,el.className||'');});"
                 + "candidates.sort(function(a,b){return b.score-a.score||b.area-a.area;});var unique=[],seenUrls={};candidates.forEach(function(c){if(!seenUrls[c.url]){seenUrls[c.url]=1;unique.push(c);}});"
                 + "var poster=unique.length?unique[0].url:'';"
-                + "return JSON.stringify({title:document.title||'',fields:fields,poster:poster,posterCandidates:unique.slice(0,8).map(function(c){return c.url;})});})()";
+                + "var torrentLinks=[];Array.from(document.querySelectorAll('a[href]')).forEach(function(a){var h=a.href||'',t=(a.innerText||a.textContent||'').trim(),raw=(a.getAttribute('href')||'');if(/^magnet:/i.test(raw)||/\\.torrent(?:[?#]|$)/i.test(h)||/(скачать|download).*(торрент|torrent)|(торрент|torrent).*(скачать|download)/i.test(t+' '+a.className)){var score=/^magnet:/i.test(raw)?100:0;if(/\\.torrent(?:[?#]|$)/i.test(h))score+=80;if(/скачать торрент|download torrent/i.test(t))score+=30;if(/download/i.test(h))score+=10;torrentLinks.push({url:h,score:score});}});torrentLinks.sort(function(a,b){return b.score-a.score;});"
+                + "return JSON.stringify({title:document.title||'',fields:fields,poster:poster,posterCandidates:unique.slice(0,8).map(function(c){return c.url;}),torrentLink:torrentLinks.length?torrentLinks[0].url:''});})()";
         webView.evaluateJavascript(script, value -> {
             try {
                 Object decoded = new org.json.JSONTokener(value).nextValue();
@@ -697,11 +700,36 @@ public class MainActivity extends Activity {
                 AlertDialog dialog = new AlertDialog.Builder(this)
                         .setTitle("Подробности раздачи")
                         .setView(root)
-                        .setPositiveButton("Открыть страницу сайта", (d, w) -> { })
+                        .setPositiveButton("Просмотр", (d, w) -> { })
+                        .setNeutralButton("Открыть страницу сайта", (d, w) -> { })
                         .setNegativeButton("Закрыть", null)
                         .create();
                 dialog.show();
-                dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> dialog.dismiss());
+                dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
+                    String torrentLink = data.optString("torrentLink", "").trim();
+                    if (torrentLink.isEmpty()) {
+                        Toast.makeText(this, "Ссылка на торрент не найдена на странице",
+                                Toast.LENGTH_LONG).show();
+                        return;
+                    }
+                    try {
+                        Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(torrentLink));
+                        intent.setPackage("ru.yourok.torrserve");
+                        startActivity(intent);
+                        dialog.dismiss();
+                    } catch (android.content.ActivityNotFoundException e) {
+                        Toast.makeText(this, "TorrServe MatriX не установлен или не принимает эту ссылку",
+                                Toast.LENGTH_LONG).show();
+                    } catch (Exception e) {
+                        Toast.makeText(this, "Не удалось передать торрент: " + e.getClass().getSimpleName(),
+                                Toast.LENGTH_LONG).show();
+                    }
+                });
+                dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener(v -> {
+                    String pageUrl = webView.getUrl();
+                    if (pageUrl != null) webView.loadUrl(pageUrl);
+                    dialog.dismiss();
+                });
                 if (dialog.getWindow() != null) {
                     dialog.getWindow().setLayout(
                             ViewGroup.LayoutParams.MATCH_PARENT,
