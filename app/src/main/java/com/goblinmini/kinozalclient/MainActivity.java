@@ -462,7 +462,8 @@ public class MainActivity extends Activity {
                 + "Array.from(document.querySelectorAll('[style*=background]')).forEach(function(el){var bg=getComputedStyle(el).backgroundImage||el.style.backgroundImage,m=bg.match(/url\\([\\\"']?(.*?)[\\\"']?\\)/i);if(m)addImage(m[1],el.clientWidth||0,el.clientHeight||0,el.className||'');});"
                 + "candidates.sort(function(a,b){return b.score-a.score||b.area-a.area;});var unique=[],seenUrls={};candidates.forEach(function(c){if(!seenUrls[c.url]){seenUrls[c.url]=1;unique.push(c);}});"
                 + "var poster=unique.length?unique[0].url:'';"
-                + "return JSON.stringify({title:document.title||'',fields:fields,poster:poster,posterCandidates:unique.slice(0,8).map(function(c){return c.url;})});})()"        webView.evaluateJavascript(script, value -> {
+                + "return JSON.stringify({title:document.title||'',fields:fields,poster:poster,posterCandidates:unique.slice(0,8).map(function(c){return c.url;})});})()";
+        webView.evaluateJavascript(script, value -> {
             try {
                 Object decoded = new org.json.JSONTokener(value).nextValue();
                 org.json.JSONObject data = new org.json.JSONObject(String.valueOf(decoded));
