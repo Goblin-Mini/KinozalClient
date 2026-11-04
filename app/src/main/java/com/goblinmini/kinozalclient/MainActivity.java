@@ -665,7 +665,7 @@ public class MainActivity extends Activity {
         root.addView(mainArea, new LinearLayout.LayoutParams(-1, 0, 1));
 
         String[][] groups = {
-                {"Название", "Оригинальное название", "Год выпуска", "Жанр", "Выпущено", "Режиссер", "В ролях", "О фильме"},
+                {"Год выпуска", "Жанр", "Выпущено", "Режиссер", "В ролях", "О фильме"},
                 {"Качество", "Видео", "Аудио", "Субтитры", "Продолжительность", "Перевод", "Размер", "Язык"}
         };
         final int[] active = {0};
@@ -717,9 +717,7 @@ public class MainActivity extends Activity {
 
         watch.setOnClickListener(v -> playTorrent(data));
         AlertDialog dialog = new AlertDialog.Builder(this)
-                .setTitle("Подробности раздачи")
                 .setView(root)
-                .setNegativeButton("Закрыть", null)
                 .create();
         dialog.show();
         if (dialog.getWindow() != null) {
