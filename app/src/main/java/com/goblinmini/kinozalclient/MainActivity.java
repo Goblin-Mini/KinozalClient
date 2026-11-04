@@ -467,11 +467,6 @@ public class MainActivity extends Activity {
             fillWebLogin(web, userValue, passValue, true);
         });
         android.view.inputmethod.InputMethodManager imm =
-                    (android.view.inputmethod.InputMethodManager)getSystemService(INPUT_METHOD_SERVICE);
-            imm.hideSoftInputFromWindow(loginInput.getWindowToken(), 0);
-            imm.hideSoftInputFromWindow(passwordInput.getWindowToken(), 0);
-        });
-        android.view.inputmethod.InputMethodManager imm =
                 (android.view.inputmethod.InputMethodManager)getSystemService(INPUT_METHOD_SERVICE);
         View.OnFocusChangeListener showKeyboard = (v, focused) -> {
             if (focused) v.postDelayed(() -> imm.showSoftInput(v,
