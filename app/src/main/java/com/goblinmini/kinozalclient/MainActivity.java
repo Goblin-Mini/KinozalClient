@@ -763,13 +763,13 @@ public class MainActivity extends Activity {
         LinearLayout.LayoutParams doneParams = new LinearLayout.LayoutParams(0, dp(46), 1f);
         doneParams.leftMargin = dp(8);
         actions.addView(done, doneParams);
-        TextView hint = text("Войдите на Kinozal в открывшемся окне. Рекламные переходы и всплывающие окна блокируются.", 13, TEAL, false);
+        TextView hint = text("Пройдите проверку на сайте. Посторонние рекламные переходы и всплывающие окна блокируются.", 13, TEAL, false);
         hint.setPadding(dp(12), dp(8), dp(12), dp(8));
         panel.addView(hint, new LinearLayout.LayoutParams(-1, -2));
+        // Match the supplied screenshot: hint, then action buttons, then the site page.
+        panel.addView(actions, new LinearLayout.LayoutParams(-1, -2));
         LinearLayout.LayoutParams webParams = new LinearLayout.LayoutParams(-1, 0, 1f);
         panel.addView(web, webParams);
-        // Keep the original bottom placement of the Close/Done controls.
-        panel.addView(actions, new LinearLayout.LayoutParams(-1, -2));
 
         AlertDialog dialog = new AlertDialog.Builder(this)
                 .setTitle("Проверка Kinozal")
