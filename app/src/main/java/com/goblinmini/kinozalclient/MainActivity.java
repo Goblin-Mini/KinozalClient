@@ -74,6 +74,7 @@ public class MainActivity extends Activity {
     private boolean startupCatalogReady = false;
     private boolean startupCatalogStarted = false;
     private boolean automaticUpdateCheckScheduled = false;
+    private boolean cloudflareDialogOpen = false;
     private interface BrowserPageCallback { void onPage(String html, String error); }
     private final java.util.LinkedHashMap<String, String> pageCache =
             new java.util.LinkedHashMap<String, String>(12, 0.75f, true) {
@@ -1080,7 +1081,8 @@ public class MainActivity extends Activity {
         LinearLayout panel = new LinearLayout(this);
         panel.setOrientation(LinearLayout.VERTICAL);
         panel.setBackgroundColor(BG);
-        panel.setMinimumHeight((int)(getResources().getDisplayMetrics().heightPixels * 0.72f));
+        panel.setFocusable(true);
+        panel.setFocusableInTouchMode(true);
         panel.setLayoutParams(new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         WebView existingWeb = sessionWebView;
@@ -1093,7 +1095,10 @@ public class MainActivity extends Activity {
         final WebView web = existingWeb;
         web.setBackgroundColor(Color.WHITE);
         web.setVisibility(View.VISIBLE);
-        web.setMinimumHeight(dp(360));
+        web.setMinimumHeight(dp(240));
+        web.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_YES);
+        web.setOverScrollMode(View.OVER_SCROLL_IF_CONTENT_SCROLLS);
+        web.setVerticalScrollBarEnabled(true);
         web.setFocusable(true);
         web.setFocusableInTouchMode(true);
         web.setDescendantFocusability(ViewGroup.FOCUS_AFTER_DESCENDANTS);
@@ -1194,19 +1199,22 @@ public class MainActivity extends Activity {
         LinearLayout.LayoutParams doneParams = new LinearLayout.LayoutParams(0, dp(46), 1f);
         doneParams.leftMargin = dp(8);
         actions.addView(done, doneParams);
-        TextView hint = text("Пройдите проверку на сайте. Посторонние рекламные переходы и всплывающие окна блокируются.", 13, TEAL, false);
-        hint.setPadding(dp(12), dp(8), dp(12), dp(8));
-        panel.addView(hint, new LinearLayout.LayoutParams(-1, -2));
-        // Match the supplied screenshot: hint, then action buttons, then the site page.
-        panel.addView(actions, new LinearLayout.LayoutParams(-1, -2));
+        TextView hint = text("Пройдите проверку Kinozal. Для отметки Cloudflare наведите фокус на проверку и нажмите OK/Enter. Страница прокручивается пультом.", 13, TEAL, false);
+        hint.setPadding(dp(12), dp(5), dp(12), dp(5));
         LinearLayout.LayoutParams webParams = new LinearLayout.LayoutParams(-1, 0, 1f);
+        webParams.bottomMargin = dp(4);
         panel.addView(web, webParams);
+        panel.addView(hint, new LinearLayout.LayoutParams(-1, -2));
+        // Keep controls fixed at the bottom; the challenge gets almost all available height.
+        panel.addView(actions, new LinearLayout.LayoutParams(-1, -2));
 
         AlertDialog dialog = new AlertDialog.Builder(this)
                 .setTitle("Проверка Kinozal")
                 .setView(panel)
                 .create();
         close.setOnClickListener(v -> {
+            persistWebViewCookies();
+            cloudflareDialogOpen = false;
             web.stopLoading();
             if (web.getParent() instanceof ViewGroup) ((ViewGroup) web.getParent()).removeView(web);
             web.setVisibility(View.INVISIBLE);
@@ -1229,6 +1237,8 @@ public class MainActivity extends Activity {
                     return;
                 }
             }
+            persistWebViewCookies();
+            cloudflareDialogOpen = false;
             web.stopLoading();
             if (web.getParent() instanceof ViewGroup) ((ViewGroup) web.getParent()).removeView(web);
             web.setVisibility(View.INVISIBLE);
@@ -1239,6 +1249,8 @@ public class MainActivity extends Activity {
             load("browse.php", "Все раздачи");
         });
         dialog.setOnDismissListener(d -> {
+            cloudflareDialogOpen = false;
+            persistWebViewCookies();
             if (web.getParent() == panel) {
                 panel.removeView(web);
                 web.setVisibility(View.INVISIBLE);
@@ -1246,9 +1258,10 @@ public class MainActivity extends Activity {
             }
         });
         dialog.show();
+        cloudflareDialogOpen = true;
         dialog.getWindow().setLayout(
-                (int)(getResources().getDisplayMetrics().widthPixels * 0.88f),
-                (int)(getResources().getDisplayMetrics().heightPixels * 0.88f));
+                (int)(getResources().getDisplayMetrics().widthPixels * 0.96f),
+                (int)(getResources().getDisplayMetrics().heightPixels * 0.96f));
         web.post(() -> {
             web.requestLayout();
             web.requestFocus();
@@ -1706,6 +1719,39 @@ public class MainActivity extends Activity {
 
     private String safe(String s) { return s == null ? "Ошибка сети" : s; }
 
-    @Override public void onBackPressed() { finish(); }
-    @Override protected void onDestroy() { io.shutdownNow(); super.onDestroy(); }
+    private void persistWebViewCookies() {
+        WebView web = sessionWebView;
+        if (web == null) return;
+        try {
+            CookieManager manager = CookieManager.getInstance();
+            manager.flush();
+            String cookies = manager.getCookie(client.getMirror());
+            if (cookies != null && !cookies.trim().isEmpty()) {
+                client.saveBrowserCookies(cookies);
+                client.importBrowserCookies(cookies);
+            }
+        } catch (Exception e) {
+            android.util.Log.w("KinozalSession", "Could not persist WebView cookies", e);
+        }
+    }
+
+    @Override protected void onPause() {
+        persistWebViewCookies();
+        super.onPause();
+    }
+
+    @Override public void onBackPressed() {
+        if (cloudflareDialogOpen) {
+            persistWebViewCookies();
+            super.onBackPressed();
+            return;
+        }
+        finish();
+    }
+
+    @Override protected void onDestroy() {
+        persistWebViewCookies();
+        io.shutdownNow();
+        super.onDestroy();
+    }
 }
