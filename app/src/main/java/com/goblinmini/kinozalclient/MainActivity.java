@@ -71,6 +71,8 @@ public class MainActivity extends Activity {
     private BrowserPageCallback pendingBrowserCallback;
     private final android.os.Handler browserHandler = new android.os.Handler(android.os.Looper.getMainLooper());
     private Runnable browserRequestTimeout;
+    private boolean startupCatalogReady = false;
+    private boolean startupCatalogStarted = false;
     private interface BrowserPageCallback { void onPage(String html, String error); }
     private final java.util.LinkedHashMap<String, String> pageCache =
             new java.util.LinkedHashMap<String, String>(12, 0.75f, true) {
@@ -94,10 +96,27 @@ public class MainActivity extends Activity {
         if (savedBrowserCookies != null) {
             restoreBrowserSession(savedBrowserCookies);
         } else {
-            // Let Android finish the first activity/layout frame and network stack
-            // initialization before the first catalogue request.
-            browserHandler.postDelayed(this::loadInitialCatalog, 1000);
+            // Wait until the TV window is actually focused before the first request.
+            markStartupCatalogReady();
         }
+    }
+
+
+    @Override public void onWindowFocusChanged(boolean hasFocus) {
+        super.onWindowFocusChanged(hasFocus);
+        if (hasFocus) startInitialCatalogWhenReady();
+    }
+
+    private void markStartupCatalogReady() {
+        startupCatalogReady = true;
+        startInitialCatalogWhenReady();
+    }
+
+    private void startInitialCatalogWhenReady() {
+        if (!startupCatalogReady || startupCatalogStarted || !hasWindowFocus()
+                || root == null || !root.isAttachedToWindow()) return;
+        startupCatalogStarted = true;
+        browserHandler.postDelayed(this::loadInitialCatalog, 350);
     }
 
     private static class HomeSection {
@@ -622,7 +641,7 @@ public class MainActivity extends Activity {
         final int[] remaining = {0};
         for (String pair : pairs) if (pair.trim().contains("=")) remaining[0]++;
         if (remaining[0] == 0) {
-            loadInitialCatalog();
+            markStartupCatalogReady();
             return;
         }
         final boolean[] started = {false};
@@ -631,7 +650,7 @@ public class MainActivity extends Activity {
             if (remaining[0] <= 0 && !started[0]) {
                 started[0] = true;
                 manager.flush();
-                web.postDelayed(this::loadInitialCatalog, 250);
+                markStartupCatalogReady();
             }
         };
         for (String pair : pairs) {
