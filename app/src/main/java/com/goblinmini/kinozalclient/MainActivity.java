@@ -1688,7 +1688,9 @@ public class MainActivity extends Activity {
                     + ".then(function(r){if(!r.ok){window.KinozalTorrentBridge.onTorrentResult(r.status,'','HTTP '+r.status);return;}"
                     + "return r.blob().then(function(blob){var reader=new FileReader();"
                     + "reader.onloadend=function(){var value=String(reader.result||'');"
-                    + "window.KinozalTorrentBridge.onTorrentResult(r.status,value.substring(value.indexOf(',')+1),'');};"
+                    + "var payload=value.substring(value.indexOf(',')+1);"
+                    + "if(blob.size<20||!payload||atob(payload).charCodeAt(0)!==100){window.KinozalTorrentBridge.onTorrentResult(0,'','HTTP 200 вернул не torrent-файл');return;}"
+                    + "window.KinozalTorrentBridge.onTorrentResult(r.status,payload,'');};"
                     + "reader.onerror=function(){window.KinozalTorrentBridge.onTorrentResult(0,'','FileReader error');};"
                     + "reader.readAsDataURL(blob);});})"
                     + ".catch(function(e){window.KinozalTorrentBridge.onTorrentResult(0,'',String(e));});})()";
