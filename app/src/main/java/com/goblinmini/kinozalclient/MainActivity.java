@@ -348,24 +348,42 @@ public class MainActivity extends Activity {
      * Resolve it from the torrent page og:image, also used by the details view.
      */
     private void loadHomePosterFromDetails(HomePoster item, ImageView target) {
+        WebView web = sessionWebView;
+        if (web != null) {
+            String detailUrl = org.json.JSONObject.quote(item.torrent.href);
+            String script = "(function(){return fetch(" + detailUrl + ",{credentials:'include'})"
+                    + ".then(function(r){if(!r.ok)throw new Error('detail HTTP '+r.status);return r.text();})"
+                    + ".then(function(html){var d=new DOMParser().parseFromString(html,'text/html');"
+                    + "var m=d.querySelector('meta[property=og:image]');"
+                    + "var p=m?m.content:'';if(!p){var i=d.querySelector('img[src*=\\\"/poster/\\\"],img[data-src*=\\\"/poster/\\\"]');"
+                    + "if(i)p=i.getAttribute('data-src')||i.getAttribute('src')||'';}"
+                    + "if(!p)throw new Error('poster not found');return new URL(p," + detailUrl + ").href;})"
+                    + ".then(function(u){return fetch(u,{credentials:'include',headers:{'Referer':" + detailUrl + "}});})"
+                    + ".then(function(r){if(!r.ok)throw new Error('image HTTP '+r.status);return r.blob();})"
+                    + ".then(function(b){return new Promise(function(resolve,reject){var f=new FileReader();"
+                    + "f.onloadend=function(){resolve(String(f.result||''));};f.onerror=reject;f.readAsDataURL(b);});});})()";
+            web.evaluateJavascript(script, result -> {
+                try {
+                    String data = new org.json.JSONArray("[" + result + "]").getString(0);
+                    if (data == null || !data.startsWith("data:")) return;
+                    String encoded = data.substring(data.indexOf(',') + 1);
+                    byte[] bytes = android.util.Base64.decode(encoded, android.util.Base64.DEFAULT);
+                    Bitmap bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.length);
+                    if (bitmap != null && target.getParent() != null) target.setImageBitmap(bitmap);
+                } catch (Exception ignored) { }
+            });
+            return;
+        }
         io.execute(() -> {
             try {
                 String html = client.fetch(item.torrent.href);
                 Document doc = Jsoup.parse(html, item.torrent.href);
                 Element image = doc.selectFirst("meta[property=og:image]");
                 String imageUrl = "";
-                if (image != null) {
-                    String raw = image.attr("content").trim();
-                    if (!raw.isEmpty()) imageUrl = doc.baseUri().isEmpty()
-                            ? resolveImageUrl(raw) : java.net.URI.create(doc.baseUri()).resolve(raw).toString();
-                }
+                if (image != null) imageUrl = resolveImageUrl(image.attr("content"));
                 if (imageUrl.isEmpty()) {
                     Element poster = doc.selectFirst("img[src*=/poster/], img[data-src*=/poster/]");
-                    if (poster != null) {
-                        String raw = firstImageSource(poster);
-                        imageUrl = poster.absUrl("src");
-                        if (imageUrl.isEmpty()) imageUrl = resolveImageUrl(raw);
-                    }
+                    if (poster != null) imageUrl = resolveImageUrl(firstImageSource(poster));
                 }
                 if (imageUrl.isEmpty()) return;
                 byte[] bytes = client.fetchBytes(imageUrl, "image/*", item.torrent.href);
