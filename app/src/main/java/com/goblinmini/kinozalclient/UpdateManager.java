@@ -21,12 +21,26 @@ final class UpdateManager {
     private static final String TAG = "KinozalUpdate";
     private static final String RELEASE_API =
             "https://api.github.com/repos/Goblin-Mini/KinozalClient/releases/latest";
+    private static final String UPDATE_PREFS = "kinozal_update_prefs";
+    private static final String LAST_CHECK = "last_successful_check";
+    private static final long CHECK_INTERVAL_MS = 24L * 60L * 60L * 1000L;
     private final Activity activity;
 
     UpdateManager(Activity activity) { this.activity = activity; }
 
-    void check() {
-        Toast.makeText(activity, "Проверяем обновления…", Toast.LENGTH_SHORT).show();
+    void check() { check(false); }
+
+    void checkAutomatically() {
+        long last = activity.getSharedPreferences(UPDATE_PREFS, Activity.MODE_PRIVATE)
+                .getLong(LAST_CHECK, 0L);
+        if (System.currentTimeMillis() - last < CHECK_INTERVAL_MS) return;
+        check(true);
+    }
+
+    private void check(boolean automatic) {
+        if (!automatic) {
+            Toast.makeText(activity, "Проверяем обновления…", Toast.LENGTH_SHORT).show();
+        }
         new Thread(() -> {
             HttpURLConnection c = null;
             try {
@@ -39,11 +53,14 @@ final class UpdateManager {
                 int response = c.getResponseCode();
                 if (response < 200 || response >= 300) {
                     Log.e(TAG, "GitHub release API returned HTTP " + response);
-                    showMessage("Не удалось проверить обновления (HTTP " + response + "). Попробуй позже.");
+                    if (!automatic) showMessage("Не удалось проверить обновления (HTTP " + response + "). Попробуй позже.");
                     return;
                 }
 
                 JSONObject release = new JSONObject(new String(readAll(c.getInputStream()), "UTF-8"));
+                activity.getSharedPreferences(UPDATE_PREFS, Activity.MODE_PRIVATE).edit()
+                        .putLong(LAST_CHECK, System.currentTimeMillis()).apply();
+
                 JSONArray assets = release.optJSONArray("assets");
                 String apkUrl = null;
                 if (assets != null) for (int i = 0; i < assets.length(); i++) {
@@ -55,7 +72,7 @@ final class UpdateManager {
                 }
                 if (apkUrl == null || apkUrl.isEmpty()) {
                     Log.e(TAG, "Latest release does not contain KinozalClient.apk");
-                    showMessage("В последнем релизе не найден установочный APK.");
+                    if (!automatic) showMessage("В последнем релизе не найден установочный APK.");
                     return;
                 }
 
@@ -73,15 +90,16 @@ final class UpdateManager {
                         .getPackageInfo(activity.getPackageName(), 0).versionCode;
                 if (remoteCode <= 0) {
                     Log.e(TAG, "Invalid release tag: " + release.optString("tag_name"));
-                    showMessage("Не удалось определить версию обновления.");
+                    if (!automatic) showMessage("Не удалось определить версию обновления.");
                 } else if (remoteCode <= localCode) {
-                    showMessage("Установлена последняя версия.");
+                    if (!automatic) showMessage("Установлена последняя версия.");
                 } else {
-                    downloadAndPrompt(apkUrl);
+                    if (automatic) showMessage("Найдено обновление. Загружаем…");
+                    downloadAndPrompt(apkUrl, automatic);
                 }
             } catch (Exception e) {
                 Log.e(TAG, "Update check failed", e);
-                showMessage("Не удалось проверить обновления. Проверь подключение к интернету и попробуй ещё раз.");
+                if (!automatic) showMessage("Не удалось проверить обновления. Проверь подключение к интернету и попробуй ещё раз.");
             } finally {
                 if (c != null) c.disconnect();
             }
@@ -93,7 +111,7 @@ final class UpdateManager {
                 Toast.makeText(activity, message, Toast.LENGTH_LONG).show());
     }
 
-    private void downloadAndPrompt(String apkUrl) throws Exception {
+    private void downloadAndPrompt(String apkUrl, boolean automatic) throws Exception {
         HttpURLConnection c = (HttpURLConnection) new URL(apkUrl).openConnection();
         c.setConnectTimeout(15000);
         c.setReadTimeout(60000);
@@ -108,6 +126,7 @@ final class UpdateManager {
                 byte[] buffer = new byte[32768];
                 int n;
                 while ((n = in.read(buffer)) != -1) out.write(buffer, 0, n);
+                out.getFD().sync();
             }
         } finally {
             c.disconnect();
