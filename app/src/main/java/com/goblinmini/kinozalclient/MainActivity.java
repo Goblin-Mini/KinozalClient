@@ -1142,7 +1142,7 @@ public class MainActivity extends Activity {
     private void showFavorites() { addEmpty("Избранное пока пусто. Добавление раздач будет подключено вместе с карточкой раздачи."); }
 
     private static class TorrentDetails {
-        String title = "", poster = "", torrentLink = "";
+        String title = "", poster = "", torrentLink = "", sourcePage = "";
         final java.util.LinkedHashMap<String, String> fields = new java.util.LinkedHashMap<>();
     }
 
@@ -1186,6 +1186,7 @@ public class MainActivity extends Activity {
     private TorrentDetails parseTorrentDetails(Document doc, Torrent torrent) {
         TorrentDetails data = new TorrentDetails();
         data.title = torrent.title;
+        data.sourcePage = torrent.href;
         Element info = doc.selectFirst(".bx1.justify h2");
         if (info != null) extractBoldFields(info, data.fields);
 
