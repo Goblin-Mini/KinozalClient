@@ -282,8 +282,13 @@ public final class KinozalHttpClient {
             String value = item.substring(equals + 1).trim();
             if (name.isEmpty()) continue;
             HttpCookie cookie = new HttpCookie(name, value);
+            // CookieManager.getCookie() returns only cookies applicable to this
+            // mirror URL. Give them an explicit host scope so java.net.CookieStore
+            // reliably sends them on subsequent native HTTPS requests.
+            cookie.setDomain(host);
             cookie.setPath("/");
-            // Host-only cookies are sufficient for the selected mirror.
+            cookie.setVersion(0);
+            if ("https".equalsIgnoreCase(origin.getScheme())) cookie.setSecure(true);
             cookies.getCookieStore().add(origin, cookie);
         }
         persistCookies();
