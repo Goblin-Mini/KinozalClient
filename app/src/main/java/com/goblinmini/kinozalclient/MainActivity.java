@@ -270,27 +270,34 @@ public class MainActivity extends Activity {
             item.torrent = new Torrent();
             item.torrent.title = title;
             item.torrent.href = href;
-            item.torrent.size = item.torrent.seeds = item.torrent.leeches = "—";
+            Element statsRow = a.closest("tr");
+            if (statsRow != null) {
+                Elements cells = statsRow.select("td");
+                item.torrent.size = cells.size() > 3 ? cells.get(3).text().trim() : "—";
+                item.torrent.seeds = cells.size() > 4 ? cells.get(4).text().trim() : "—";
+                item.torrent.leeches = cells.size() > 5 ? cells.get(5).text().trim() : "—";
+            } else {
+                item.torrent.size = item.torrent.seeds = item.torrent.leeches = "—";
+            }
             item.imageUrl = image;
             boolean duplicate = false;
             for (HomePoster old : out) {
                 if (old.torrent.href.equals(href)) { duplicate = true; break; }
             }
             if (!duplicate) out.add(item);
-            if (out.size() >= 12) break;
         }
         return out;
     }
 
     /**
-     * Remove duplicates only inside each home section. The same torrent may
-     * legitimately appear in Новинки, Топ недели and Топ месяца, so sections
-     * must not hide one another's cards.
+     * Collapse alternate encodes of the same release inside each home section.
+     * Keep the torrent with the most seeders; leechers break ties. Other sections
+     * remain independent so a title can appear in multiple home collections.
      */
     private void removeHomeDuplicates(List<HomeSection> sections) {
         for (HomeSection section : sections) {
+            java.util.LinkedHashMap<String, HomePoster> bestByTitle = new java.util.LinkedHashMap<>();
             java.util.Set<String> seenLinks = new java.util.HashSet<>();
-            java.util.Set<String> seenTitles = new java.util.HashSet<>();
             List<HomePoster> unique = new ArrayList<>();
             for (HomePoster item : section.items) {
                 String href = item.torrent.href == null ? "" : item.torrent.href;
@@ -299,19 +306,31 @@ public class MainActivity extends Activity {
                         .compile("[?&]id=(\\d+)", java.util.regex.Pattern.CASE_INSENSITIVE)
                         .matcher(href);
                 if (matcher.find()) id = matcher.group(1);
-                String titleKey = normalizeHomeTitle(item.torrent.title);
-                boolean duplicate = (!id.isEmpty() && seenLinks.contains("id:" + id))
-                        || (!href.isEmpty() && seenLinks.contains("url:" + href))
-                        || (!titleKey.isEmpty() && seenTitles.contains(titleKey));
-                if (duplicate) continue;
-                unique.add(item);
+                if ((!id.isEmpty() && seenLinks.contains("id:" + id))
+                        || (!href.isEmpty() && seenLinks.contains("url:" + href))) continue;
                 if (!id.isEmpty()) seenLinks.add("id:" + id);
                 if (!href.isEmpty()) seenLinks.add("url:" + href);
-                if (!titleKey.isEmpty()) seenTitles.add(titleKey);
+
+                String titleKey = normalizeHomeTitle(item.torrent.title);
+                if (titleKey.isEmpty()) {
+                    unique.add(item);
+                    continue;
+                }
+                HomePoster current = bestByTitle.get(titleKey);
+                if (current == null) {
+                    bestByTitle.put(titleKey, item);
+                } else if (homeTorrentScore(item) > homeTorrentScore(current)) {
+                    bestByTitle.put(titleKey, item);
+                }
             }
+            unique.addAll(bestByTitle.values());
             section.items.clear();
-            section.items.addAll(unique);
+            section.items.addAll(unique.subList(0, Math.min(12, unique.size())));
         }
+    }
+
+    private int homeTorrentScore(HomePoster item) {
+        return parseInt(item.torrent.seeds) * 1000000 + parseInt(item.torrent.leeches);
     }
 
     private String normalizeHomeTitle(String title) {
