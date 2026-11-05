@@ -201,8 +201,23 @@ public final class KinozalHttpClient {
                 continue;
             }
             if (code < 200 || code >= 300) {
+                String contentType = connection.getContentType();
+                InputStream errorStream = connection.getErrorStream();
+                String preview = "";
+                if (errorStream != null) {
+                    try (InputStream in = errorStream; ByteArrayOutputStream out = new ByteArrayOutputStream()) {
+                        byte[] sample = new byte[1024];
+                        int n;
+                        while ((n = in.read(sample)) != -1 && out.size() < 4096) out.write(sample, 0, n);
+                        preview = new String(out.toByteArray(), StandardCharsets.UTF_8)
+                                .replaceAll("\\s+", " ").trim();
+                        if (preview.length() > 500) preview = preview.substring(0, 500);
+                    } catch (Exception ignored) { }
+                }
                 connection.disconnect();
-                throw new java.io.IOException("HTTP " + code + " при загрузке файла");
+                throw new java.io.IOException("HTTP " + code + "; URL: " + current
+                        + "; тип: " + (contentType == null ? "не указан" : contentType)
+                        + "; ответ: " + (preview.isEmpty() ? "пустой" : preview));
             }
             try (InputStream in = connection.getInputStream(); ByteArrayOutputStream out = new ByteArrayOutputStream()) {
                 byte[] buffer = new byte[8192];
