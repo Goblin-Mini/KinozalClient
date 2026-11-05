@@ -675,6 +675,12 @@ public class MainActivity extends Activity {
         hint.setPadding(dp(12), dp(8), dp(12), dp(8));
         panel.addView(hint, new LinearLayout.LayoutParams(-1, -2));
 
+        // Keep the native keyboard launcher pinned above the scrolling website.
+        Button enterText = button("Ввод текста в выбранное поле");
+        LinearLayout.LayoutParams enterTextParams = new LinearLayout.LayoutParams(-1, dp(44));
+        enterTextParams.setMargins(dp(8), dp(4), dp(8), dp(6));
+        panel.addView(enterText, enterTextParams);
+
         WebView web = new WebView(this);
         web.setBackgroundColor(Color.WHITE);
         web.setVisibility(View.VISIBLE);
@@ -753,12 +759,8 @@ public class MainActivity extends Activity {
         LinearLayout actions = new LinearLayout(this);
         actions.setGravity(Gravity.CENTER_VERTICAL);
         actions.setPadding(dp(8), dp(6), dp(8), dp(6));
-        Button enterText = button("Ввод текста");
         Button close = button("Закрыть");
         Button done = button("Готово");
-        LinearLayout.LayoutParams enterParams = new LinearLayout.LayoutParams(0, dp(46), 1f);
-        enterParams.rightMargin = dp(8);
-        actions.addView(enterText, enterParams);
         enterText.setOnClickListener(v -> showWebTextEntry(web));
         actions.addView(close, new LinearLayout.LayoutParams(0, dp(46), 1f));
         LinearLayout.LayoutParams doneParams = new LinearLayout.LayoutParams(0, dp(46), 1f);
