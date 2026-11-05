@@ -848,7 +848,7 @@ public class MainActivity extends Activity {
                         + "e.dispatchEvent(new Event('input',{bubbles:true}));"
                         + "e.dispatchEvent(new Event('change',{bubbles:true}));return 'OK';})()";
                 web.evaluateJavascript(script, result -> {
-                    if ("\\"NO_FIELD\\"".equals(result) || result == null) {
+                    if ("\\\"NO_FIELD\\\"".equals(result) || result == null) {
                         showMessage("Поле сайта потеряло фокус. Выберите его ещё раз.");
                     }
                 });
