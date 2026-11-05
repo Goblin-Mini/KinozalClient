@@ -1064,6 +1064,23 @@ public class MainActivity extends Activity {
 
     private void showTorrent(Torrent t) {
         progress.setVisibility(View.VISIBLE);
+        if (sessionWebView != null) {
+            fetchBrowserPage(t.href, null, html -> {
+                progress.setVisibility(View.GONE);
+                if (html == null || html.isEmpty()) {
+                    showMessage("Не удалось загрузить карточку через браузерную сессию.");
+                    return;
+                }
+                try {
+                    Document doc = Jsoup.parse(html, t.href);
+                    TorrentDetails details = parseTorrentDetails(doc, t);
+                    showTorrentDetails(t, details);
+                } catch (Exception e) {
+                    showMessage("Не удалось разобрать карточку: " + safe(e.getMessage()));
+                }
+            });
+            return;
+        }
         io.execute(() -> {
             try {
                 String html = client.fetch(t.href);
