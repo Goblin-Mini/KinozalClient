@@ -75,13 +75,19 @@ jobs:
           mkdir -p dist
           cp app/build/outputs/apk/release/app-release.apk dist/KinozalClient.apk
           test -s dist/KinozalClient.apk
+          VERSION_CODE=$(sed -nE 's/^[[:space:]]*versionCode = ([0-9]+).*/\\1/p' app/build.gradle.kts)
+          VERSION_NAME=$(sed -nE 's/^[[:space:]]*versionName = "([^"]+)".*/\\1/p' app/build.gradle.kts)
+          test -n "$VERSION_CODE"
+          test -n "$VERSION_NAME"
+          echo "VERSION_CODE=$VERSION_CODE" >> "$GITHUB_ENV"
+          echo "VERSION_NAME=$VERSION_NAME" >> "$GITHUB_ENV"
 
       - name: Publish GitHub Release
         if: github.event_name != 'pull_request'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v6
-          name: KinozalClient v0.5.1
+          tag_name: v${{ env.VERSION_CODE }}
+          name: KinozalClient v${{ env.VERSION_NAME }}
           target_commitish: main
           files: dist/KinozalClient.apk
           overwrite_files: true
