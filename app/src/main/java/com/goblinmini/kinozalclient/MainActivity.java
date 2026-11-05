@@ -344,10 +344,14 @@ public class MainActivity extends Activity {
     }
 
     private void loadImageIntoView(String imageUrl, ImageView target) {
+        loadImageIntoView(imageUrl, target, client.getMirror() + "/");
+    }
+
+    private void loadImageIntoView(String imageUrl, ImageView target, String referer) {
         if (imageUrl == null || imageUrl.isEmpty()) return;
         WebView web = sessionWebView;
         if (web == null) {
-            loadImageWithHttp(imageUrl, target);
+            loadImageWithHttp(imageUrl, target, referer);
             return;
         }
         String quotedUrl = org.json.JSONObject.quote(imageUrl);
@@ -361,7 +365,7 @@ public class MainActivity extends Activity {
             try { encoded = new org.json.JSONArray("[" + result + "]").getString(0); }
             catch (Exception ignored) { }
             if (encoded == null || encoded.isEmpty() || "null".equals(encoded)) {
-                loadImageWithHttp(imageUrl, target);
+                loadImageWithHttp(imageUrl, target, referer);
                 return;
             }
             final String base64 = encoded;
@@ -372,16 +376,20 @@ public class MainActivity extends Activity {
                     if (bitmap != null) runOnUiThread(() -> {
                         if (target.getParent() != null) target.setImageBitmap(bitmap);
                     });
-                    else loadImageWithHttp(imageUrl, target);
-                } catch (Exception ignored) { loadImageWithHttp(imageUrl, target); }
+                    else loadImageWithHttp(imageUrl, target, referer);
+                } catch (Exception ignored) { loadImageWithHttp(imageUrl, target, referer); }
             });
         });
     }
 
     private void loadImageWithHttp(String imageUrl, ImageView target) {
+        loadImageWithHttp(imageUrl, target, client.getMirror() + "/");
+    }
+
+    private void loadImageWithHttp(String imageUrl, ImageView target, String referer) {
         io.execute(() -> {
             try {
-                byte[] bytes = client.fetchBytes(imageUrl, "image/*");
+                byte[] bytes = client.fetchBytes(imageUrl, "image/*", referer);
                 Bitmap bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.length);
                 if (bitmap != null) runOnUiThread(() -> {
                     if (target.getParent() != null) target.setImageBitmap(bitmap);
@@ -440,7 +448,7 @@ public class MainActivity extends Activity {
                 cardParams.rightMargin = dp(8);
                 strip.addView(card, cardParams);
                 card.setOnClickListener(v -> showTorrent(item.torrent));
-                if (!item.imageUrl.isEmpty()) loadImageIntoView(item.imageUrl, poster);
+                if (!item.imageUrl.isEmpty()) loadImageIntoView(item.imageUrl, poster, client.getMirror() + "/" + section.path);
             }
             horizontal.addView(strip);
             LinearLayout.LayoutParams rowParams = new LinearLayout.LayoutParams(-1, dp(238));
