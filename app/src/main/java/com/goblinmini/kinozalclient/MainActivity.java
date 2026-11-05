@@ -1665,7 +1665,8 @@ public class MainActivity extends Activity {
             // so the response is delivered only after the authenticated fetch finishes.
             web.addJavascriptInterface(new Object() {
                 @JavascriptInterface
-                public void onTorrentResult(int statusCode, String base64, String error) {
+                public void onTorrentResult(int statusCode, String base64, String error,
+                        String finalUrl, String contentType, String preview) {
                     runOnUiThread(() -> {
                         if (statusCode >= 200 && statusCode < 300 && base64 != null && !base64.isEmpty()) {
                             try {
@@ -1675,9 +1676,11 @@ public class MainActivity extends Activity {
                                 showMessage("Не удалось прочитать торрент: " + safe(e.getMessage()));
                             }
                         } else {
-                            // Keep the native retry as a fallback, but do not silently
-                            // treat the unresolved JS Promise as a successful response.
-                            downloadTorrentNative(data);
+                            String diagnostic = "WebView HTTP " + statusCode
+                                    + "; URL: " + safe(finalUrl)
+                                    + "; тип: " + safe(contentType)
+                                    + "; ответ: " + safe(preview);
+                            downloadTorrentNative(data, diagnostic);
                         }
                     });
                 }
@@ -1685,15 +1688,16 @@ public class MainActivity extends Activity {
             String url = org.json.JSONObject.quote(data.torrentLink);
             String script = "(function(){fetch(" + url
                     + ",{credentials:'include',redirect:'follow',cache:'no-store'})"
-                    + ".then(function(r){if(!r.ok){window.KinozalTorrentBridge.onTorrentResult(r.status,'','HTTP '+r.status);return;}"
+                    + ".then(function(r){var finalUrl=r.url||'',type=r.headers.get('content-type')||'';"
+                    + "if(!r.ok){return r.text().then(function(t){window.KinozalTorrentBridge.onTorrentResult(r.status,'','HTTP '+r.status,finalUrl,type,t.slice(0,500));});}"
                     + "return r.blob().then(function(blob){var reader=new FileReader();"
                     + "reader.onloadend=function(){var value=String(reader.result||'');"
                     + "var payload=value.substring(value.indexOf(',')+1);"
-                    + "if(blob.size<20||!payload||atob(payload).charCodeAt(0)!==100){window.KinozalTorrentBridge.onTorrentResult(0,'','HTTP 200 вернул не torrent-файл');return;}"
-                    + "window.KinozalTorrentBridge.onTorrentResult(r.status,payload,'');};"
-                    + "reader.onerror=function(){window.KinozalTorrentBridge.onTorrentResult(0,'','FileReader error');};"
+                    + "if(blob.size<20||!payload||atob(payload).charCodeAt(0)!==100){blob.text().then(function(t){window.KinozalTorrentBridge.onTorrentResult(r.status,'','Not a torrent',finalUrl,type,t.slice(0,500));});return;}"
+                    + "window.KinozalTorrentBridge.onTorrentResult(r.status,payload,'',finalUrl,type,'');};"
+                    + "reader.onerror=function(){window.KinozalTorrentBridge.onTorrentResult(0,'','FileReader error',finalUrl,type,'');};"
                     + "reader.readAsDataURL(blob);});})"
-                    + ".catch(function(e){window.KinozalTorrentBridge.onTorrentResult(0,'',String(e));});})()";
+                    + ".catch(function(e){window.KinozalTorrentBridge.onTorrentResult(0,'',String(e),'','','');});})()";
             web.evaluateJavascript(script, null);
         } else {
             downloadTorrentNative(data);
@@ -1701,6 +1705,10 @@ public class MainActivity extends Activity {
     }
 
     private void downloadTorrentNative(TorrentDetails data) {
+        downloadTorrentNative(data, "");
+    }
+
+    private void downloadTorrentNative(TorrentDetails data, String browserDiagnostic) {
         io.execute(() -> {
             try {
                 // Read cookies for the actual torrent details page, not just the
@@ -1718,7 +1726,10 @@ public class MainActivity extends Activity {
                                 ? client.getMirror() + "/" : data.sourcePage);
                 deliverTorrentBytes(data, bytes);
             } catch (Exception e) {
-                runOnUiThread(() -> showMessage("Не удалось передать торрент: " + safe(e.getMessage())));
+                String details = (browserDiagnostic == null || browserDiagnostic.isEmpty())
+                        ? "" : "\\n" + browserDiagnostic;
+                runOnUiThread(() -> showMessage("Не удалось передать торрент: "
+                        + safe(e.getMessage()) + details));
             }
         });
     }
