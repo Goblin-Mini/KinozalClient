@@ -172,6 +172,11 @@ public final class KinozalHttpClient {
 
     /** Download a protected image or torrent using the same authenticated HTTP cookie jar. */
     public synchronized byte[] fetchBytes(String target, String accept) throws Exception {
+        return fetchBytes(target, accept, baseUrl + "/");
+    }
+
+    /** Download a protected file with the details page as Referer (Kinozal checks hotlink origin). */
+    public synchronized byte[] fetchBytes(String target, String accept, String referer) throws Exception {
         String current = target.startsWith("http") ? target : baseUrl + "/" + target.replaceFirst("^/+", "");
         for (int redirect = 0; redirect < 9; redirect++) {
             URL url = new URL(current);
@@ -181,7 +186,8 @@ public final class KinozalHttpClient {
             connection.setInstanceFollowRedirects(false);
             connection.setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 Chrome/120.0 Mobile Safari/537.36");
             connection.setRequestProperty("Accept", accept == null ? "*/*" : accept);
-            connection.setRequestProperty("Referer", baseUrl + "/");
+            connection.setRequestProperty("Referer",
+                    referer == null || referer.trim().isEmpty() ? baseUrl + "/" : referer);
             URI uri = URI.create(current);
             List<String> cookieHeaders = cookies.get(uri, new java.util.HashMap<>()).get("Cookie");
             if (cookieHeaders != null && !cookieHeaders.isEmpty()) connection.setRequestProperty("Cookie", cookieHeaders.get(0));
