@@ -283,14 +283,14 @@ public class MainActivity extends Activity {
     }
 
     /**
-     * Keep the first occurrence across home sections: Новинки, Топ раздач,
-     * Топ недели, Топ месяца. Ignore common release/quality tags, but retain
-     * years and season/episode numbers to avoid merging different releases.
+     * Remove duplicates only inside each home section. The same torrent may
+     * legitimately appear in Новинки, Топ недели and Топ месяца, so sections
+     * must not hide one another's cards.
      */
     private void removeHomeDuplicates(List<HomeSection> sections) {
-        java.util.Set<String> seenLinks = new java.util.HashSet<>();
-        java.util.Set<String> seenTitles = new java.util.HashSet<>();
         for (HomeSection section : sections) {
+            java.util.Set<String> seenLinks = new java.util.HashSet<>();
+            java.util.Set<String> seenTitles = new java.util.HashSet<>();
             List<HomePoster> unique = new ArrayList<>();
             for (HomePoster item : section.items) {
                 String href = item.torrent.href == null ? "" : item.torrent.href;
