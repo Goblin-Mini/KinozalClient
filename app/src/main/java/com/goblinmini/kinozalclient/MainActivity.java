@@ -69,6 +69,8 @@ public class MainActivity extends Activity {
     private volatile String lastHtml = "";
     private WebView sessionWebView;
     private BrowserPageCallback pendingBrowserCallback;
+    private final android.os.Handler browserHandler = new android.os.Handler(android.os.Looper.getMainLooper());
+    private Runnable browserRequestTimeout;
     private interface BrowserPageCallback { void onPage(String html, String error); }
     private final java.util.LinkedHashMap<String, String> pageCache =
             new java.util.LinkedHashMap<String, String>(12, 0.75f, true) {
@@ -632,7 +634,18 @@ public class MainActivity extends Activity {
                         String html = "";
                         try { html = new org.json.JSONArray("[" + value + "]").getString(0); }
                         catch (Exception ignored) { }
-                        cb.onPage(html, html.isEmpty() ? "Пустая страница браузера" : null);
+                        if (html.isEmpty()) {
+                            cb.onPage(null, "Пустая страница браузера");
+                            return;
+                        }
+                        Document loaded = Jsoup.parse(html);
+                        boolean loginForm = !loaded.select("form:has(input[type=password])").isEmpty();
+                        String pageUrl = view.getUrl() == null ? "" : view.getUrl().toLowerCase(java.util.Locale.ROOT);
+                        if (loginForm || pageUrl.contains("login.php") || pageUrl.contains("takelogin.php")) {
+                            cb.onPage(null, "Сессия Kinozal не активна: сайт снова показывает форму входа. Откройте «Авторизация» и войдите.");
+                            return;
+                        }
+                        cb.onPage(html, null);
                     });
                 }
                 String currentCookies = manager.getCookie(client.getMirror());
@@ -651,12 +664,33 @@ public class MainActivity extends Activity {
             java.util.function.Consumer<String> callback) {
         WebView web = sessionWebView;
         if (web == null) { callback.accept(null); return; }
+        // Complete any previous request before starting another one. A stale
+        // WebView callback must never leave the UI waiting indefinitely.
+        if (browserRequestTimeout != null) browserHandler.removeCallbacks(browserRequestTimeout);
+        if (pendingBrowserCallback != null) {
+            BrowserPageCallback previous = pendingBrowserCallback;
+            pendingBrowserCallback = null;
+            previous.onPage(null, "Предыдущий запрос отменён");
+        }
         if (web.getParent() instanceof ViewGroup) ((ViewGroup) web.getParent()).removeView(web);
         web.setVisibility(View.INVISIBLE);
         if (web.getParent() == null) root.addView(web, new LinearLayout.LayoutParams(1, 1));
         String target = path.startsWith("http") ? path
                 : client.getMirror() + "/" + path.replaceFirst("^/+", "");
-        pendingBrowserCallback = (html, error) -> runOnUiThread(() -> callback.accept(error == null ? html : null));
+        pendingBrowserCallback = (html, error) -> {
+            if (browserRequestTimeout != null) browserHandler.removeCallbacks(browserRequestTimeout);
+            browserRequestTimeout = null;
+            runOnUiThread(() -> callback.accept(error == null ? html : null));
+        };
+        browserRequestTimeout = () -> {
+            if (pendingBrowserCallback == null) return;
+            BrowserPageCallback timedOut = pendingBrowserCallback;
+            pendingBrowserCallback = null;
+            browserRequestTimeout = null;
+            web.stopLoading();
+            timedOut.onPage(null, "Тайм-аут ожидания ответа Kinozal (30 секунд). Проверьте соединение или авторизацию.");
+        };
+        browserHandler.postDelayed(browserRequestTimeout, 30000);
         if (postBody == null) {
             web.loadUrl(target);
         } else {
