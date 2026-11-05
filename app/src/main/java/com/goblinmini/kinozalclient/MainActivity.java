@@ -185,6 +185,11 @@ public class MainActivity extends Activity {
             String href = mirrorUrl(a.absUrl("href"), a.attr("href"));
             if (href.isEmpty()) continue;
             Element img = a.selectFirst("img");
+            if (img == null) {
+                Element row = a.closest("tr");
+                if (row != null) img = row.selectFirst("img");
+            }
+            if (img == null && a.parent() != null) img = a.parent().selectFirst("img");
             String title = a.attr("title").trim();
             if (title.isEmpty() && img != null) title = img.attr("alt").trim();
             if (title.isEmpty()) title = a.text().replaceAll("\\s+", " ").trim();
@@ -192,7 +197,8 @@ public class MainActivity extends Activity {
             String image = "";
             if (img != null) {
                 String raw = firstImageSource(img);
-                image = resolveImageUrl(raw);
+                image = mirrorUrl(img.absUrl("src"), raw);
+                if (image.isEmpty()) image = resolveImageUrl(raw);
             }
             HomePoster item = new HomePoster();
             item.torrent = new Torrent();
@@ -1387,49 +1393,94 @@ public class MainActivity extends Activity {
             showMessage("Не удалось найти ссылку на торрент на странице раздачи.");
             return;
         }
-        try {
-            if (data.torrentLink.startsWith("magnet:")) {
+        if (data.torrentLink.startsWith("magnet:")) {
+            try {
                 Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(data.torrentLink));
                 intent.setPackage("ru.yourok.torrserve");
                 intent.putExtra("poster", data.poster == null ? "" : data.poster);
                 intent.putExtra("title", data.title == null ? "" : data.title);
                 startActivity(intent);
-                return;
+            } catch (Exception e) {
+                showMessage("Не удалось открыть magnet в TorrServe: " + safe(e.getMessage()));
             }
-        } catch (Exception e) {
-            showMessage("Не удалось открыть magnet в TorrServe: " + safe(e.getMessage()));
             return;
         }
-        progress.setVisibility(View.VISIBLE);
+
+        // Download through the same WebView session that opened the details page.
+        // This preserves Cloudflare/session cookies and the real details-page Referer.
+        WebView web = sessionWebView;
+        if (web != null) {
+            String url = org.json.JSONObject.quote(data.torrentLink);
+            String script = "(function(){return fetch(" + url
+                    + ",{credentials:'include',redirect:'follow',cache:'no-store'})"
+                    + ".then(function(r){if(!r.ok)return JSON.stringify({status:r.status,data:''});"
+                    + "return r.blob().then(function(b){return new Promise(function(resolve,reject){"
+                    + "var f=new FileReader();f.onloadend=function(){var v=String(f.result||'');"
+                    + "resolve(JSON.stringify({status:r.status,data:v.substring(v.indexOf(',')+1)}));};"
+                    + "f.onerror=reject;f.readAsDataURL(b);});});})"
+                    + ".catch(function(e){return JSON.stringify({status:0,data:'',error:String(e)});});})()";
+            web.evaluateJavascript(script, result -> {
+                try {
+                    String json = new org.json.JSONArray("[" + result + "]").getString(0);
+                    org.json.JSONObject response = new org.json.JSONObject(json);
+                    int code = response.optInt("status", 0);
+                    String encoded = response.optString("data", "");
+                    if (code >= 200 && code < 300 && !encoded.isEmpty()) {
+                        byte[] bytes = android.util.Base64.decode(encoded, android.util.Base64.DEFAULT);
+                        deliverTorrentBytes(data, bytes);
+                    } else {
+                        downloadTorrentNative(data);
+                    }
+                } catch (Exception ignored) {
+                    downloadTorrentNative(data);
+                }
+            });
+        } else {
+            downloadTorrentNative(data);
+        }
+    }
+
+    private void downloadTorrentNative(TorrentDetails data) {
         io.execute(() -> {
             try {
-                byte[] bytes = client.fetchBytes(data.torrentLink, "application/x-bittorrent,application/octet-stream,*/*");
-                if (bytes.length < 20 || bytes[0] != 'd') {
-                    throw new java.io.IOException("Сайт вернул не .torrent-файл. Проверь авторизацию.");
+                String browserCookies = CookieManager.getInstance().getCookie(client.getMirror());
+                if (browserCookies != null && !browserCookies.isEmpty()) {
+                    client.importBrowserCookies(browserCookies);
                 }
-                java.io.File target = new java.io.File(getCacheDir(), "kinozal-transfer.torrent");
-                try (java.io.FileOutputStream out = new java.io.FileOutputStream(target)) { out.write(bytes); }
-                Uri fileUri = Uri.parse("content://" + getPackageName() + ".torrentprovider/torrent");
-                Intent send = new Intent(Intent.ACTION_SEND);
-                send.setPackage("ru.yourok.torrserve");
-                send.setType("application/x-bittorrent");
-                send.putExtra(Intent.EXTRA_STREAM, fileUri);
-                send.putExtra("poster", data.poster == null ? "" : data.poster);
-                send.putExtra("title", data.title == null ? "" : data.title);
-                send.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-                send.setClipData(android.content.ClipData.newUri(getContentResolver(), "torrent", fileUri));
-                runOnUiThread(() -> {
-                    progress.setVisibility(View.GONE);
-                    try { startActivity(send); }
-                    catch (Exception e) { showMessage("TorrServe MatriX не установлен или не принимает файл."); }
-                });
+                byte[] bytes = client.fetchBytes(data.torrentLink,
+                        "application/x-bittorrent,application/octet-stream,*/*",
+                        data.sourcePage == null || data.sourcePage.isEmpty()
+                                ? client.getMirror() + "/" : data.sourcePage);
+                deliverTorrentBytes(data, bytes);
             } catch (Exception e) {
-                runOnUiThread(() -> {
-                    progress.setVisibility(View.GONE);
-                    showMessage("Не удалось передать торрент: " + safe(e.getMessage()));
-                });
+                runOnUiThread(() -> showMessage("Не удалось передать торрент: " + safe(e.getMessage())));
             }
         });
+    }
+
+    private void deliverTorrentBytes(TorrentDetails data, byte[] bytes) {
+        try {
+            if (bytes == null || bytes.length < 20 || bytes[0] != 'd') {
+                throw new java.io.IOException("Сайт вернул не .torrent-файл. Возможно, сессия истекла или зеркало отклонило запрос.");
+            }
+            java.io.File target = new java.io.File(getCacheDir(), "kinozal-transfer.torrent");
+            try (java.io.FileOutputStream out = new java.io.FileOutputStream(target)) { out.write(bytes); }
+            Uri fileUri = Uri.parse("content://" + getPackageName() + ".torrentprovider/torrent");
+            Intent send = new Intent(Intent.ACTION_SEND);
+            send.setPackage("ru.yourok.torrserve");
+            send.setType("application/x-bittorrent");
+            send.putExtra(Intent.EXTRA_STREAM, fileUri);
+            send.putExtra("poster", data.poster == null ? "" : data.poster);
+            send.putExtra("title", data.title == null ? "" : data.title);
+            send.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            send.setClipData(android.content.ClipData.newUri(getContentResolver(), "torrent", fileUri));
+            runOnUiThread(() -> {
+                try { startActivity(send); }
+                catch (Exception e) { showMessage("TorrServe MatriX не установлен или не принимает файл."); }
+            });
+        } catch (Exception e) {
+            runOnUiThread(() -> showMessage("Не удалось подготовить торрент: " + safe(e.getMessage())));
+        }
     }
 
     private void addEmpty(String message) {
