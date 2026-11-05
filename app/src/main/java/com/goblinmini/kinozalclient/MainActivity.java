@@ -187,7 +187,7 @@ public class MainActivity extends Activity {
                 }
                 runOnUiThread(() -> {
                     progress.setVisibility(View.GONE);
-                    status.setText("Главная · Постеров: " + total + "\nВерсия: " + BuildConfig.VERSION_NAME);
+                    status.setText("Главная · Постеров: " + total + "\nВерсия: " + getAppVersionName());
                     renderHome(sections);
                 });
             } catch (Exception e) {
@@ -216,7 +216,7 @@ public class MainActivity extends Activity {
                 return;
             }
             progress.setVisibility(View.GONE);
-            status.setText("Главная · Постеров: " + total + "\nВерсия: " + BuildConfig.VERSION_NAME);
+            status.setText("Главная · Постеров: " + total + "\nВерсия: " + getAppVersionName());
             renderHome(sections);
             return;
         }
@@ -350,6 +350,15 @@ public class MainActivity extends Activity {
             return path.replaceAll("/+$", "").toLowerCase(java.util.Locale.ROOT);
         } catch (Exception ignored) {
             return imageUrl.trim().toLowerCase(java.util.Locale.ROOT);
+        }
+    }
+
+    private String getAppVersionName() {
+        try {
+            android.content.pm.PackageInfo info = getPackageManager().getPackageInfo(getPackageName(), 0);
+            return info.versionName == null ? "неизвестна" : info.versionName;
+        } catch (Exception ignored) {
+            return "неизвестна";
         }
     }
 
