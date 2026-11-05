@@ -80,8 +80,8 @@ jobs:
         if: github.event_name != 'pull_request'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v5
-          name: KinozalClient v0.5.0
+          tag_name: v6
+          name: KinozalClient v0.5.1
           target_commitish: main
           files: dist/KinozalClient.apk
           overwrite_files: true
