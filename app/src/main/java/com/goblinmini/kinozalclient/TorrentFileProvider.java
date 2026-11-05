@@ -26,7 +26,10 @@ public class TorrentFileProvider extends ContentProvider {
     }
 
     @Override
-    public String getType(Uri uri) { return "application/x-bittorrent"; }
+    public String getType(Uri uri) {
+        return "update.apk".equals(uri.getLastPathSegment())
+                ? "application/vnd.android.package-archive" : "application/x-bittorrent";
+    }
 
     @Override
     public Cursor query(Uri uri, String[] projection, String selection, String[] selectionArgs, String sortOrder) {
