@@ -1394,8 +1394,8 @@ public class MainActivity extends Activity {
             // Tab selection controls content only. Visual highlighting follows
             // actual DPAD focus, so the unfocused Description tab is not lit
             // while the default focus is on Просмотр.
-            descriptionTab.setBackground(shape(PANEL, 0));
-            technicalTab.setBackground(shape(PANEL, 0));
+            descriptionTab.setBackground(shape(descriptionTab.hasFocus() ? Color.rgb(65, 72, 73) : PANEL, descriptionTab.hasFocus() ? GOLD : 0));
+            technicalTab.setBackground(shape(technicalTab.hasFocus() ? Color.rgb(65, 72, 73) : PANEL, technicalTab.hasFocus() ? GOLD : 0));
             detailsScroll.scrollTo(0, 0);
         };
         descriptionTab.setOnFocusChangeListener((v, focused) ->
