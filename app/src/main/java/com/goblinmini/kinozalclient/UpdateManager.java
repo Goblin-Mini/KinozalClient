@@ -20,7 +20,7 @@ import java.net.URL;
 final class UpdateManager {
     private static final String TAG = "KinozalUpdate";
     private static final String RELEASE_API =
-            "https://api.github.com/repos/Goblin-Mini/KinozalClient/releases/latest";
+            "https://api.github.com/repos/Goblin-Mini/KinozalClient/releases?per_page=30";
     private static final String UPDATE_PREFS = "kinozal_update_prefs";
     private static final String LAST_CHECK = "last_successful_check";
     private static final long CHECK_INTERVAL_MS = 24L * 60L * 60L * 1000L;
@@ -57,34 +57,44 @@ final class UpdateManager {
                     return;
                 }
 
-                JSONObject release = new JSONObject(new String(readAll(c.getInputStream()), "UTF-8"));
-                activity.getSharedPreferences(UPDATE_PREFS, Activity.MODE_PRIVATE).edit()
-                        .putLong(LAST_CHECK, System.currentTimeMillis()).apply();
-
-                JSONArray assets = release.optJSONArray("assets");
+                JSONArray releases = new JSONArray(new String(readAll(c.getInputStream()), "UTF-8"));
+                JSONObject release = null;
+                int remoteCode = 0;
                 String apkUrl = null;
-                if (assets != null) for (int i = 0; i < assets.length(); i++) {
-                    JSONObject asset = assets.getJSONObject(i);
-                    if ("KinozalClient.apk".equals(asset.optString("name"))) {
-                        apkUrl = asset.optString("browser_download_url");
-                        break;
+                for (int r = 0; r < releases.length(); r++) {
+                    JSONObject candidate = releases.optJSONObject(r);
+                    if (candidate == null || candidate.optBoolean("draft", true)
+                            || candidate.optBoolean("prerelease", false)) continue;
+                    String tag = candidate.optString("tag_name", "");
+                    java.util.regex.Matcher matcher = java.util.regex.Pattern
+                            .compile("v?(\\\\d+)").matcher(tag);
+                    if (!matcher.matches()) continue;
+                    int candidateCode;
+                    try { candidateCode = Integer.parseInt(matcher.group(1)); }
+                    catch (Exception ignored) { continue; }
+                    JSONArray candidateAssets = candidate.optJSONArray("assets");
+                    String candidateApk = null;
+                    if (candidateAssets != null) for (int i = 0; i < candidateAssets.length(); i++) {
+                        JSONObject asset = candidateAssets.optJSONObject(i);
+                        if (asset != null && "KinozalClient.apk".equals(asset.optString("name"))) {
+                            candidateApk = asset.optString("browser_download_url");
+                            break;
+                        }
+                    }
+                    if (candidateApk != null && !candidateApk.isEmpty()
+                            && candidateCode > remoteCode) {
+                        remoteCode = candidateCode;
+                        release = candidate;
+                        apkUrl = candidateApk;
                     }
                 }
-                if (apkUrl == null || apkUrl.isEmpty()) {
-                    Log.e(TAG, "Latest release does not contain KinozalClient.apk");
-                    if (!automatic) showMessage("В последнем релизе не найден установочный APK.");
+                if (release == null || apkUrl == null) {
+                    Log.e(TAG, "No published release with a valid APK was found");
+                    if (!automatic) showMessage("Не найден опубликованный APK обновления.");
                     return;
                 }
-
-                int remoteCode = 0;
-                try {
-                    String tag = release.optString("tag_name", "");
-                    java.util.regex.Matcher matcher =
-                            java.util.regex.Pattern.compile("v?(\\d+)").matcher(tag);
-                    if (matcher.matches()) remoteCode = Integer.parseInt(matcher.group(1));
-                } catch (Exception e) {
-                    Log.w(TAG, "Cannot parse release version", e);
-                }
+                activity.getSharedPreferences(UPDATE_PREFS, Activity.MODE_PRIVATE).edit()
+                        .putLong(LAST_CHECK, System.currentTimeMillis()).apply();
 
                 int localCode = activity.getPackageManager()
                         .getPackageInfo(activity.getPackageName(), 0).versionCode;
