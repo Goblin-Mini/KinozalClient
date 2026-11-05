@@ -742,7 +742,7 @@ public class MainActivity extends Activity {
 
         AlertDialog dialog = new AlertDialog.Builder(this)
                 .setTitle("Проверка Kinozal")
-                .setView(panel, 0, 0, 0, 0)
+                .setView(panel)
                 .create();
         close.setOnClickListener(v -> { web.stopLoading(); web.destroy(); dialog.dismiss(); });
         done.setOnClickListener(v -> {
