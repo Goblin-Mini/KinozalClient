@@ -713,6 +713,20 @@ public class MainActivity extends Activity {
         CookieManager manager = CookieManager.getInstance();
         manager.setAcceptCookie(true);
         manager.setAcceptThirdPartyCookies(web, true);
+        // WebView's own cookie store is persistent across normal APK updates.
+        // Prefer it over the flattened SharedPreferences header: rebuilding cookies
+        // from "name=value" loses domain, expiry, HttpOnly and SameSite attributes
+        // (notably Cloudflare clearance cookies).
+        String nativeWebViewCookies = manager.getCookie(client.getMirror());
+        if (nativeWebViewCookies != null && !nativeWebViewCookies.trim().isEmpty()) {
+            android.util.Log.i("KinozalSession",
+                    "Using persistent WebView cookie store; skipping manual cookie import");
+            manager.flush();
+            markStartupCatalogReady();
+            return;
+        }
+
+        // Compatibility fallback for installations whose WebView cookie store is empty.
         String[] pairs = cookieHeader.split(";");
         final int[] remaining = {0};
         for (String pair : pairs) if (pair.trim().contains("=")) remaining[0]++;
