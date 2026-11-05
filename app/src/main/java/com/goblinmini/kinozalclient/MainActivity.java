@@ -119,7 +119,7 @@ public class MainActivity extends Activity {
                     "top.php?t=0&d=0&f=0&k=0&j=&s=0&w=1",
                     "top.php?t=0&d=0&f=0&k=0&j=&s=0&w=2"},
                     new String[]{"Новинки", "Топ раздач", "Топ недели", "Топ месяца"}, 0,
-                    new ArrayList<>());
+                    new ArrayList<>(), 0);
             return;
         }
         io.execute(() -> {
@@ -158,11 +158,20 @@ public class MainActivity extends Activity {
     }
 
     private void loadHomeSectionsInBrowser(String[] paths, String[] titles, int index,
-            List<HomeSection> sections) {
+            List<HomeSection> sections, int retry) {
         if (index >= paths.length) {
             removeHomeDuplicates(sections);
             int total = 0;
             for (HomeSection section : sections) total += section.items.size();
+            // The first WebView pass can receive a Cloudflare/session warm-up page
+            // instead of the catalogue. Retry the complete home sequence once
+            // automatically so the user does not need to press Главная twice.
+            if (total == 0 && retry == 0) {
+                status.setText("Повторное подключение к Kinozal…");
+                browserHandler.postDelayed(() -> loadHomeSectionsInBrowser(
+                        paths, titles, 0, new ArrayList<>(), 1), 1500);
+                return;
+            }
             progress.setVisibility(View.GONE);
             status.setText("Главная · Постеров: " + total);
             renderHome(sections);
@@ -178,7 +187,7 @@ public class MainActivity extends Activity {
             HomeSection section = new HomeSection(titles[index], paths[index]);
             section.items.addAll(parseHomePosters(Jsoup.parse(html, client.getMirror() + "/")));
             sections.add(section);
-            loadHomeSectionsInBrowser(paths, titles, index + 1, sections);
+            loadHomeSectionsInBrowser(paths, titles, index + 1, sections, retry);
         });
     }
 
