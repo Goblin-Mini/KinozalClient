@@ -437,6 +437,7 @@ public class MainActivity extends Activity {
         addMenu("Избранное", () -> showFavorites());
         addMenu("Авторизация", () -> showLogin());
         addMenu("Зеркало", () -> chooseMirror());
+        addMenu("Проверить обновления", () -> new UpdateManager(this).check());
         status = text("Подключение…", 11, TEAL, false);
         LinearLayout.LayoutParams statusParams = new LinearLayout.LayoutParams(-1, dp(28));
         statusParams.topMargin = dp(4);
