@@ -268,6 +268,26 @@ public final class KinozalHttpClient {
         return false;
     }
 
+    /** Import cookies created by the browser-based Cloudflare check. */
+    public synchronized void importBrowserCookies(String cookieHeader) throws Exception {
+        if (cookieHeader == null || cookieHeader.trim().isEmpty()) return;
+        URI origin = URI.create(baseUrl);
+        String host = origin.getHost();
+        for (String part : cookieHeader.split(";")) {
+            String item = part.trim();
+            int equals = item.indexOf('=');
+            if (equals <= 0) continue;
+            String name = item.substring(0, equals).trim();
+            String value = item.substring(equals + 1).trim();
+            if (name.isEmpty()) continue;
+            HttpCookie cookie = new HttpCookie(name, value);
+            cookie.setPath("/");
+            // Host-only cookies are sufficient for the selected mirror.
+            cookies.getCookieStore().add(origin, cookie);
+        }
+        persistCookies();
+    }
+
     private void persistCookies() throws Exception {
         StringBuilder value = new StringBuilder();
         for (HttpCookie cookie : cookies.getCookieStore().getCookies()) {
