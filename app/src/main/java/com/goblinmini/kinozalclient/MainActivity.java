@@ -94,7 +94,9 @@ public class MainActivity extends Activity {
         if (savedBrowserCookies != null) {
             restoreBrowserSession(savedBrowserCookies);
         } else {
-            loadInitialCatalog();
+            // Let Android finish the first activity/layout frame and network stack
+            // initialization before the first catalogue request.
+            browserHandler.postDelayed(this::loadInitialCatalog, 1000);
         }
     }
 
@@ -110,6 +112,10 @@ public class MainActivity extends Activity {
     }
 
     private void loadInitialCatalog() {
+        loadInitialCatalog(0);
+    }
+
+    private void loadInitialCatalog(int startupRetry) {
         currentPath = "";
         currentTitle = "Главная";
         heading.setText("Главная");
@@ -142,6 +148,13 @@ public class MainActivity extends Activity {
                 int count = 0;
                 for (HomeSection section : sections) count += section.items.size();
                 final int total = count;
+                if (total == 0 && startupRetry == 0) {
+                    runOnUiThread(() -> {
+                        status.setText("Повторное подключение к Kinozal…");
+                        browserHandler.postDelayed(() -> loadInitialCatalog(1), 1500);
+                    });
+                    return;
+                }
                 runOnUiThread(() -> {
                     progress.setVisibility(View.GONE);
                     status.setText("Главная · Постеров: " + total);
