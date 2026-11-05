@@ -23,6 +23,12 @@ import android.widget.ProgressBar;
 import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
+import android.webkit.CookieManager;
+import android.webkit.WebChromeClient;
+import android.webkit.WebResourceRequest;
+import android.webkit.WebSettings;
+import android.webkit.WebView;
+import android.webkit.WebViewClient;
 
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
@@ -648,6 +654,118 @@ public class MainActivity extends Activity {
         showNativeLoginForm(client.getSavedCredentials());
     }
 
+    /**
+     * Opens a restricted browser only for the selected Kinozal mirror.
+     * Popups and top-level redirects to unrelated/ad domains are blocked.
+     * Cloudflare scripts and challenge frames remain enabled.
+     */
+    private void openCloudflareWindow() {
+        final String base = client.getMirror();
+        final String allowedHost;
+        try { allowedHost = java.net.URI.create(base).getHost().toLowerCase(java.util.Locale.ROOT); }
+        catch (Exception e) { showMessage("Некорректный адрес зеркала."); return; }
+
+        LinearLayout panel = new LinearLayout(this);
+        panel.setOrientation(LinearLayout.VERTICAL);
+        panel.setBackgroundColor(BG);
+        TextView hint = text("Пройдите проверку на сайте. Посторонние рекламные переходы и всплывающие окна блокируются.", 13, TEAL, false);
+        hint.setPadding(dp(12), dp(8), dp(12), dp(8));
+        panel.addView(hint, new LinearLayout.LayoutParams(-1, -2));
+
+        WebView web = new WebView(this);
+        web.setBackgroundColor(Color.WHITE);
+        WebSettings settings = web.getSettings();
+        settings.setJavaScriptEnabled(true);
+        settings.setDomStorageEnabled(true);
+        settings.setJavaScriptCanOpenWindowsAutomatically(false);
+        settings.setSupportMultipleWindows(false);
+        settings.setLoadsImagesAutomatically(true);
+        settings.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
+        CookieManager browserCookies = CookieManager.getInstance();
+        browserCookies.setAcceptCookie(true);
+        CookieManager.setAcceptFileSchemeCookies(false);
+        browserCookies.setAcceptThirdPartyCookies(web, false);
+        web.setWebChromeClient(new WebChromeClient() {
+            @Override public boolean onCreateWindow(WebView view, boolean isDialog,
+                    boolean isUserGesture, android.os.Message resultMsg) {
+                return false;
+            }
+        });
+        web.setWebViewClient(new WebViewClient() {
+            private boolean allowed(Uri uri) {
+                String host = uri == null ? null : uri.getHost();
+                if (host == null) return false;
+                host = host.toLowerCase(java.util.Locale.ROOT);
+                return host.equals(allowedHost);
+            }
+            @Override public boolean shouldOverrideUrlLoading(WebView view, String url) {
+                Uri uri = Uri.parse(url);
+                if (allowed(uri)) return false;
+                showMessage("Переход на посторонний сайт заблокирован.");
+                return true;
+            }
+            @Override public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
+                if (!request.isForMainFrame()) return false;
+                Uri uri = request.getUrl();
+                if (allowed(uri)) return false;
+                showMessage("Рекламный переход заблокирован.");
+                return true;
+            }
+            @Override public void onPageFinished(WebView view, String url) {
+                super.onPageFinished(view, url);
+                String cookie = browserCookies.getCookie(base);
+                if (cookie != null && !cookie.isEmpty()) {
+                    try { client.importBrowserCookies(cookie); } catch (Exception ignored) { }
+                }
+            }
+        });
+
+        LinearLayout.LayoutParams webParams = new LinearLayout.LayoutParams(-1, 0, 1f);
+        panel.addView(web, webParams);
+        LinearLayout actions = new LinearLayout(this);
+        actions.setGravity(Gravity.CENTER_VERTICAL);
+        actions.setPadding(dp(8), dp(6), dp(8), dp(6));
+        Button close = button("Закрыть");
+        Button done = button("Готово");
+        actions.addView(close, new LinearLayout.LayoutParams(0, dp(46), 1f));
+        LinearLayout.LayoutParams doneParams = new LinearLayout.LayoutParams(0, dp(46), 1f);
+        doneParams.leftMargin = dp(8);
+        actions.addView(done, doneParams);
+        panel.addView(actions, new LinearLayout.LayoutParams(-1, -2));
+
+        AlertDialog dialog = new AlertDialog.Builder(this)
+                .setTitle("Проверка Kinozal")
+                .setView(panel)
+                .create();
+        close.setOnClickListener(v -> { web.stopLoading(); web.destroy(); dialog.dismiss(); });
+        done.setOnClickListener(v -> {
+            browserCookies.flush();
+            String cookie = browserCookies.getCookie(base);
+            if (cookie != null && !cookie.isEmpty()) {
+                try { client.importBrowserCookies(cookie); } catch (Exception e) {
+                    showMessage("Не удалось сохранить cookies: " + safe(e.getMessage()));
+                    return;
+                }
+            }
+            web.stopLoading();
+            web.destroy();
+            dialog.dismiss();
+            showMessage("Cookies проверки переданы приложению. Попробуйте снова войти или открыть каталог.");
+            status.setText("Проверка сайта выполнена");
+        });
+        dialog.setOnDismissListener(d -> {
+            if (web.getParent() != null) {
+                web.stopLoading();
+                web.destroy();
+            }
+        });
+        dialog.show();
+        dialog.getWindow().setLayout(
+                (int)(getResources().getDisplayMetrics().widthPixels * 0.88f),
+                (int)(getResources().getDisplayMetrics().heightPixels * 0.88f));
+        web.loadUrl(base + "/");
+    }
+
     private void showNativeLoginForm(String[] saved) {
         LinearLayout form = new LinearLayout(this);
         form.setOrientation(LinearLayout.VERTICAL);
@@ -677,6 +795,13 @@ public class MainActivity extends Activity {
         LinearLayout.LayoutParams passwordParams = new LinearLayout.LayoutParams(-1, dp(52));
         passwordParams.topMargin = dp(10);
         form.addView(password, passwordParams);
+
+        Button cloudflare = button("Открыть проверку сайта");
+        cloudflare.setTextSize(13);
+        LinearLayout.LayoutParams cloudflareParams = new LinearLayout.LayoutParams(-1, dp(44));
+        cloudflareParams.topMargin = dp(10);
+        form.addView(cloudflare, cloudflareParams);
+        cloudflare.setOnClickListener(v -> openCloudflareWindow());
 
         if (saved != null) {
             username.setText(saved[0]);
