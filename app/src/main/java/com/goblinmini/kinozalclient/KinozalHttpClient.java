@@ -68,7 +68,8 @@ public final class KinozalHttpClient {
         if (username == null || username.trim().isEmpty() || password == null || password.isEmpty()) {
             throw new IllegalArgumentException("Введите логин и пароль");
         }
-        cookies.getCookieStore().removeAll();
+        // Keep Cloudflare clearance cookies imported from the browser check.
+        // Clearing the whole jar here removes cf_clearance and causes HTTP 403.
         String loginUrl = baseUrl + "/login.php?m=5";
         String loginHtml = request(loginUrl, "GET", null, false);
         org.jsoup.nodes.Document doc = org.jsoup.Jsoup.parse(loginHtml, loginUrl);
