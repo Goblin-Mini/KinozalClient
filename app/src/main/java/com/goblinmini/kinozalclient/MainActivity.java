@@ -1727,11 +1727,35 @@ public class MainActivity extends Activity {
                 deliverTorrentBytes(data, bytes);
             } catch (Exception e) {
                 String details = (browserDiagnostic == null || browserDiagnostic.isEmpty())
-                        ? "" : "\\n" + browserDiagnostic;
-                runOnUiThread(() -> showMessage("Не удалось передать торрент: "
-                        + safe(e.getMessage()) + details));
+                        ? "" : "\\n\\nОтвет WebView:\\n" + browserDiagnostic;
+                String report = "Не удалось передать торрент\\n\\n"
+                        + safe(e.getMessage()) + details;
+                runOnUiThread(() -> showTorrentDiagnostic(report));
             }
         });
+    }
+
+    private void showTorrentDiagnostic(String report) {
+        android.widget.TextView message = new android.widget.TextView(this);
+        message.setText(report);
+        message.setTextIsSelectable(true);
+        message.setTextSize(14);
+        int pad = (int) (16 * getResources().getDisplayMetrics().density);
+        message.setPadding(pad, pad, pad, pad);
+        android.widget.ScrollView scroll = new android.widget.ScrollView(this);
+        scroll.addView(message);
+        new android.app.AlertDialog.Builder(this)
+                .setTitle("Диагностика загрузки торрента")
+                .setView(scroll)
+                .setPositiveButton("Копировать", (dialog, which) -> {
+                    android.content.ClipboardManager clipboard =
+                            (android.content.ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
+                    if (clipboard != null) clipboard.setPrimaryClip(
+                            android.content.ClipData.newPlainText("Kinozal torrent diagnostic", report));
+                    showMessage("Диагностика скопирована");
+                })
+                .setNegativeButton("Закрыть", null)
+                .show();
     }
 
     private void deliverTorrentBytes(TorrentDetails data, byte[] bytes) {
