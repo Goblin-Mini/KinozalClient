@@ -73,6 +73,7 @@ public class MainActivity extends Activity {
     private Runnable browserRequestTimeout;
     private boolean startupCatalogReady = false;
     private boolean startupCatalogStarted = false;
+    private boolean automaticUpdateCheckScheduled = false;
     private interface BrowserPageCallback { void onPage(String html, String error); }
     private final java.util.LinkedHashMap<String, String> pageCache =
             new java.util.LinkedHashMap<String, String>(12, 0.75f, true) {
@@ -104,7 +105,17 @@ public class MainActivity extends Activity {
 
     @Override public void onWindowFocusChanged(boolean hasFocus) {
         super.onWindowFocusChanged(hasFocus);
-        if (hasFocus) startInitialCatalogWhenReady();
+        if (hasFocus) {
+            startInitialCatalogWhenReady();
+            scheduleAutomaticUpdateCheck();
+        }
+    }
+
+    private void scheduleAutomaticUpdateCheck() {
+        if (automaticUpdateCheckScheduled) return;
+        automaticUpdateCheckScheduled = true;
+        // Let the home screen settle before making a background network request.
+        browserHandler.postDelayed(() -> new UpdateManager(this).checkAutomatically(), 15000);
     }
 
     private void markStartupCatalogReady() {
