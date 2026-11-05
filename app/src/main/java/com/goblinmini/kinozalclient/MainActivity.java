@@ -67,6 +67,9 @@ public class MainActivity extends Activity {
     private final List<Torrent> torrents = new ArrayList<>();
     private int page = 0;
     private volatile String lastHtml = "";
+    private WebView sessionWebView;
+    private BrowserPageCallback pendingBrowserCallback;
+    private interface BrowserPageCallback { void onPage(String html, String error); }
     private final java.util.LinkedHashMap<String, String> pageCache =
             new java.util.LinkedHashMap<String, String>(12, 0.75f, true) {
                 @Override protected boolean removeEldestEntry(java.util.Map.Entry<String, String> eldest) {
@@ -400,16 +403,41 @@ public class MainActivity extends Activity {
         synchronized (pageCache) { cachedPage = pageCache.get(cacheKey); }
         if (cachedPage != null) { showLoadedPage(cachedPage); return; }
         progress.setVisibility(View.VISIBLE); list.removeAllViews();
-        io.execute(() -> {
-            try {
-                String html = postBody == null ? client.fetch(path) : client.fetchPost(path, postBody);
-                synchronized (pageCache) { pageCache.put(cacheKey, html); }
-                runOnUiThread(() -> showLoadedPage(html));
-            } catch (Exception e) {
-                runOnUiThread(() -> { progress.setVisibility(View.GONE); status.setText("Нет соединения");
-                    addEmpty("Не удалось загрузить каталог. " + safe(e.getMessage())); });
-            }
-        });
+        if (sessionWebView != null) {
+            fetchBrowserPage(path, html -> {
+                if (html != null && !html.isEmpty()) {
+                    synchronized (pageCache) { pageCache.put(cacheKey, html); }
+                    showLoadedPage(html);
+                } else {
+                    progress.setVisibility(View.GONE);
+                    status.setText("Нет соединения");
+                    addEmpty("Не удалось загрузить каталог через браузерную сессию.");
+                }
+            });
+        } else {
+            io.execute(() -> {
+                try {
+                    String html = postBody == null ? client.fetch(path) : client.fetchPost(path, postBody);
+                    synchronized (pageCache) { pageCache.put(cacheKey, html); }
+                    runOnUiThread(() -> showLoadedPage(html));
+                } catch (Exception e) {
+                    runOnUiThread(() -> { progress.setVisibility(View.GONE); status.setText("Нет соединения");
+                        addEmpty("Не удалось загрузить каталог. " + safe(e.getMessage())); });
+                }
+            });
+        }
+    }
+
+    private void fetchBrowserPage(String path, java.util.function.Consumer<String> callback) {
+        WebView web = sessionWebView;
+        if (web == null) { callback.accept(null); return; }
+        if (web.getParent() instanceof ViewGroup) ((ViewGroup) web.getParent()).removeView(web);
+        web.setVisibility(View.INVISIBLE);
+        if (web.getParent() == null) root.addView(web, new LinearLayout.LayoutParams(1, 1));
+        String target = path.startsWith("http") ? path
+                : client.getMirror() + "/" + path.replaceFirst("^/+", "");
+        pendingBrowserCallback = (html, error) -> runOnUiThread(() -> callback.accept(error == null ? html : null));
+        web.loadUrl(target);
     }
 
     private void showLoadedPage(String html) {
@@ -672,7 +700,13 @@ public class MainActivity extends Activity {
         panel.setMinimumHeight((int)(getResources().getDisplayMetrics().heightPixels * 0.72f));
         panel.setLayoutParams(new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
-        WebView web = new WebView(this);
+        WebView web = sessionWebView;
+        if (web == null) {
+            web = new WebView(this);
+            sessionWebView = web;
+        } else if (web.getParent() instanceof ViewGroup) {
+            ((ViewGroup) web.getParent()).removeView(web);
+        }
         web.setBackgroundColor(Color.WHITE);
         web.setVisibility(View.VISIBLE);
         web.setMinimumHeight(dp(360));
@@ -737,6 +771,16 @@ public class MainActivity extends Activity {
             }
             @Override public void onPageFinished(WebView view, String url) {
                 super.onPageFinished(view, url);
+                if (pendingBrowserCallback != null) {
+                    BrowserPageCallback callback = pendingBrowserCallback;
+                    pendingBrowserCallback = null;
+                    view.evaluateJavascript("(document.documentElement ? document.documentElement.outerHTML : '')", value -> {
+                        String html = "";
+                        try { html = new org.json.JSONArray("[" + value + "]").getString(0); }
+                        catch (Exception ignored) { }
+                        callback.onPage(html, html.isEmpty() ? "Пустая страница браузера" : null);
+                    });
+                }
                 view.evaluateJavascript("(function(){if(window.__kinozalInputHook)return;window.__kinozalInputHook=true;"
                         + "document.addEventListener('focusin',function(ev){var e=ev.target;if(!e)return;"
                         + "var tag=(e.tagName||'').toLowerCase(),type=(e.type||'text').toLowerCase();"
@@ -775,7 +819,13 @@ public class MainActivity extends Activity {
                 .setTitle("Проверка Kinozal")
                 .setView(panel)
                 .create();
-        close.setOnClickListener(v -> { web.stopLoading(); web.destroy(); dialog.dismiss(); });
+        close.setOnClickListener(v -> {
+            web.stopLoading();
+            if (web.getParent() instanceof ViewGroup) ((ViewGroup) web.getParent()).removeView(web);
+            web.setVisibility(View.INVISIBLE);
+            root.addView(web, new LinearLayout.LayoutParams(1, 1));
+            dialog.dismiss();
+        });
         done.setOnClickListener(v -> {
             browserCookies.flush();
             String cookie = browserCookies.getCookie(base);
@@ -792,15 +842,18 @@ public class MainActivity extends Activity {
                 }
             }
             web.stopLoading();
-            web.destroy();
+            if (web.getParent() instanceof ViewGroup) ((ViewGroup) web.getParent()).removeView(web);
+            web.setVisibility(View.INVISIBLE);
+            root.addView(web, new LinearLayout.LayoutParams(1, 1));
             dialog.dismiss();
             showMessage("Cookies браузера переданы приложению.");
             status.setText("Проверка сайта выполнена");
         });
         dialog.setOnDismissListener(d -> {
-            if (web.getParent() != null) {
-                web.stopLoading();
-                web.destroy();
+            if (web.getParent() == panel) {
+                panel.removeView(web);
+                web.setVisibility(View.INVISIBLE);
+                if (web.getParent() == null) root.addView(web, new LinearLayout.LayoutParams(1, 1));
             }
         });
         dialog.show();
