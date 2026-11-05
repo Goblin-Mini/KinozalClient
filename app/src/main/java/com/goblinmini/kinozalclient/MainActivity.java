@@ -187,7 +187,7 @@ public class MainActivity extends Activity {
                 }
                 runOnUiThread(() -> {
                     progress.setVisibility(View.GONE);
-                    status.setText("Главная · Постеров: " + total);
+                    status.setText("Главная · Постеров: " + total + "\nВерсия: " + BuildConfig.VERSION_NAME);
                     renderHome(sections);
                 });
             } catch (Exception e) {
@@ -216,7 +216,7 @@ public class MainActivity extends Activity {
                 return;
             }
             progress.setVisibility(View.GONE);
-            status.setText("Главная · Постеров: " + total);
+            status.setText("Главная · Постеров: " + total + "\nВерсия: " + BuildConfig.VERSION_NAME);
             renderHome(sections);
             return;
         }
