@@ -197,7 +197,8 @@ public class MainActivity extends Activity {
             String image = "";
             if (img != null) {
                 String raw = firstImageSource(img);
-                image = mirrorUrl(img.absUrl("src"), raw);
+                // Use the real lazy-load attribute, not a placeholder data: URL from src.
+                image = mirrorUrl("", raw);
                 if (image.isEmpty()) image = resolveImageUrl(raw);
             }
             HomePoster item = new HomePoster();
@@ -469,7 +470,7 @@ public class MainActivity extends Activity {
         scroll.addView(list);
         main.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1));
         setContentView(root);
-        sidebar.getChildAt(1).requestFocus();
+        if (menuItems.getChildCount() > 0) menuItems.getChildAt(0).requestFocus();
     }
 
     private void addMenu(String label, Runnable action) {
@@ -1402,31 +1403,38 @@ public class MainActivity extends Activity {
         // This preserves Cloudflare/session cookies and the real details-page Referer.
         WebView web = sessionWebView;
         if (web != null) {
-            String url = org.json.JSONObject.quote(data.torrentLink);
-            String script = "(function(){return fetch(" + url
-                    + ",{credentials:'include',redirect:'follow',cache:'no-store'})"
-                    + ".then(function(r){if(!r.ok)return JSON.stringify({status:r.status,data:''});"
-                    + "return r.blob().then(function(b){return new Promise(function(resolve,reject){"
-                    + "var f=new FileReader();f.onloadend=function(){var v=String(f.result||'');"
-                    + "resolve(JSON.stringify({status:r.status,data:v.substring(v.indexOf(',')+1)}));};"
-                    + "f.onerror=reject;f.readAsDataURL(b);});});})"
-                    + ".catch(function(e){return JSON.stringify({status:0,data:'',error:String(e)});});})()";
-            web.evaluateJavascript(script, result -> {
-                try {
-                    String json = new org.json.JSONArray("[" + result + "]").getString(0);
-                    org.json.JSONObject response = new org.json.JSONObject(json);
-                    int code = response.optInt("status", 0);
-                    String encoded = response.optString("data", "");
-                    if (code >= 200 && code < 300 && !encoded.isEmpty()) {
-                        byte[] bytes = android.util.Base64.decode(encoded, android.util.Base64.DEFAULT);
-                        deliverTorrentBytes(data, bytes);
-                    } else {
-                        downloadTorrentNative(data);
-                    }
-                } catch (Exception ignored) {
-                    downloadTorrentNative(data);
+            // evaluateJavascript does not await a returned Promise. Use a JS bridge
+            // so the response is delivered only after the authenticated fetch finishes.
+            web.addJavascriptInterface(new Object() {
+                @JavascriptInterface
+                public void onTorrentResult(int statusCode, String base64, String error) {
+                    runOnUiThread(() -> {
+                        if (statusCode >= 200 && statusCode < 300 && base64 != null && !base64.isEmpty()) {
+                            try {
+                                byte[] bytes = android.util.Base64.decode(base64, android.util.Base64.DEFAULT);
+                                deliverTorrentBytes(data, bytes);
+                            } catch (Exception e) {
+                                showMessage("Не удалось прочитать торрент: " + safe(e.getMessage()));
+                            }
+                        } else {
+                            // Keep the native retry as a fallback, but do not silently
+                            // treat the unresolved JS Promise as a successful response.
+                            downloadTorrentNative(data);
+                        }
+                    });
                 }
-            });
+            }, "KinozalTorrentBridge");
+            String url = org.json.JSONObject.quote(data.torrentLink);
+            String script = "(function(){fetch(" + url
+                    + ",{credentials:'include',redirect:'follow',cache:'no-store'})"
+                    + ".then(function(r){if(!r.ok){window.KinozalTorrentBridge.onTorrentResult(r.status,'','HTTP '+r.status);return;}"
+                    + "return r.blob().then(function(blob){var reader=new FileReader();"
+                    + "reader.onloadend=function(){var value=String(reader.result||'');"
+                    + "window.KinozalTorrentBridge.onTorrentResult(r.status,value.substring(value.indexOf(',')+1),'');};"
+                    + "reader.onerror=function(){window.KinozalTorrentBridge.onTorrentResult(0,'','FileReader error');};"
+                    + "reader.readAsDataURL(blob);});})"
+                    + ".catch(function(e){window.KinozalTorrentBridge.onTorrentResult(0,'',String(e));});})()";
+            web.evaluateJavascript(script, null);
         } else {
             downloadTorrentNative(data);
         }
