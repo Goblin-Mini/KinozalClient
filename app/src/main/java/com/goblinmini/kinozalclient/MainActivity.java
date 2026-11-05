@@ -681,6 +681,27 @@ public class MainActivity extends Activity {
         web.setMinimumHeight(dp(360));
         web.setFocusable(true);
         web.setFocusableInTouchMode(true);
+        web.setDescendantFocusability(ViewGroup.FOCUS_AFTER_DESCENDANTS);
+        web.setOnKeyListener((view, keyCode, event) -> {
+            // Some Android TV remotes report the OK button as DPAD_CENTER;
+            // forward it as ENTER so focused HTML controls (including Turnstile)
+            // receive a normal activation key.
+            if (keyCode == android.view.KeyEvent.KEYCODE_DPAD_CENTER) {
+                android.view.KeyEvent forwarded = new android.view.KeyEvent(
+                        event.getDownTime(), event.getEventTime(),
+                        event.getAction(), android.view.KeyEvent.KEYCODE_ENTER,
+                        event.getRepeatCount(), event.getMetaState(),
+                        event.getDeviceId(), event.getScanCode(),
+                        event.getFlags(), event.getSource());
+                if (event.getAction() == android.view.KeyEvent.ACTION_DOWN) {
+                    web.onKeyDown(android.view.KeyEvent.KEYCODE_ENTER, forwarded);
+                } else if (event.getAction() == android.view.KeyEvent.ACTION_UP) {
+                    web.onKeyUp(android.view.KeyEvent.KEYCODE_ENTER, forwarded);
+                }
+                return true;
+            }
+            return false;
+        });
         WebSettings settings = web.getSettings();
         settings.setJavaScriptEnabled(true);
         settings.setDomStorageEnabled(true);
@@ -691,7 +712,7 @@ public class MainActivity extends Activity {
         CookieManager browserCookies = CookieManager.getInstance();
         browserCookies.setAcceptCookie(true);
         CookieManager.setAcceptFileSchemeCookies(false);
-        browserCookies.setAcceptThirdPartyCookies(web, false);
+        browserCookies.setAcceptThirdPartyCookies(web, true);
         web.setWebChromeClient(new WebChromeClient() {
             @Override public boolean onCreateWindow(WebView view, boolean isDialog,
                     boolean isUserGesture, android.os.Message resultMsg) {
@@ -772,6 +793,7 @@ public class MainActivity extends Activity {
                 (int)(getResources().getDisplayMetrics().heightPixels * 0.88f));
         web.post(() -> {
             web.requestLayout();
+            web.requestFocus();
             web.loadUrl(base + "/");
         });
     }
