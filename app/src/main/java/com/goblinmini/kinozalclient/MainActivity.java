@@ -1657,51 +1657,122 @@ public class MainActivity extends Activity {
             return;
         }
 
-        // Download through the same WebView session that opened the details page.
-        // This preserves Cloudflare/session cookies and the real details-page Referer.
-        WebView web = sessionWebView;
-        if (web != null) {
-            // evaluateJavascript does not await a returned Promise. Use a JS bridge
-            // so the response is delivered only after the authenticated fetch finishes.
-            web.addJavascriptInterface(new Object() {
-                @JavascriptInterface
-                public void onTorrentResult(int statusCode, String base64, String error,
-                        String finalUrl, String contentType, String preview) {
-                    runOnUiThread(() -> {
-                        if (statusCode >= 200 && statusCode < 300 && base64 != null && !base64.isEmpty()) {
-                            try {
-                                byte[] bytes = android.util.Base64.decode(base64, android.util.Base64.DEFAULT);
+        openCloudflareDownload(data);
+    }
+
+    private void openCloudflareDownload(TorrentDetails data) {
+        final LinearLayout panel = new LinearLayout(this);
+        panel.setOrientation(LinearLayout.VERTICAL);
+        panel.setPadding(12, 8, 12, 4);
+        TextView hint = new TextView(this);
+        hint.setText("Откройте проверку Kinozal в окне ниже. Если появится Cloudflare, дождитесь её завершения, затем нажмите «Проверить и скачать».");
+        hint.setTextColor(GOLD);
+        hint.setTextSize(14);
+        panel.addView(hint, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        WebView browser = new WebView(this);
+        browser.setBackgroundColor(BG);
+        WebSettings settings = browser.getSettings();
+        settings.setJavaScriptEnabled(true);
+        settings.setDomStorageEnabled(true);
+        settings.setLoadsImagesAutomatically(true);
+        settings.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
+        CookieManager cookies = CookieManager.getInstance();
+        cookies.setAcceptCookie(true);
+        cookies.setAcceptThirdPartyCookies(browser, true);
+        LinearLayout.LayoutParams browserParams = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, (int) (390 * getResources().getDisplayMetrics().density));
+        browserParams.topMargin = 8;
+        panel.addView(browser, browserParams);
+
+        final AlertDialog dialog = new AlertDialog.Builder(this)
+                .setTitle("Проверка Kinozal")
+                .setView(panel)
+                .setNegativeButton("Отмена", null)
+                .setPositiveButton("Проверить и скачать", null)
+                .create();
+
+        browser.addJavascriptInterface(new Object() {
+            @JavascriptInterface
+            public void onResult(int statusCode, String base64, String finalUrl,
+                    String contentType, String preview, String error) {
+                runOnUiThread(() -> {
+                    if (statusCode >= 200 && statusCode < 300 && base64 != null && !base64.isEmpty()) {
+                        try {
+                            byte[] bytes = android.util.Base64.decode(base64, android.util.Base64.DEFAULT);
+                            if (bytes.length >= 20 && bytes[0] == 'd') {
+                                cookies.flush();
+                                String currentCookies = cookies.getCookie(data.sourcePage);
+                                if (currentCookies != null) {
+                                    client.importBrowserCookies(currentCookies);
+                                    client.saveBrowserCookies(currentCookies);
+                                }
+                                dialog.dismiss();
                                 deliverTorrentBytes(data, bytes);
-                            } catch (Exception e) {
-                                showMessage("Не удалось прочитать торрент: " + safe(e.getMessage()));
+                                return;
                             }
-                        } else {
-                            String diagnostic = "WebView HTTP " + statusCode
-                                    + "; URL: " + safe(finalUrl)
-                                    + "; тип: " + safe(contentType)
-                                    + "; ответ: " + safe(preview);
-                            downloadTorrentNative(data, diagnostic);
-                        }
-                    });
+                        } catch (Exception ignored) { }
+                    }
+                    String message = "Ответ: HTTP " + statusCode
+                            + "\\nАдрес: " + safe(finalUrl)
+                            + "\\nТип: " + safe(contentType)
+                            + "\\n" + (error == null ? "" : error)
+                            + "\\n" + safe(preview);
+                    hint.setText(message + "\\n\\nЕсли это проверка Cloudflare, завершите её в окне и нажмите кнопку ещё раз.");
+                });
+            }
+        }, "KinozalBrowserBridge");
+
+        browser.setWebChromeClient(new WebChromeClient());
+        browser.setWebViewClient(new WebViewClient() {
+            @Override public void onPageFinished(WebView view, String url) {
+                super.onPageFinished(view, url);
+                cookies.flush();
+                String currentCookies = cookies.getCookie(url);
+                if (currentCookies != null && !currentCookies.isEmpty()) {
+                    try {
+                        client.importBrowserCookies(currentCookies);
+                        client.saveBrowserCookies(currentCookies);
+                    } catch (Exception ignored) { }
                 }
-            }, "KinozalTorrentBridge");
-            String url = org.json.JSONObject.quote(data.torrentLink);
-            String script = "(function(){fetch(" + url
-                    + ",{credentials:'include',redirect:'follow',cache:'no-store'})"
-                    + ".then(function(r){var finalUrl=r.url||'',type=r.headers.get('content-type')||'';"
-                    + "if(!r.ok){return r.text().then(function(t){window.KinozalTorrentBridge.onTorrentResult(r.status,'','HTTP '+r.status,finalUrl,type,t.slice(0,500));});}"
-                    + "return r.blob().then(function(blob){var reader=new FileReader();"
-                    + "reader.onloadend=function(){var value=String(reader.result||'');"
-                    + "var payload=value.substring(value.indexOf(',')+1);"
-                    + "if(blob.size<20||!payload||atob(payload).charCodeAt(0)!==100){blob.text().then(function(t){window.KinozalTorrentBridge.onTorrentResult(r.status,'','Not a torrent',finalUrl,type,t.slice(0,500));});return;}"
-                    + "window.KinozalTorrentBridge.onTorrentResult(r.status,payload,'',finalUrl,type,'');};"
-                    + "reader.onerror=function(){window.KinozalTorrentBridge.onTorrentResult(0,'','FileReader error',finalUrl,type,'');};"
-                    + "reader.readAsDataURL(blob);});})"
-                    + ".catch(function(e){window.KinozalTorrentBridge.onTorrentResult(0,'',String(e),'','','');});})()";
-            web.evaluateJavascript(script, null);
-        } else {
-            downloadTorrentNative(data);
-        }
+                hint.setText("Страница: " + url
+                        + "\\nЕсли проверка Cloudflare завершилась, нажмите «Проверить и скачать».");
+            }
+        });
+        browser.setDownloadListener((url, userAgent, contentDisposition, mimeType, contentLength) -> {
+            hint.setText("Браузер получил ссылку на файл. Проверяю доступ...");
+            runCloudflareTorrentFetch(browser, url, hint);
+        });
+
+        dialog.setOnShowListener(ignored -> {
+            Button action = dialog.getButton(AlertDialog.BUTTON_POSITIVE);
+            action.setOnClickListener(v -> runCloudflareTorrentFetch(browser, data.torrentLink, hint));
+        });
+        dialog.setOnDismissListener(ignored -> browser.destroy());
+        dialog.show();
+        dialog.getWindow().setLayout(
+                Math.min(getResources().getDisplayMetrics().widthPixels - 48,
+                        (int) (760 * getResources().getDisplayMetrics().density)),
+                ViewGroup.LayoutParams.WRAP_CONTENT);
+        browser.loadUrl(data.torrentLink);
+    }
+
+    private void runCloudflareTorrentFetch(WebView browser, String url, TextView hint) {
+        String quoted = org.json.JSONObject.quote(url);
+        String script = "(function(){fetch(" + quoted
+                + ",{credentials:'include',redirect:'follow',cache:'no-store'})"
+                + ".then(function(r){var u=r.url||'',t=r.headers.get('content-type')||'';"
+                + "return r.blob().then(function(b){var rd=new FileReader();"
+                + "rd.onloadend=function(){var v=String(rd.result||''),p=v.substring(v.indexOf(',')+1);"
+                + "if(r.ok&&b.size>=20&&p&&atob(p).charCodeAt(0)===100){"
+                + "window.KinozalBrowserBridge.onResult(r.status,p,u,t,'','');return;}"
+                + "b.text().then(function(s){window.KinozalBrowserBridge.onResult(r.status,'',u,t,s.slice(0,1200),'Not a torrent file');});};"
+                + "rd.onerror=function(){window.KinozalBrowserBridge.onResult(0,'',u,t,'','FileReader error');};"
+                + "rd.readAsDataURL(b);});})"
+                + ".catch(function(e){window.KinozalBrowserBridge.onResult(0,'','','','',String(e));});})()";
+        hint.setText("Проверяю ответ Kinozal...");
+        browser.evaluateJavascript(script, null);
     }
 
     private void downloadTorrentNative(TorrentDetails data) {
