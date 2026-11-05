@@ -404,7 +404,7 @@ public class MainActivity extends Activity {
         if (cachedPage != null) { showLoadedPage(cachedPage); return; }
         progress.setVisibility(View.VISIBLE); list.removeAllViews();
         if (sessionWebView != null) {
-            fetchBrowserPage(path, html -> {
+            fetchBrowserPage(path, postBody, html -> {
                 if (html != null && !html.isEmpty()) {
                     synchronized (pageCache) { pageCache.put(cacheKey, html); }
                     showLoadedPage(html);
@@ -428,7 +428,8 @@ public class MainActivity extends Activity {
         }
     }
 
-    private void fetchBrowserPage(String path, java.util.function.Consumer<String> callback) {
+    private void fetchBrowserPage(String path, String postBody,
+            java.util.function.Consumer<String> callback) {
         WebView web = sessionWebView;
         if (web == null) { callback.accept(null); return; }
         if (web.getParent() instanceof ViewGroup) ((ViewGroup) web.getParent()).removeView(web);
@@ -437,7 +438,11 @@ public class MainActivity extends Activity {
         String target = path.startsWith("http") ? path
                 : client.getMirror() + "/" + path.replaceFirst("^/+", "");
         pendingBrowserCallback = (html, error) -> runOnUiThread(() -> callback.accept(error == null ? html : null));
-        web.loadUrl(target);
+        if (postBody == null) {
+            web.loadUrl(target);
+        } else {
+            web.postUrl(target, postBody.getBytes(StandardCharsets.UTF_8));
+        }
     }
 
     private void showLoadedPage(String html) {
