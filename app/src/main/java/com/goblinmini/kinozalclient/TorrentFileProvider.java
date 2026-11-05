@@ -15,10 +15,12 @@ public class TorrentFileProvider extends ContentProvider {
 
     @Override
     public ParcelFileDescriptor openFile(Uri uri, String mode) throws FileNotFoundException {
-        if (getContext() == null || !"torrent".equals(uri.getLastPathSegment())) {
+        if (getContext() == null || (!"torrent".equals(uri.getLastPathSegment())
+                && !"update.apk".equals(uri.getLastPathSegment()))) {
             throw new FileNotFoundException("Torrent not found");
         }
-        File file = new File(getContext().getCacheDir(), "update.apk".equals(uri.getLastPathSegment())\n                ? "KinozalClient-update.apk" : "kinozal-transfer.torrent");
+        File file = new File(getContext().getCacheDir(), "update.apk".equals(uri.getLastPathSegment())
+                ? "KinozalClient-update.apk" : "kinozal-transfer.torrent");
         if (!file.isFile()) throw new FileNotFoundException("Torrent file not found");
         return ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY);
     }
