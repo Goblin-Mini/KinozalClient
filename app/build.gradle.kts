@@ -10,8 +10,8 @@ android {
         applicationId = "com.goblinmini.kinozalclient"
         minSdk = 23
         targetSdk = 28
-        versionCode = 22
-        versionName = "0.5.17"
+        versionCode = 23
+        versionName = "0.5.18"
     }
 
     lint {
