@@ -75,8 +75,8 @@ jobs:
           mkdir -p dist
           cp app/build/outputs/apk/release/app-release.apk dist/KinozalClient.apk
           test -s dist/KinozalClient.apk
-          VERSION_CODE=$(sed -nE 's/^[[:space:]]*versionCode = ([0-9]+).*/\\1/p' app/build.gradle.kts)
-          VERSION_NAME=$(sed -nE 's/^[[:space:]]*versionName = "([^"]+)".*/\\1/p' app/build.gradle.kts)
+          VERSION_CODE=$(grep -E '^[[:space:]]*versionCode[[:space:]]*=' app/build.gradle.kts | awk -F= '{gsub(/[[:space:]]/, "", $2); print $2}')
+          VERSION_NAME=$(grep -E '^[[:space:]]*versionName[[:space:]]*=' app/build.gradle.kts | cut -d '"' -f2)
           test -n "$VERSION_CODE"
           test -n "$VERSION_NAME"
           echo "VERSION_CODE=$VERSION_CODE" >> "$GITHUB_ENV"
