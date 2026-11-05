@@ -105,6 +105,7 @@ public final class KinozalHttpClient {
         persistCookies();
     }
 
+    private static final String BROWSER_COOKIE_KEY = "encrypted_browser_cookie_header";
     private static final String SAVED_LOGIN_KEY = "encrypted_saved_login";
     private static final String SAVED_PASSWORD_KEY = "encrypted_saved_password";
 
@@ -117,6 +118,29 @@ public final class KinozalHttpClient {
         String login = Base64.encodeToString(encrypt(username.trim().getBytes(StandardCharsets.UTF_8)), Base64.NO_WRAP);
         String pass = Base64.encodeToString(encrypt(password.getBytes(StandardCharsets.UTF_8)), Base64.NO_WRAP);
         prefs.edit().putString(SAVED_LOGIN_KEY, login).putString(SAVED_PASSWORD_KEY, pass).apply();
+    }
+
+    /** Persist the WebView cookie header encrypted with Android Keystore AES-GCM. */
+    public synchronized void saveBrowserCookies(String cookieHeader) throws Exception {
+        if (cookieHeader == null || cookieHeader.trim().isEmpty()) return;
+        String encoded = Base64.encodeToString(
+                encrypt(cookieHeader.getBytes(StandardCharsets.UTF_8)), Base64.NO_WRAP);
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+                .putString(BROWSER_COOKIE_KEY, encoded).commit();
+    }
+
+    /** Return the encrypted WebView cookie header, or null if no browser session was saved. */
+    public synchronized String getSavedBrowserCookies() {
+        try {
+            String encoded = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                    .getString(BROWSER_COOKIE_KEY, null);
+            if (encoded == null) return null;
+            String value = new String(decrypt(Base64.decode(encoded, Base64.NO_WRAP)),
+                    StandardCharsets.UTF_8);
+            return value.trim().isEmpty() ? null : value;
+        } catch (Exception e) {
+            return null;
+        }
     }
 
     /** Returns decrypted saved credentials, or null when none were saved. */
@@ -142,7 +166,8 @@ public final class KinozalHttpClient {
 
     public synchronized void logout() {
         cookies.getCookieStore().removeAll();
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().remove(COOKIE_KEY).apply();
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+                .remove(COOKIE_KEY).remove(BROWSER_COOKIE_KEY).apply();
     }
 
     /** Download a protected image or torrent using the same authenticated HTTP cookie jar. */
