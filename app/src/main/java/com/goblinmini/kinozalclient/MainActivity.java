@@ -113,6 +113,14 @@ public class MainActivity extends Activity {
         heading.setText("Главная");
         progress.setVisibility(View.VISIBLE);
         list.removeAllViews();
+        if (sessionWebView != null) {
+            loadHomeSectionsInBrowser(new String[]{"novinki.php", "top.php",
+                    "top.php?t=0&d=0&f=0&k=0&j=&s=0&w=1",
+                    "top.php?t=0&d=0&f=0&k=0&j=&s=0&w=2"},
+                    new String[]{"Новинки", "Топ раздач", "Топ недели", "Топ месяца"}, 0,
+                    new ArrayList<>());
+            return;
+        }
         io.execute(() -> {
             try {
                 String[] paths = {
