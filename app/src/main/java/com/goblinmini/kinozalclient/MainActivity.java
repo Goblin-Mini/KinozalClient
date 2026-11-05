@@ -74,7 +74,6 @@ public class MainActivity extends Activity {
     private boolean startupCatalogReady = false;
     private boolean startupCatalogStarted = false;
     private boolean automaticUpdateCheckScheduled = false;
-    private boolean cloudflareDialogOpen = false;
     private interface BrowserPageCallback { void onPage(String html, String error); }
     private final java.util.LinkedHashMap<String, String> pageCache =
             new java.util.LinkedHashMap<String, String>(12, 0.75f, true) {
@@ -349,42 +348,24 @@ public class MainActivity extends Activity {
      * Resolve it from the torrent page og:image, also used by the details view.
      */
     private void loadHomePosterFromDetails(HomePoster item, ImageView target) {
-        WebView web = sessionWebView;
-        if (web != null) {
-            String detailUrl = org.json.JSONObject.quote(item.torrent.href);
-            String script = "(function(){return fetch(" + detailUrl + ",{credentials:'include'})"
-                    + ".then(function(r){if(!r.ok)throw new Error('detail HTTP '+r.status);return r.text();})"
-                    + ".then(function(html){var d=new DOMParser().parseFromString(html,'text/html');"
-                    + "var m=d.querySelector('meta[property=og:image]');"
-                    + "var p=m?m.content:'';if(!p){var i=d.querySelector('img[src*=\\\"/poster/\\\"],img[data-src*=\\\"/poster/\\\"]');"
-                    + "if(i)p=i.getAttribute('data-src')||i.getAttribute('src')||'';}"
-                    + "if(!p)throw new Error('poster not found');return new URL(p," + detailUrl + ").href;})"
-                    + ".then(function(u){return fetch(u,{credentials:'include',headers:{'Referer':" + detailUrl + "}});})"
-                    + ".then(function(r){if(!r.ok)throw new Error('image HTTP '+r.status);return r.blob();})"
-                    + ".then(function(b){return new Promise(function(resolve,reject){var f=new FileReader();"
-                    + "f.onloadend=function(){resolve(String(f.result||''));};f.onerror=reject;f.readAsDataURL(b);});});})()";
-            web.evaluateJavascript(script, result -> {
-                try {
-                    String data = new org.json.JSONArray("[" + result + "]").getString(0);
-                    if (data == null || !data.startsWith("data:")) return;
-                    String encoded = data.substring(data.indexOf(',') + 1);
-                    byte[] bytes = android.util.Base64.decode(encoded, android.util.Base64.DEFAULT);
-                    Bitmap bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.length);
-                    if (bitmap != null && target.getParent() != null) target.setImageBitmap(bitmap);
-                } catch (Exception ignored) { }
-            });
-            return;
-        }
         io.execute(() -> {
             try {
                 String html = client.fetch(item.torrent.href);
                 Document doc = Jsoup.parse(html, item.torrent.href);
                 Element image = doc.selectFirst("meta[property=og:image]");
                 String imageUrl = "";
-                if (image != null) imageUrl = resolveImageUrl(image.attr("content"));
+                if (image != null) {
+                    String raw = image.attr("content").trim();
+                    if (!raw.isEmpty()) imageUrl = doc.baseUri().isEmpty()
+                            ? resolveImageUrl(raw) : java.net.URI.create(doc.baseUri()).resolve(raw).toString();
+                }
                 if (imageUrl.isEmpty()) {
                     Element poster = doc.selectFirst("img[src*=/poster/], img[data-src*=/poster/]");
-                    if (poster != null) imageUrl = resolveImageUrl(firstImageSource(poster));
+                    if (poster != null) {
+                        String raw = firstImageSource(poster);
+                        imageUrl = poster.absUrl("src");
+                        if (imageUrl.isEmpty()) imageUrl = resolveImageUrl(raw);
+                    }
                 }
                 if (imageUrl.isEmpty()) return;
                 byte[] bytes = client.fetchBytes(imageUrl, "image/*", item.torrent.href);
@@ -713,20 +694,6 @@ public class MainActivity extends Activity {
         CookieManager manager = CookieManager.getInstance();
         manager.setAcceptCookie(true);
         manager.setAcceptThirdPartyCookies(web, true);
-        // WebView's own cookie store is persistent across normal APK updates.
-        // Prefer it over the flattened SharedPreferences header: rebuilding cookies
-        // from "name=value" loses domain, expiry, HttpOnly and SameSite attributes
-        // (notably Cloudflare clearance cookies).
-        String nativeWebViewCookies = manager.getCookie(client.getMirror());
-        if (nativeWebViewCookies != null && !nativeWebViewCookies.trim().isEmpty()) {
-            android.util.Log.i("KinozalSession",
-                    "Using persistent WebView cookie store; skipping manual cookie import");
-            manager.flush();
-            markStartupCatalogReady();
-            return;
-        }
-
-        // Compatibility fallback for installations whose WebView cookie store is empty.
         String[] pairs = cookieHeader.split(";");
         final int[] remaining = {0};
         for (String pair : pairs) if (pair.trim().contains("=")) remaining[0]++;
@@ -1095,8 +1062,7 @@ public class MainActivity extends Activity {
         LinearLayout panel = new LinearLayout(this);
         panel.setOrientation(LinearLayout.VERTICAL);
         panel.setBackgroundColor(BG);
-        panel.setFocusable(true);
-        panel.setFocusableInTouchMode(true);
+        panel.setMinimumHeight((int)(getResources().getDisplayMetrics().heightPixels * 0.72f));
         panel.setLayoutParams(new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         WebView existingWeb = sessionWebView;
@@ -1109,10 +1075,7 @@ public class MainActivity extends Activity {
         final WebView web = existingWeb;
         web.setBackgroundColor(Color.WHITE);
         web.setVisibility(View.VISIBLE);
-        web.setMinimumHeight(dp(240));
-        web.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_YES);
-        web.setOverScrollMode(View.OVER_SCROLL_IF_CONTENT_SCROLLS);
-        web.setVerticalScrollBarEnabled(true);
+        web.setMinimumHeight(dp(360));
         web.setFocusable(true);
         web.setFocusableInTouchMode(true);
         web.setDescendantFocusability(ViewGroup.FOCUS_AFTER_DESCENDANTS);
@@ -1213,22 +1176,19 @@ public class MainActivity extends Activity {
         LinearLayout.LayoutParams doneParams = new LinearLayout.LayoutParams(0, dp(46), 1f);
         doneParams.leftMargin = dp(8);
         actions.addView(done, doneParams);
-        TextView hint = text("Пройдите проверку Kinozal. Для отметки Cloudflare наведите фокус на проверку и нажмите OK/Enter. Страница прокручивается пультом.", 13, TEAL, false);
-        hint.setPadding(dp(12), dp(5), dp(12), dp(5));
-        LinearLayout.LayoutParams webParams = new LinearLayout.LayoutParams(-1, 0, 1f);
-        webParams.bottomMargin = dp(4);
-        panel.addView(web, webParams);
+        TextView hint = text("Пройдите проверку на сайте. Посторонние рекламные переходы и всплывающие окна блокируются.", 13, TEAL, false);
+        hint.setPadding(dp(12), dp(8), dp(12), dp(8));
         panel.addView(hint, new LinearLayout.LayoutParams(-1, -2));
-        // Keep controls fixed at the bottom; the challenge gets almost all available height.
+        // Match the supplied screenshot: hint, then action buttons, then the site page.
         panel.addView(actions, new LinearLayout.LayoutParams(-1, -2));
+        LinearLayout.LayoutParams webParams = new LinearLayout.LayoutParams(-1, 0, 1f);
+        panel.addView(web, webParams);
 
         AlertDialog dialog = new AlertDialog.Builder(this)
                 .setTitle("Проверка Kinozal")
                 .setView(panel)
                 .create();
         close.setOnClickListener(v -> {
-            persistWebViewCookies();
-            cloudflareDialogOpen = false;
             web.stopLoading();
             if (web.getParent() instanceof ViewGroup) ((ViewGroup) web.getParent()).removeView(web);
             web.setVisibility(View.INVISIBLE);
@@ -1251,8 +1211,6 @@ public class MainActivity extends Activity {
                     return;
                 }
             }
-            persistWebViewCookies();
-            cloudflareDialogOpen = false;
             web.stopLoading();
             if (web.getParent() instanceof ViewGroup) ((ViewGroup) web.getParent()).removeView(web);
             web.setVisibility(View.INVISIBLE);
@@ -1263,8 +1221,6 @@ public class MainActivity extends Activity {
             load("browse.php", "Все раздачи");
         });
         dialog.setOnDismissListener(d -> {
-            cloudflareDialogOpen = false;
-            persistWebViewCookies();
             if (web.getParent() == panel) {
                 panel.removeView(web);
                 web.setVisibility(View.INVISIBLE);
@@ -1272,10 +1228,9 @@ public class MainActivity extends Activity {
             }
         });
         dialog.show();
-        cloudflareDialogOpen = true;
         dialog.getWindow().setLayout(
-                (int)(getResources().getDisplayMetrics().widthPixels * 0.96f),
-                (int)(getResources().getDisplayMetrics().heightPixels * 0.96f));
+                (int)(getResources().getDisplayMetrics().widthPixels * 0.88f),
+                (int)(getResources().getDisplayMetrics().heightPixels * 0.88f));
         web.post(() -> {
             web.requestLayout();
             web.requestFocus();
@@ -1733,39 +1688,6 @@ public class MainActivity extends Activity {
 
     private String safe(String s) { return s == null ? "Ошибка сети" : s; }
 
-    private void persistWebViewCookies() {
-        WebView web = sessionWebView;
-        if (web == null) return;
-        try {
-            CookieManager manager = CookieManager.getInstance();
-            manager.flush();
-            String cookies = manager.getCookie(client.getMirror());
-            if (cookies != null && !cookies.trim().isEmpty()) {
-                client.saveBrowserCookies(cookies);
-                client.importBrowserCookies(cookies);
-            }
-        } catch (Exception e) {
-            android.util.Log.w("KinozalSession", "Could not persist WebView cookies", e);
-        }
-    }
-
-    @Override protected void onPause() {
-        persistWebViewCookies();
-        super.onPause();
-    }
-
-    @Override public void onBackPressed() {
-        if (cloudflareDialogOpen) {
-            persistWebViewCookies();
-            super.onBackPressed();
-            return;
-        }
-        finish();
-    }
-
-    @Override protected void onDestroy() {
-        persistWebViewCookies();
-        io.shutdownNow();
-        super.onDestroy();
-    }
+    @Override public void onBackPressed() { finish(); }
+    @Override protected void onDestroy() { io.shutdownNow(); super.onDestroy(); }
 }
