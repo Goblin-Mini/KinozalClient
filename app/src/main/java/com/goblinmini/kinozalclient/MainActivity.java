@@ -182,6 +182,8 @@ public class MainActivity extends Activity {
         List<HomePoster> out = new ArrayList<>();
         Elements anchors = doc.select("a[href*=details.php?id=]");
         for (Element a : anchors) {
+            String linkPath = a.attr("href").toLowerCase(java.util.Locale.ROOT);
+            if (linkPath.contains("userdetails.php") || linkPath.contains("userdetails")) continue;
             String href = mirrorUrl(a.absUrl("href"), a.attr("href"));
             if (href.isEmpty()) continue;
             Element img = a.selectFirst("img");
@@ -190,6 +192,13 @@ public class MainActivity extends Activity {
                 if (row != null) img = row.selectFirst("img");
             }
             if (img == null && a.parent() != null) img = a.parent().selectFirst("img");
+            if (img == null) {
+                Element ancestor = a;
+                for (int depth = 0; depth < 4 && ancestor != null && img == null; depth++) {
+                    ancestor = ancestor.parent();
+                    if (ancestor != null) img = ancestor.selectFirst("img");
+                }
+            }
             String title = a.attr("title").trim();
             if (title.isEmpty() && img != null) title = img.attr("alt").trim();
             if (title.isEmpty()) title = a.text().replaceAll("\\s+", " ").trim();
@@ -433,8 +442,6 @@ public class MainActivity extends Activity {
         statusParams.topMargin = dp(4);
         sidebar.addView(status, statusParams);
 
-        heading = text("Все раздачи", 25, GOLD, true);
-        main.addView(heading, new LinearLayout.LayoutParams(-1, dp(48)));
         LinearLayout searchBar = new LinearLayout(this); searchBar.setGravity(Gravity.CENTER_VERTICAL);
         search = new EditText(this);
         search.setSingleLine(true);
@@ -461,6 +468,8 @@ public class MainActivity extends Activity {
         });
         LinearLayout.LayoutParams sbp = new LinearLayout.LayoutParams(-1, dp(52)); sbp.bottomMargin = dp(8);
         main.addView(searchBar, sbp);
+        heading = text("Главная", 25, GOLD, true);
+        main.addView(heading, new LinearLayout.LayoutParams(-1, dp(42)));
         progress = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
         progress.setIndeterminate(true);
         progress.setVisibility(View.GONE);
@@ -696,7 +705,7 @@ public class MainActivity extends Activity {
             TextView size = text(t.size, 13, GOLD, false);
             size.setGravity(Gravity.CENTER);
             row.addView(size, new LinearLayout.LayoutParams(dp(85), -2));
-            TextView uploaded = text(t.uploaded == null ? "—" : t.uploaded, 12, TEAL, false);
+            TextView uploaded = text(t.uploaded == null ? "—" : t.uploaded, 12, Color.rgb(170, 205, 180), false);
             uploaded.setGravity(Gravity.CENTER);
             uploaded.setMaxLines(2);
             row.addView(uploaded, new LinearLayout.LayoutParams(dp(96), -2));
@@ -1256,11 +1265,6 @@ public class MainActivity extends Activity {
         LinearLayout posterColumn = new LinearLayout(this);
         posterColumn.setOrientation(LinearLayout.VERTICAL);
         posterColumn.setGravity(Gravity.TOP | Gravity.CENTER_HORIZONTAL);
-        ImageView poster = new ImageView(this);
-        poster.setScaleType(ImageView.ScaleType.FIT_CENTER);
-        poster.setBackground(shape(PANEL, 0));
-        posterColumn.addView(poster, new LinearLayout.LayoutParams(-1, dp(260)));
-
         Button watch = button("Просмотр");
         watch.setTextSize(15);
         watch.setTextColor(Color.WHITE);
@@ -1268,8 +1272,13 @@ public class MainActivity extends Activity {
         watch.setOnFocusChangeListener((v, focused) ->
                 v.setBackground(shape(focused ? Color.rgb(125, 48, 25) : RED, focused ? GOLD : 0)));
         LinearLayout.LayoutParams watchParams = new LinearLayout.LayoutParams(-1, dp(48));
-        watchParams.topMargin = dp(10);
+        watchParams.bottomMargin = dp(10);
         posterColumn.addView(watch, watchParams);
+
+        ImageView poster = new ImageView(this);
+        poster.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        poster.setBackground(shape(PANEL, 0));
+        posterColumn.addView(poster, new LinearLayout.LayoutParams(-1, dp(260)));
         LinearLayout.LayoutParams posterParams = new LinearLayout.LayoutParams(dp(190), -1);
         posterParams.rightMargin = dp(12);
         mainArea.addView(posterColumn, posterParams);
@@ -1355,8 +1364,16 @@ public class MainActivity extends Activity {
                 .create();
         dialog.show();
         if (dialog.getWindow() != null) {
-            dialog.getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(Color.TRANSPARENT));
-            dialog.getWindow().setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT);
+            android.view.Window window = dialog.getWindow();
+            window.setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(BG));
+            window.getDecorView().setBackgroundColor(BG);
+            window.addFlags(android.view.WindowManager.LayoutParams.FLAG_DIM_BEHIND);
+            android.view.WindowManager.LayoutParams windowParams = window.getAttributes();
+            windowParams.width = ViewGroup.LayoutParams.MATCH_PARENT;
+            windowParams.height = ViewGroup.LayoutParams.MATCH_PARENT;
+            windowParams.dimAmount = 0.72f;
+            window.setAttributes(windowParams);
+            window.setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT);
         }
         if (!data.poster.isEmpty()) loadImageIntoView(data.poster, poster);
         watch.requestFocus();
