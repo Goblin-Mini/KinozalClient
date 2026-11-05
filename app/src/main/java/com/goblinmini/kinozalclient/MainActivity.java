@@ -748,8 +748,6 @@ public class MainActivity extends Activity {
             }
         });
 
-        LinearLayout.LayoutParams webParams = new LinearLayout.LayoutParams(-1, 0, 1f);
-        panel.addView(web, webParams);
         LinearLayout actions = new LinearLayout(this);
         actions.setGravity(Gravity.CENTER_VERTICAL);
         actions.setPadding(dp(8), dp(6), dp(8), dp(6));
@@ -759,7 +757,10 @@ public class MainActivity extends Activity {
         LinearLayout.LayoutParams doneParams = new LinearLayout.LayoutParams(0, dp(46), 1f);
         doneParams.leftMargin = dp(8);
         actions.addView(done, doneParams);
+        // Keep the controls above the browser so they remain reachable on TV.
         panel.addView(actions, new LinearLayout.LayoutParams(-1, -2));
+        LinearLayout.LayoutParams webParams = new LinearLayout.LayoutParams(-1, 0, 1f);
+        panel.addView(web, webParams);
 
         AlertDialog dialog = new AlertDialog.Builder(this)
                 .setTitle("Проверка Kinozal")
