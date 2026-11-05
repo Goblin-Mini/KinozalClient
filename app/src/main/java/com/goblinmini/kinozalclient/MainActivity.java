@@ -682,26 +682,7 @@ public class MainActivity extends Activity {
         web.setFocusable(true);
         web.setFocusableInTouchMode(true);
         web.setDescendantFocusability(ViewGroup.FOCUS_AFTER_DESCENDANTS);
-        web.setOnKeyListener((view, keyCode, event) -> {
-            // Some Android TV remotes report the OK button as DPAD_CENTER;
-            // forward it as ENTER so focused HTML controls (including Turnstile)
-            // receive a normal activation key.
-            if (keyCode == android.view.KeyEvent.KEYCODE_DPAD_CENTER) {
-                android.view.KeyEvent forwarded = new android.view.KeyEvent(
-                        event.getDownTime(), event.getEventTime(),
-                        event.getAction(), android.view.KeyEvent.KEYCODE_ENTER,
-                        event.getRepeatCount(), event.getMetaState(),
-                        event.getDeviceId(), event.getScanCode(),
-                        event.getFlags(), event.getSource());
-                if (event.getAction() == android.view.KeyEvent.ACTION_DOWN) {
-                    web.onKeyDown(android.view.KeyEvent.KEYCODE_ENTER, forwarded);
-                } else if (event.getAction() == android.view.KeyEvent.ACTION_UP) {
-                    web.onKeyUp(android.view.KeyEvent.KEYCODE_ENTER, forwarded);
-                }
-                return true;
-            }
-            return false;
-        });
+        // Let WebView handle DPAD/ENTER itself so focused HTML inputs can open Android TV IME.
         WebSettings settings = web.getSettings();
         settings.setJavaScriptEnabled(true);
         settings.setDomStorageEnabled(true);
