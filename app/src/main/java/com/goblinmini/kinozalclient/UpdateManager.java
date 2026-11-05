@@ -18,7 +18,7 @@ import java.net.URL;
 
 final class UpdateManager {
     private static final String RELEASE_API =
-            "https://api.github.com/repos/Goblin-Mini/KinozalClient/releases/tags/tv-latest";
+            "https://api.github.com/repos/Goblin-Mini/KinozalClient/releases/latest";
     private final Activity activity;
 
     UpdateManager(Activity activity) { this.activity = activity; }
