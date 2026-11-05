@@ -668,12 +668,19 @@ public class MainActivity extends Activity {
         LinearLayout panel = new LinearLayout(this);
         panel.setOrientation(LinearLayout.VERTICAL);
         panel.setBackgroundColor(BG);
+        panel.setMinimumHeight((int)(getResources().getDisplayMetrics().heightPixels * 0.72f));
+        panel.setLayoutParams(new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         TextView hint = text("Пройдите проверку на сайте. Посторонние рекламные переходы и всплывающие окна блокируются.", 13, TEAL, false);
         hint.setPadding(dp(12), dp(8), dp(12), dp(8));
         panel.addView(hint, new LinearLayout.LayoutParams(-1, -2));
 
         WebView web = new WebView(this);
         web.setBackgroundColor(Color.WHITE);
+        web.setVisibility(View.VISIBLE);
+        web.setMinimumHeight(dp(360));
+        web.setFocusable(true);
+        web.setFocusableInTouchMode(true);
         WebSettings settings = web.getSettings();
         settings.setJavaScriptEnabled(true);
         settings.setDomStorageEnabled(true);
@@ -735,7 +742,7 @@ public class MainActivity extends Activity {
 
         AlertDialog dialog = new AlertDialog.Builder(this)
                 .setTitle("Проверка Kinozal")
-                .setView(panel)
+                .setView(panel, 0, 0, 0, 0)
                 .create();
         close.setOnClickListener(v -> { web.stopLoading(); web.destroy(); dialog.dismiss(); });
         done.setOnClickListener(v -> {
@@ -763,7 +770,10 @@ public class MainActivity extends Activity {
         dialog.getWindow().setLayout(
                 (int)(getResources().getDisplayMetrics().widthPixels * 0.88f),
                 (int)(getResources().getDisplayMetrics().heightPixels * 0.88f));
-        web.loadUrl(base + "/");
+        web.post(() -> {
+            web.requestLayout();
+            web.loadUrl(base + "/");
+        });
     }
 
     private void showNativeLoginForm(String[] saved) {
