@@ -24,6 +24,7 @@ import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
 import android.webkit.CookieManager;
+import android.webkit.JavascriptInterface;
 import android.webkit.WebChromeClient;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebSettings;
@@ -694,6 +695,17 @@ public class MainActivity extends Activity {
         browserCookies.setAcceptCookie(true);
         CookieManager.setAcceptFileSchemeCookies(false);
         browserCookies.setAcceptThirdPartyCookies(web, true);
+        final boolean[] textEntryOpen = {false};
+        web.addJavascriptInterface(new Object() {
+            @JavascriptInterface
+            public void onTextFieldFocused(String fieldType) {
+                runOnUiThread(() -> {
+                    if (textEntryOpen[0] || web.getParent() == null) return;
+                    textEntryOpen[0] = true;
+                    showWebTextEntry(web, fieldType, () -> textEntryOpen[0] = false);
+                });
+            }
+        }, "AndroidTV");
         web.setWebChromeClient(new WebChromeClient() {
             @Override public boolean onCreateWindow(WebView view, boolean isDialog,
                     boolean isUserGesture, android.os.Message resultMsg) {
@@ -722,6 +734,13 @@ public class MainActivity extends Activity {
             }
             @Override public void onPageFinished(WebView view, String url) {
                 super.onPageFinished(view, url);
+                view.evaluateJavascript("(function(){if(window.__kinozalInputHook)return;window.__kinozalInputHook=true;"
+                        + "document.addEventListener('focusin',function(ev){var e=ev.target;if(!e)return;"
+                        + "var tag=(e.tagName||'').toLowerCase(),type=(e.type||'text').toLowerCase();"
+                        + "if((tag==='input'&&['text','password','email','search','tel','url','number'].indexOf(type)>=0)"
+                        + "||tag==='textarea'||e.isContentEditable){window.__kinozalTarget=e;"
+                        + "if(window.AndroidTV&&window.AndroidTV.onTextFieldFocused)"
+                        + "window.AndroidTV.onTextFieldFocused(type==='password'?'password':'text');}},true);})();", null);
                 String cookie = browserCookies.getCookie(base);
                 if (cookie != null && !cookie.isEmpty()) {
                     try { client.importBrowserCookies(cookie); } catch (Exception ignored) { }
@@ -784,14 +803,18 @@ public class MainActivity extends Activity {
      * Use a native EditText (which can invoke the TV keyboard), then insert the
      * entered text into the currently focused HTML input.
      */
-    private void showWebTextEntry(WebView web) {
+    private void showWebTextEntry(WebView web, String fieldType, Runnable onClosed) {
+        boolean password = "password".equalsIgnoreCase(fieldType);
         EditText editor = new EditText(this);
         editor.setSingleLine(true);
         editor.setTextColor(Color.WHITE);
         editor.setHintTextColor(TEAL);
-        editor.setHint("Введите текст для выбранного поля");
-        editor.setInputType(android.text.InputType.TYPE_CLASS_TEXT
-                | android.text.InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
+        editor.setHint(password ? "Введите пароль" : "Введите логин");
+        editor.setInputType(password
+                ? android.text.InputType.TYPE_CLASS_TEXT
+                    | android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
+                : android.text.InputType.TYPE_CLASS_TEXT
+                    | android.text.InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
         editor.setSelectAllOnFocus(true);
         editor.setFocusable(true);
         editor.setFocusableInTouchMode(true);
@@ -799,11 +822,12 @@ public class MainActivity extends Activity {
         editor.setBackground(shape(PANEL, TEAL));
 
         AlertDialog inputDialog = new AlertDialog.Builder(this)
-                .setTitle("Ввод текста на Kinozal")
+                .setTitle(password ? "Пароль Kinozal" : "Ввод на Kinozal")
                 .setView(editor)
                 .setPositiveButton("Вставить", null)
                 .setNegativeButton("Отмена", null)
                 .create();
+        inputDialog.setOnDismissListener(d -> onClosed.run());
         inputDialog.setOnShowListener(ignored -> {
             inputDialog.getWindow().setSoftInputMode(
                     android.view.WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE
@@ -817,22 +841,15 @@ public class MainActivity extends Activity {
             }, 180);
             inputDialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
                 String value = editor.getText().toString();
-                if (value.isEmpty()) {
-                    inputDialog.dismiss();
-                    return;
-                }
                 String quoted = org.json.JSONObject.quote(value);
-                String script = "(function(){var e=document.activeElement;"
-                        + "if(!e||!(e.matches('input,textarea,[contenteditable=true]'))){"
-                        + "e=document.querySelector('input:not([type=hidden]),textarea,[contenteditable=true]');}"
-                        + "if(!e)return 'NO_FIELD';e.focus();"
-                        + "var setter=Object.getOwnPropertyDescriptor(e.constructor.prototype,'value');"
-                        + "if(setter&&setter.set)setter.set.call(e," + quoted + ");else e.value=" + quoted + ";"
+                String script = "(function(){var e=window.__kinozalTarget;"
+                        + "if(!e||!e.isConnected)return 'NO_FIELD';e.focus();"
+                        + "e.value=" + quoted + ";"
                         + "e.dispatchEvent(new Event('input',{bubbles:true}));"
                         + "e.dispatchEvent(new Event('change',{bubbles:true}));return 'OK';})()";
                 web.evaluateJavascript(script, result -> {
-                    if ("\"NO_FIELD\"".equals(result) || result == null) {
-                        showMessage("Сначала выберите поле логина или пароля на странице.");
+                    if ("\\"NO_FIELD\\"".equals(result) || result == null) {
+                        showMessage("Поле сайта потеряло фокус. Выберите его ещё раз.");
                     }
                 });
                 inputDialog.dismiss();
