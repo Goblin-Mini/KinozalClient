@@ -408,6 +408,7 @@ public class MainActivity extends Activity {
         menuItems.setOrientation(LinearLayout.VERTICAL);
         menuScroll.addView(menuItems, new ScrollView.LayoutParams(-1, -2));
         sidebar.addView(menuScroll, new LinearLayout.LayoutParams(-1, 0, 1));
+        addMenu("Главная", () -> loadInitialCatalog());
         addMenu("Поиск", () -> focusSearch());
         addMenu("Все раздачи", () -> load("browse.php", "Все раздачи"));
         addMenu("Все сериалы", () -> load("browse.php?c=1001", "Все сериалы"));
@@ -461,8 +462,8 @@ public class MainActivity extends Activity {
         LinearLayout.LayoutParams sbp = new LinearLayout.LayoutParams(-1, dp(52)); sbp.bottomMargin = dp(8);
         main.addView(searchBar, sbp);
         progress = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
-        progress.setIndeterminate(true); progress.setVisibility(View.GONE);
-        main.addView(progress, new LinearLayout.LayoutParams(-1, dp(3)));
+        progress.setIndeterminate(true);
+        progress.setVisibility(View.GONE);
         ScrollView scroll = new ScrollView(this); scroll.setFillViewport(true);
         list = new LinearLayout(this); list.setOrientation(LinearLayout.VERTICAL);
         scroll.addView(list);
@@ -490,20 +491,10 @@ public class MainActivity extends Activity {
     private void showMessage(String message) { Toast.makeText(this, message, Toast.LENGTH_LONG).show(); }
 
     private void showPageLoading(String message) {
-        progress.setVisibility(View.VISIBLE);
+        // No in-page spinner: keep the content area clean while the request runs.
+        progress.setVisibility(View.GONE);
         list.removeAllViews();
-        LinearLayout loading = new LinearLayout(this);
-        loading.setOrientation(LinearLayout.VERTICAL);
-        loading.setGravity(Gravity.CENTER);
-        loading.setPadding(dp(16), dp(48), dp(16), dp(48));
-        ProgressBar spinner = new ProgressBar(this);
-        loading.addView(spinner, new LinearLayout.LayoutParams(dp(46), dp(46)));
-        TextView label = text(message, 15, TEAL, false);
-        label.setGravity(Gravity.CENTER);
-        LinearLayout.LayoutParams labelParams = new LinearLayout.LayoutParams(-1, -2);
-        labelParams.topMargin = dp(14);
-        loading.addView(label, labelParams);
-        list.addView(loading, new LinearLayout.LayoutParams(-1, -1));
+        status.setText(message);
     }
 
     private void load(String path, String title) { load(path, title, null); }
