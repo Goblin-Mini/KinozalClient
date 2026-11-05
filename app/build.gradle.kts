@@ -19,9 +19,22 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
-    signingConfigs {\n        create("release") {\n            val ks = System.getenv("KINOZAL_KEYSTORE_FILE")\n            if (!ks.isNullOrEmpty()) {\n                storeFile = file(ks)\n                storePassword = System.getenv("KINOZAL_STORE_PASSWORD")\n                keyAlias = System.getenv("KINOZAL_KEY_ALIAS")\n                keyPassword = System.getenv("KINOZAL_KEY_PASSWORD")\n            }\n        }\n    }\n\n    buildTypes {
+    signingConfigs {
+        create("release") {
+            val ks = System.getenv("KINOZAL_KEYSTORE_FILE")
+            if (!ks.isNullOrEmpty()) {
+                storeFile = file(ks)
+                storePassword = System.getenv("KINOZAL_STORE_PASSWORD")
+                keyAlias = System.getenv("KINOZAL_KEY_ALIAS")
+                keyPassword = System.getenv("KINOZAL_KEY_PASSWORD")
+            }
+        }
+    }
+
+    buildTypes {
         release {
             isMinifyEnabled = false
+            signingConfig = signingConfigs.getByName("release")
         }
     }
 }
