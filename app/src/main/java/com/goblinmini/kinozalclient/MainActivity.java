@@ -136,6 +136,7 @@ public class MainActivity extends Activity {
                     section.items.addAll(parseHomePosters(Jsoup.parse(html, client.getMirror() + "/")));
                     sections.add(section);
                 }
+                removeHomeDuplicates(sections);
                 int count = 0;
                 for (HomeSection section : sections) count += section.items.size();
                 final int total = count;
@@ -157,6 +158,7 @@ public class MainActivity extends Activity {
     private void loadHomeSectionsInBrowser(String[] paths, String[] titles, int index,
             List<HomeSection> sections) {
         if (index >= paths.length) {
+            removeHomeDuplicates(sections);
             int total = 0;
             for (HomeSection section : sections) total += section.items.size();
             progress.setVisibility(View.GONE);
@@ -224,6 +226,46 @@ public class MainActivity extends Activity {
             if (out.size() >= 12) break;
         }
         return out;
+    }
+
+    /**
+     * Keep the first occurrence across home sections: Новинки, Топ раздач,
+     * Топ недели, Топ месяца. Ignore common release/quality tags, but retain
+     * years and season/episode numbers to avoid merging different releases.
+     */
+    private void removeHomeDuplicates(List<HomeSection> sections) {
+        java.util.Set<String> seenLinks = new java.util.HashSet<>();
+        java.util.Set<String> seenTitles = new java.util.HashSet<>();
+        for (HomeSection section : sections) {
+            List<HomePoster> unique = new ArrayList<>();
+            for (HomePoster item : section.items) {
+                String href = item.torrent.href == null ? "" : item.torrent.href;
+                String id = "";
+                java.util.regex.Matcher matcher = java.util.regex.Pattern
+                        .compile("[?&]id=(\\d+)", java.util.regex.Pattern.CASE_INSENSITIVE)
+                        .matcher(href);
+                if (matcher.find()) id = matcher.group(1);
+                String titleKey = normalizeHomeTitle(item.torrent.title);
+                boolean duplicate = (!id.isEmpty() && seenLinks.contains("id:" + id))
+                        || (!href.isEmpty() && seenLinks.contains("url:" + href))
+                        || (!titleKey.isEmpty() && seenTitles.contains(titleKey));
+                if (duplicate) continue;
+                unique.add(item);
+                if (!id.isEmpty()) seenLinks.add("id:" + id);
+                if (!href.isEmpty()) seenLinks.add("url:" + href);
+                if (!titleKey.isEmpty()) seenTitles.add(titleKey);
+            }
+            section.items.clear();
+            section.items.addAll(unique);
+        }
+    }
+
+    private String normalizeHomeTitle(String title) {
+        if (title == null) return "";
+        String value = title.toLowerCase(java.util.Locale.ROOT);
+        value = value.replaceAll("\\b(2160p|1080p|720p|480p|4k|uhd|hdr10?|web[- .]?dl|webrip|blu[- .]?ray|bdrip|brrip|dvdrip|hdtv|h265|h264|x265|x264|hevc|avc|aac|dts|ac3|proper|repack|remux)\\b", " ");
+        return value.replaceAll("[^\\p{L}\\p{N}]+", " ")
+                .replaceAll("\\s+", " ").trim();
     }
 
     private String firstImageSource(Element img) {
@@ -1349,10 +1391,17 @@ public class MainActivity extends Activity {
                 detailContent.addView(divider, new LinearLayout.LayoutParams(-1, dp(1)));
             }
             if (!any) detailContent.addView(text("Сведения на странице не найдены.", 15, Color.LTGRAY, false));
-            descriptionTab.setBackground(shape(active[0] == 0 ? Color.rgb(57, 68, 70) : PANEL, active[0] == 0 ? GOLD : 0));
-            technicalTab.setBackground(shape(active[0] == 1 ? Color.rgb(57, 68, 70) : PANEL, active[0] == 1 ? GOLD : 0));
+            // Tab selection controls content only. Visual highlighting follows
+            // actual DPAD focus, so the unfocused Description tab is not lit
+            // while the default focus is on Просмотр.
+            descriptionTab.setBackground(shape(PANEL, 0));
+            technicalTab.setBackground(shape(PANEL, 0));
             detailsScroll.scrollTo(0, 0);
         };
+        descriptionTab.setOnFocusChangeListener((v, focused) ->
+                v.setBackground(shape(focused ? Color.rgb(65, 72, 73) : PANEL, focused ? GOLD : 0)));
+        technicalTab.setOnFocusChangeListener((v, focused) ->
+                v.setBackground(shape(focused ? Color.rgb(65, 72, 73) : PANEL, focused ? GOLD : 0)));
         descriptionTab.setOnClickListener(v -> { active[0] = 0; render.run(); });
         technicalTab.setOnClickListener(v -> { active[0] = 1; render.run(); });
         render.run();
