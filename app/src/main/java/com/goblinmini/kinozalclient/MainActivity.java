@@ -753,8 +753,13 @@ public class MainActivity extends Activity {
         LinearLayout actions = new LinearLayout(this);
         actions.setGravity(Gravity.CENTER_VERTICAL);
         actions.setPadding(dp(8), dp(6), dp(8), dp(6));
+        Button enterText = button("Ввод текста");
         Button close = button("Закрыть");
         Button done = button("Готово");
+        LinearLayout.LayoutParams enterParams = new LinearLayout.LayoutParams(0, dp(46), 1f);
+        enterParams.rightMargin = dp(8);
+        actions.addView(enterText, enterParams);
+        enterText.setOnClickListener(v -> showWebTextEntry(web));
         actions.addView(close, new LinearLayout.LayoutParams(0, dp(46), 1f));
         LinearLayout.LayoutParams doneParams = new LinearLayout.LayoutParams(0, dp(46), 1f);
         doneParams.leftMargin = dp(8);
@@ -796,6 +801,71 @@ public class MainActivity extends Activity {
             web.requestFocus();
             web.loadUrl(base + "/");
         });
+    }
+
+    /**
+     * Android TV WebViews often do not summon the system IME for HTML inputs.
+     * Use a native EditText (which can invoke the TV keyboard), then insert the
+     * entered text into the currently focused HTML input.
+     */
+    private void showWebTextEntry(WebView web) {
+        EditText editor = new EditText(this);
+        editor.setSingleLine(true);
+        editor.setTextColor(Color.WHITE);
+        editor.setHintTextColor(TEAL);
+        editor.setHint("Введите текст для выбранного поля");
+        editor.setInputType(android.text.InputType.TYPE_CLASS_TEXT
+                | android.text.InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
+        editor.setSelectAllOnFocus(true);
+        editor.setFocusable(true);
+        editor.setFocusableInTouchMode(true);
+        editor.setPadding(dp(14), dp(8), dp(14), dp(8));
+        editor.setBackground(shape(PANEL, TEAL));
+
+        AlertDialog inputDialog = new AlertDialog.Builder(this)
+                .setTitle("Ввод текста на Kinozal")
+                .setView(editor)
+                .setPositiveButton("Вставить", null)
+                .setNegativeButton("Отмена", null)
+                .create();
+        inputDialog.setOnShowListener(ignored -> {
+            inputDialog.getWindow().setSoftInputMode(
+                    android.view.WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE
+                    | android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
+            editor.requestFocus();
+            editor.postDelayed(() -> {
+                android.view.inputmethod.InputMethodManager imm =
+                        (android.view.inputmethod.InputMethodManager) getSystemService(INPUT_METHOD_SERVICE);
+                if (imm != null) imm.showSoftInput(editor,
+                        android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT);
+            }, 180);
+            inputDialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
+                String value = editor.getText().toString();
+                if (value.isEmpty()) {
+                    inputDialog.dismiss();
+                    return;
+                }
+                String quoted = org.json.JSONObject.quote(value);
+                String script = "(function(){var e=document.activeElement;"
+                        + "if(!e||!(e.matches('input,textarea,[contenteditable=true]'))){"
+                        + "e=document.querySelector('input:not([type=hidden]),textarea,[contenteditable=true]');}"
+                        + "if(!e)return 'NO_FIELD';e.focus();"
+                        + "var setter=Object.getOwnPropertyDescriptor(e.constructor.prototype,'value');"
+                        + "if(setter&&setter.set)setter.set.call(e," + quoted + ");else e.value=" + quoted + ";"
+                        + "e.dispatchEvent(new Event('input',{bubbles:true}));"
+                        + "e.dispatchEvent(new Event('change',{bubbles:true}));return 'OK';})()";
+                web.evaluateJavascript(script, result -> {
+                    if ("\\"NO_FIELD\\"".equals(result) || result == null) {
+                        showMessage("Сначала выберите поле логина или пароля на странице.");
+                    }
+                });
+                inputDialog.dismiss();
+            });
+        });
+        inputDialog.show();
+        inputDialog.getWindow().setSoftInputMode(
+                android.view.WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE
+                | android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
     }
 
     private void showNativeLoginForm(String[] saved) {
