@@ -88,7 +88,12 @@ public class MainActivity extends Activity {
         mirror = getSharedPreferences(PREFS, MODE_PRIVATE).getString("mirror", MIRRORS[0]);
         client = new KinozalHttpClient(this, mirror);
         buildShell();
-        loadInitialCatalog();
+        String savedBrowserCookies = client.getSavedBrowserCookies();
+        if (savedBrowserCookies != null) {
+            restoreBrowserSession(savedBrowserCookies);
+        } else {
+            loadInitialCatalog();
+        }
     }
 
     private static class HomeSection {
@@ -426,6 +431,70 @@ public class MainActivity extends Activity {
                 }
             });
         }
+    }
+
+    private void restoreBrowserSession(String cookieHeader) {
+        WebView web = new WebView(this);
+        sessionWebView = web;
+        web.setVisibility(View.INVISIBLE);
+        web.getSettings().setJavaScriptEnabled(true);
+        web.getSettings().setDomStorageEnabled(true);
+        web.getSettings().setLoadsImagesAutomatically(false);
+        web.getSettings().setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
+        CookieManager manager = CookieManager.getInstance();
+        manager.setAcceptCookie(true);
+        manager.setAcceptThirdPartyCookies(web, true);
+        String[] pairs = cookieHeader.split(";");
+        final int[] remaining = {0};
+        for (String pair : pairs) if (pair.trim().contains("=")) remaining[0]++;
+        if (remaining[0] == 0) {
+            loadInitialCatalog();
+            return;
+        }
+        final boolean[] started = {false};
+        android.webkit.ValueCallback<Boolean> callback = accepted -> {
+            remaining[0]--;
+            if (remaining[0] <= 0 && !started[0]) {
+                started[0] = true;
+                manager.flush();
+                web.postDelayed(this::loadInitialCatalog, 250);
+            }
+        };
+        for (String pair : pairs) {
+            String item = pair.trim();
+            if (!item.contains("=")) continue;
+            manager.setCookie(client.getMirror(), item + "; Path=/; Secure; SameSite=Lax", callback);
+        }
+        web.setWebViewClient(new WebViewClient() {
+            private boolean isMirror(Uri uri) {
+                return uri != null && uri.getHost() != null
+                        && uri.getHost().equalsIgnoreCase(Uri.parse(client.getMirror()).getHost());
+            }
+            @Override public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
+                return request.isForMainFrame() && !isMirror(request.getUrl());
+            }
+            @Override public void onPageFinished(WebView view, String url) {
+                super.onPageFinished(view, url);
+                if (pendingBrowserCallback != null) {
+                    BrowserPageCallback cb = pendingBrowserCallback;
+                    pendingBrowserCallback = null;
+                    view.evaluateJavascript("(document.documentElement ? document.documentElement.outerHTML : '')", value -> {
+                        String html = "";
+                        try { html = new org.json.JSONArray("[" + value + "]").getString(0); }
+                        catch (Exception ignored) { }
+                        cb.onPage(html, html.isEmpty() ? "Пустая страница браузера" : null);
+                    });
+                }
+                String currentCookies = manager.getCookie(client.getMirror());
+                if (currentCookies != null && !currentCookies.isEmpty()) {
+                    try {
+                        client.saveBrowserCookies(currentCookies);
+                        client.importBrowserCookies(currentCookies);
+                    } catch (Exception ignored) { }
+                }
+            }
+        });
+        web.setWebChromeClient(new WebChromeClient());
     }
 
     private void fetchBrowserPage(String path, String postBody,
@@ -799,7 +868,10 @@ public class MainActivity extends Activity {
                         + "window.AndroidTV.onLoginSubmit(u?u.value:'',p.value);},true);})();", null);
                 String cookie = browserCookies.getCookie(base);
                 if (cookie != null && !cookie.isEmpty()) {
-                    try { client.importBrowserCookies(cookie); } catch (Exception ignored) { }
+                    try {
+                        client.importBrowserCookies(cookie);
+                        client.saveBrowserCookies(cookie);
+                    } catch (Exception ignored) { }
                 }
             }
         });
@@ -838,6 +910,7 @@ public class MainActivity extends Activity {
             if (cookie != null && !cookie.isEmpty()) {
                 try {
                     client.importBrowserCookies(cookie);
+                    client.saveBrowserCookies(cookie);
                     if (submittedLogin[0] != null && !submittedLogin[0].trim().isEmpty()
                             && submittedPassword[0] != null && !submittedPassword[0].isEmpty()) {
                         client.saveCredentials(submittedLogin[0], submittedPassword[0]);
