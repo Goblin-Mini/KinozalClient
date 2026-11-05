@@ -645,6 +645,13 @@ public class MainActivity extends Activity {
         statusParams.topMargin = dp(4);
         sidebar.addView(status, statusParams);
 
+        Button categoriesButton = button("Категории");
+        categoriesButton.setGravity(Gravity.CENTER);
+        LinearLayout.LayoutParams categoriesParams = new LinearLayout.LayoutParams(-1, dp(44));
+        categoriesParams.bottomMargin = dp(8);
+        main.addView(categoriesButton, categoriesParams);
+        categoriesButton.setOnClickListener(v -> openCategories());
+
         LinearLayout searchBar = new LinearLayout(this); searchBar.setGravity(Gravity.CENTER_VERTICAL);
         search = new EditText(this);
         search.setSingleLine(true);
@@ -970,6 +977,42 @@ public class MainActivity extends Activity {
         String q = search.getText().toString().trim(); if (q.isEmpty()) return;
         try { load("browse.php?s=" + URLEncoder.encode(q, "UTF-8"), "Поиск: " + q); }
         catch (Exception e) { showMessage("Ошибка поиска"); }
+    }
+
+    private void openCategories() {
+        if (lastHtml != null && !lastHtml.isEmpty()) {
+            categories();
+            return;
+        }
+        showPageLoading("Загрузка списка категорий…");
+        if (sessionWebView != null) {
+            fetchBrowserPage("browse.php", null, html -> {
+                if (html == null || html.isEmpty()) {
+                    progress.setVisibility(View.GONE);
+                    status.setText("Нет соединения");
+                    showMessage("Не удалось загрузить категории через браузерную сессию.");
+                    return;
+                }
+                lastHtml = html;
+                categories();
+            });
+        } else {
+            io.execute(() -> {
+                try {
+                    String html = client.fetch("browse.php");
+                    runOnUiThread(() -> {
+                        lastHtml = html;
+                        categories();
+                    });
+                } catch (Exception e) {
+                    runOnUiThread(() -> {
+                        progress.setVisibility(View.GONE);
+                        status.setText("Нет соединения");
+                        showMessage("Не удалось загрузить категории: " + safe(e.getMessage()));
+                    });
+                }
+            });
+        }
     }
 
     private void categories() { categories(null); }
