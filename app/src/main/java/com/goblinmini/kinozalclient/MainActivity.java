@@ -672,10 +672,6 @@ public class MainActivity extends Activity {
         panel.setMinimumHeight((int)(getResources().getDisplayMetrics().heightPixels * 0.72f));
         panel.setLayoutParams(new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
-        TextView hint = text("Пройдите проверку на сайте. Посторонние рекламные переходы и всплывающие окна блокируются.", 13, TEAL, false);
-        hint.setPadding(dp(12), dp(8), dp(12), dp(8));
-        panel.addView(hint, new LinearLayout.LayoutParams(-1, -2));
-
         WebView web = new WebView(this);
         web.setBackgroundColor(Color.WHITE);
         web.setVisibility(View.VISIBLE);
@@ -757,8 +753,11 @@ public class MainActivity extends Activity {
         LinearLayout.LayoutParams doneParams = new LinearLayout.LayoutParams(0, dp(46), 1f);
         doneParams.leftMargin = dp(8);
         actions.addView(done, doneParams);
-        // Keep the controls above the browser so they remain reachable on TV.
+        // Put the action buttons at the very top of the dialog, before the hint and browser.
         panel.addView(actions, new LinearLayout.LayoutParams(-1, -2));
+        TextView hint = text("Пройдите проверку на сайте. Посторонние рекламные переходы и всплывающие окна блокируются.", 13, TEAL, false);
+        hint.setPadding(dp(12), dp(8), dp(12), dp(8));
+        panel.addView(hint, new LinearLayout.LayoutParams(-1, -2));
         LinearLayout.LayoutParams webParams = new LinearLayout.LayoutParams(-1, 0, 1f);
         panel.addView(web, webParams);
 
