@@ -67,7 +67,7 @@ final class UpdateManager {
         HttpURLConnection c = (HttpURLConnection) new URL(apkUrl).openConnection();
         c.setConnectTimeout(15000);
         c.setReadTimeout(60000);
-        File apk = new File(activity.getExternalFilesDir(null), "KinozalClient-update.apk");
+        File apk = new File(activity.getCacheDir(), "KinozalClient-update.apk");
         try (InputStream in = c.getInputStream(); FileOutputStream out = new FileOutputStream(apk)) {
             byte[] buffer = new byte[32768];
             int n;
