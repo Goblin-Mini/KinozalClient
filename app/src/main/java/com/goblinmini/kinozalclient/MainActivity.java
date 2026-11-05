@@ -80,7 +80,7 @@ public class MainActivity extends Activity {
     private static class Category { String title, href, method = "GET", body = ""; }
 
     private static class Torrent {
-        String title, href, size, seeds, leeches;
+        String title, href, size, seeds, leeches, uploaded;
     }
 
     @Override public void onCreate(Bundle state) {
@@ -111,8 +111,7 @@ public class MainActivity extends Activity {
         currentPath = "";
         currentTitle = "Главная";
         heading.setText("Главная");
-        progress.setVisibility(View.VISIBLE);
-        list.removeAllViews();
+        showPageLoading("Подключение к Kinozal…");
         if (sessionWebView != null) {
             loadHomeSectionsInBrowser(new String[]{"novinki.php", "top.php",
                     "top.php?t=0&d=0&f=0&k=0&j=&s=0&w=1",
@@ -192,13 +191,8 @@ public class MainActivity extends Activity {
             if (title.isEmpty()) continue;
             String image = "";
             if (img != null) {
-                String raw = img.hasAttr("data-src") ? img.attr("data-src") : img.attr("src");
-                if (raw.isEmpty()) raw = img.attr("data-original");
-                image = mirrorUrl(img.absUrl("src"), raw);
-                if (image.isEmpty() && !raw.isEmpty()) {
-                    try { image = java.net.URI.create(client.getMirror() + "/").resolve(raw).toString(); }
-                    catch (Exception ignored) { }
-                }
+                String raw = firstImageSource(img);
+                image = resolveImageUrl(raw);
             }
             HomePoster item = new HomePoster();
             item.torrent = new Torrent();
@@ -214,6 +208,74 @@ public class MainActivity extends Activity {
             if (out.size() >= 12) break;
         }
         return out;
+    }
+
+    private String firstImageSource(Element img) {
+        String[] attributes = {"data-src", "data-original", "data-lazy-src", "data-original-src", "src"};
+        for (String attribute : attributes) {
+            String value = img.attr(attribute).trim();
+            if (!value.isEmpty() && !value.startsWith("data:image/")) return value;
+        }
+        String srcset = img.attr("data-srcset");
+        if (srcset.isEmpty()) srcset = img.attr("srcset");
+        if (!srcset.isEmpty()) return srcset.split(",")[0].trim().split("\\s+")[0];
+        return "";
+    }
+
+    private String resolveImageUrl(String raw) {
+        if (raw == null || raw.trim().isEmpty()) return "";
+        try {
+            java.net.URI uri = java.net.URI.create(raw.trim());
+            return uri.isAbsolute() ? uri.toString()
+                    : java.net.URI.create(client.getMirror() + "/").resolve(uri).toString();
+        } catch (Exception ignored) { return raw.trim(); }
+    }
+
+    private void loadImageIntoView(String imageUrl, ImageView target) {
+        if (imageUrl == null || imageUrl.isEmpty()) return;
+        WebView web = sessionWebView;
+        if (web == null) {
+            loadImageWithHttp(imageUrl, target);
+            return;
+        }
+        String quotedUrl = org.json.JSONObject.quote(imageUrl);
+        String script = "(function(){return fetch(" + quotedUrl + ",{credentials:'include'})"
+                + ".then(function(r){if(!r.ok)throw new Error('HTTP '+r.status);return r.blob();})"
+                + ".then(function(b){return new Promise(function(resolve,reject){var f=new FileReader();"
+                + "f.onloadend=function(){var v=String(f.result||'');resolve(v.substring(v.indexOf(',')+1));};"
+                + "f.onerror=reject;f.readAsDataURL(b);});});})()";
+        web.evaluateJavascript(script, result -> {
+            String encoded = null;
+            try { encoded = new org.json.JSONArray("[" + result + "]").getString(0); }
+            catch (Exception ignored) { }
+            if (encoded == null || encoded.isEmpty() || "null".equals(encoded)) {
+                loadImageWithHttp(imageUrl, target);
+                return;
+            }
+            final String base64 = encoded;
+            io.execute(() -> {
+                try {
+                    byte[] bytes = android.util.Base64.decode(base64, android.util.Base64.DEFAULT);
+                    Bitmap bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.length);
+                    if (bitmap != null) runOnUiThread(() -> {
+                        if (target.getParent() != null) target.setImageBitmap(bitmap);
+                    });
+                    else loadImageWithHttp(imageUrl, target);
+                } catch (Exception ignored) { loadImageWithHttp(imageUrl, target); }
+            });
+        });
+    }
+
+    private void loadImageWithHttp(String imageUrl, ImageView target) {
+        io.execute(() -> {
+            try {
+                byte[] bytes = client.fetchBytes(imageUrl, "image/*");
+                Bitmap bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.length);
+                if (bitmap != null) runOnUiThread(() -> {
+                    if (target.getParent() != null) target.setImageBitmap(bitmap);
+                });
+            } catch (Exception ignored) { }
+        });
     }
 
     private String mirrorUrl(String absolute, String raw) {
@@ -266,17 +328,7 @@ public class MainActivity extends Activity {
                 cardParams.rightMargin = dp(8);
                 strip.addView(card, cardParams);
                 card.setOnClickListener(v -> showTorrent(item.torrent));
-                if (!item.imageUrl.isEmpty()) {
-                    io.execute(() -> {
-                        try {
-                            byte[] bytes = client.fetchBytes(item.imageUrl, "image/*");
-                            Bitmap bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.length);
-                            if (bitmap != null) runOnUiThread(() -> {
-                                if (poster.getParent() != null) poster.setImageBitmap(bitmap);
-                            });
-                        } catch (Exception ignored) { }
-                    });
-                }
+                if (!item.imageUrl.isEmpty()) loadImageIntoView(item.imageUrl, poster);
             }
             horizontal.addView(strip);
             LinearLayout.LayoutParams rowParams = new LinearLayout.LayoutParams(-1, dp(238));
@@ -431,6 +483,23 @@ public class MainActivity extends Activity {
     private void focusSearch() { search.requestFocus(); }
     private void showMessage(String message) { Toast.makeText(this, message, Toast.LENGTH_LONG).show(); }
 
+    private void showPageLoading(String message) {
+        progress.setVisibility(View.VISIBLE);
+        list.removeAllViews();
+        LinearLayout loading = new LinearLayout(this);
+        loading.setOrientation(LinearLayout.VERTICAL);
+        loading.setGravity(Gravity.CENTER);
+        loading.setPadding(dp(16), dp(48), dp(16), dp(48));
+        ProgressBar spinner = new ProgressBar(this);
+        loading.addView(spinner, new LinearLayout.LayoutParams(dp(46), dp(46)));
+        TextView label = text(message, 15, TEAL, false);
+        label.setGravity(Gravity.CENTER);
+        LinearLayout.LayoutParams labelParams = new LinearLayout.LayoutParams(-1, -2);
+        labelParams.topMargin = dp(14);
+        loading.addView(label, labelParams);
+        list.addView(loading, new LinearLayout.LayoutParams(-1, -1));
+    }
+
     private void load(String path, String title) { load(path, title, null); }
 
     private void load(String path, String title, String postBody) {
@@ -439,7 +508,7 @@ public class MainActivity extends Activity {
         String cachedPage;
         synchronized (pageCache) { cachedPage = pageCache.get(cacheKey); }
         if (cachedPage != null) { showLoadedPage(cachedPage); return; }
-        progress.setVisibility(View.VISIBLE); list.removeAllViews();
+        showPageLoading("Загрузка каталога…");
         if (sessionWebView != null) {
             fetchBrowserPage(path, postBody, html -> {
                 if (html != null && !html.isEmpty()) {
@@ -581,10 +650,12 @@ public class MainActivity extends Activity {
                 t.size = cells.size() > 3 ? cells.get(3).text().trim() : "—";
                 t.seeds = cells.size() > 4 ? cells.get(4).text().trim() : "—";
                 t.leeches = cells.size() > 5 ? cells.get(5).text().trim() : "—";
+                t.uploaded = cells.size() > 6 ? cells.get(6).text().trim() : "—";
             } else {
                 t.size = "—";
                 t.seeds = "—";
                 t.leeches = "—";
+                t.uploaded = "—";
             }
 
             boolean duplicate = false;
@@ -608,6 +679,9 @@ public class MainActivity extends Activity {
         TextView sizeHeader = text("РАЗМЕР", 11, TEAL, true);
         sizeHeader.setGravity(Gravity.CENTER);
         header.addView(sizeHeader, new LinearLayout.LayoutParams(dp(85), -2));
+        TextView dateHeader = text("ДАТА", 11, TEAL, true);
+        dateHeader.setGravity(Gravity.CENTER);
+        header.addView(dateHeader, new LinearLayout.LayoutParams(dp(96), -2));
         TextView seedsHeader = text("СИДЫ", 11, TEAL, true);
         seedsHeader.setGravity(Gravity.CENTER);
         header.addView(seedsHeader, new LinearLayout.LayoutParams(dp(55), -2));
@@ -625,6 +699,10 @@ public class MainActivity extends Activity {
             TextView size = text(t.size, 13, GOLD, false);
             size.setGravity(Gravity.CENTER);
             row.addView(size, new LinearLayout.LayoutParams(dp(85), -2));
+            TextView uploaded = text(t.uploaded == null ? "—" : t.uploaded, 12, TEAL, false);
+            uploaded.setGravity(Gravity.CENTER);
+            uploaded.setMaxLines(2);
+            row.addView(uploaded, new LinearLayout.LayoutParams(dp(96), -2));
             TextView seeds = text(t.seeds, 13, TEAL, true);
             seeds.setGravity(Gravity.CENTER);
             row.addView(seeds, new LinearLayout.LayoutParams(dp(55), -2));
@@ -1272,22 +1350,17 @@ public class MainActivity extends Activity {
         render.run();
 
         watch.setOnClickListener(v -> playTorrent(data));
+        root.setLayoutParams(new ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         AlertDialog dialog = new AlertDialog.Builder(this)
                 .setView(root)
                 .create();
         dialog.show();
         if (dialog.getWindow() != null) {
+            dialog.getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(Color.TRANSPARENT));
             dialog.getWindow().setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT);
         }
-        if (!data.poster.isEmpty()) {
-            io.execute(() -> {
-                try {
-                    byte[] bytes = client.fetchBytes(data.poster, "image/*");
-                    Bitmap bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.length);
-                    if (bitmap != null) runOnUiThread(() -> poster.setImageBitmap(bitmap));
-                } catch (Exception ignored) { }
-            });
-        }
+        if (!data.poster.isEmpty()) loadImageIntoView(data.poster, poster);
         watch.requestFocus();
     }
 
