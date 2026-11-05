@@ -700,13 +700,14 @@ public class MainActivity extends Activity {
         panel.setMinimumHeight((int)(getResources().getDisplayMetrics().heightPixels * 0.72f));
         panel.setLayoutParams(new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
-        WebView web = sessionWebView;
-        if (web == null) {
-            web = new WebView(this);
-            sessionWebView = web;
-        } else if (web.getParent() instanceof ViewGroup) {
-            ((ViewGroup) web.getParent()).removeView(web);
+        WebView existingWeb = sessionWebView;
+        if (existingWeb == null) {
+            existingWeb = new WebView(this);
+            sessionWebView = existingWeb;
+        } else if (existingWeb.getParent() instanceof ViewGroup) {
+            ((ViewGroup) existingWeb.getParent()).removeView(existingWeb);
         }
+        final WebView web = existingWeb;
         web.setBackgroundColor(Color.WHITE);
         web.setVisibility(View.VISIBLE);
         web.setMinimumHeight(dp(360));
