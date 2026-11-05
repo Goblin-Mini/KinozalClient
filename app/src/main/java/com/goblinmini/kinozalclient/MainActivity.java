@@ -187,7 +187,7 @@ public class MainActivity extends Activity {
                 }
                 runOnUiThread(() -> {
                     progress.setVisibility(View.GONE);
-                    status.setText("Главная · Постеров: " + total);
+                    status.setText("Главная · Постеров: " + total + "\nВерсия: " + getAppVersionName());
                     renderHome(sections);
                 });
             } catch (Exception e) {
@@ -216,7 +216,7 @@ public class MainActivity extends Activity {
                 return;
             }
             progress.setVisibility(View.GONE);
-            status.setText("Главная · Постеров: " + total);
+            status.setText("Главная · Постеров: " + total + "\nВерсия: " + getAppVersionName());
             renderHome(sections);
             return;
         }
@@ -297,6 +297,7 @@ public class MainActivity extends Activity {
     private void removeHomeDuplicates(List<HomeSection> sections) {
         for (HomeSection section : sections) {
             java.util.LinkedHashMap<String, HomePoster> bestByTitle = new java.util.LinkedHashMap<>();
+            java.util.Map<String, String> posterGroups = new java.util.HashMap<>();
             java.util.Set<String> seenLinks = new java.util.HashSet<>();
             List<HomePoster> unique = new ArrayList<>();
             for (HomePoster item : section.items) {
@@ -312,20 +313,52 @@ public class MainActivity extends Activity {
                 if (!href.isEmpty()) seenLinks.add("url:" + href);
 
                 String titleKey = normalizeHomeTitle(item.torrent.title);
-                if (titleKey.isEmpty()) {
+                String posterKey = normalizeHomePosterImage(item.imageUrl);
+                // Kinozal can expose the same movie under slightly different title
+                // strings. The poster URL is a second identity signal that catches
+                // those aliases without merging unrelated seasons by title alone.
+                String groupKey = titleKey;
+                if (!posterKey.isEmpty()) {
+                    String knownGroup = posterGroups.get(posterKey);
+                    if (knownGroup != null) groupKey = knownGroup;
+                    else if (groupKey.isEmpty()) groupKey = "poster:" + posterKey;
+                    posterGroups.put(posterKey, groupKey);
+                }
+                if (groupKey.isEmpty()) {
                     unique.add(item);
                     continue;
                 }
-                HomePoster current = bestByTitle.get(titleKey);
+                HomePoster current = bestByTitle.get(groupKey);
                 if (current == null) {
-                    bestByTitle.put(titleKey, item);
+                    bestByTitle.put(groupKey, item);
                 } else if (homeTorrentScore(item) > homeTorrentScore(current)) {
-                    bestByTitle.put(titleKey, item);
+                    bestByTitle.put(groupKey, item);
                 }
             }
             unique.addAll(bestByTitle.values());
             section.items.clear();
             section.items.addAll(unique.subList(0, Math.min(12, unique.size())));
+        }
+    }
+
+    private String normalizeHomePosterImage(String imageUrl) {
+        if (imageUrl == null || imageUrl.trim().isEmpty()) return "";
+        try {
+            java.net.URI uri = java.net.URI.create(imageUrl.trim());
+            String path = uri.getPath();
+            if (path == null || path.isEmpty()) return "";
+            return path.replaceAll("/+$", "").toLowerCase(java.util.Locale.ROOT);
+        } catch (Exception ignored) {
+            return imageUrl.trim().toLowerCase(java.util.Locale.ROOT);
+        }
+    }
+
+    private String getAppVersionName() {
+        try {
+            android.content.pm.PackageInfo info = getPackageManager().getPackageInfo(getPackageName(), 0);
+            return info.versionName == null ? "неизвестна" : info.versionName;
+        } catch (Exception ignored) {
+            return "неизвестна";
         }
     }
 
