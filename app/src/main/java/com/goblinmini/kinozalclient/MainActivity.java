@@ -337,7 +337,7 @@ public class MainActivity extends Activity {
             }
             unique.addAll(bestByTitle.values());
             section.items.clear();
-            section.items.addAll(unique.subList(0, Math.min(12, unique.size())));
+            section.items.addAll(unique.subList(0, Math.min(15, unique.size())));
         }
     }
 
