@@ -1703,9 +1703,14 @@ public class MainActivity extends Activity {
     private void downloadTorrentNative(TorrentDetails data) {
         io.execute(() -> {
             try {
-                String browserCookies = CookieManager.getInstance().getCookie(client.getMirror());
+                // Read cookies for the actual torrent details page, not just the
+                // mirror root: Kinozal may scope session/clearance cookies by host/path.
+                String cookieUrl = data.sourcePage == null || data.sourcePage.isEmpty()
+                        ? client.getMirror() : data.sourcePage;
+                String browserCookies = CookieManager.getInstance().getCookie(cookieUrl);
                 if (browserCookies != null && !browserCookies.isEmpty()) {
                     client.importBrowserCookies(browserCookies);
+                    client.saveBrowserCookies(browserCookies);
                 }
                 byte[] bytes = client.fetchBytes(data.torrentLink,
                         "application/x-bittorrent,application/octet-stream,*/*",
