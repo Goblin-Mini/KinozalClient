@@ -852,8 +852,9 @@ public class MainActivity extends Activity {
             web.setVisibility(View.INVISIBLE);
             root.addView(web, new LinearLayout.LayoutParams(1, 1));
             dialog.dismiss();
-            showMessage("Cookies браузера переданы приложению.");
-            status.setText("Проверка сайта выполнена");
+            showMessage("Браузерная сессия сохранена. Загружаю каталог через WebView.");
+            status.setText("Браузерная сессия активна");
+            load("browse.php", "Все раздачи");
         });
         dialog.setOnDismissListener(d -> {
             if (web.getParent() == panel) {
