@@ -438,12 +438,20 @@ public class MainActivity extends Activity {
         try {
             java.net.URI uri = java.net.URI.create(value.trim());
             java.net.URI base = java.net.URI.create(client.getMirror());
-            if (uri.isAbsolute() && uri.getHost() != null
-                    && !uri.getHost().equalsIgnoreCase(base.getHost())) {
-                return new java.net.URI(base.getScheme(), null, base.getHost(), base.getPort(),
-                        uri.getPath(), uri.getQuery(), uri.getFragment()).toString();
-            }
             if (!uri.isAbsolute()) return base.resolve(uri).toString();
+
+            // Only translate URLs that point to one of Kinozal's known site mirrors.
+            // Poster/CDN hosts are separate from the selected mirror and must stay intact.
+            String host = uri.getHost();
+            if (host != null) {
+                for (String knownMirror : MIRRORS) {
+                    String mirrorHost = java.net.URI.create(knownMirror).getHost();
+                    if (mirrorHost != null && host.equalsIgnoreCase(mirrorHost)) {
+                        return new java.net.URI(base.getScheme(), null, base.getHost(), base.getPort(),
+                                uri.getPath(), uri.getQuery(), uri.getFragment()).toString();
+                    }
+                }
+            }
             return uri.toString();
         } catch (Exception ignored) { return value; }
     }
