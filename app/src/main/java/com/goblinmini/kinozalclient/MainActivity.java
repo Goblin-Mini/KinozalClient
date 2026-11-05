@@ -343,6 +343,40 @@ public class MainActivity extends Activity {
         } catch (Exception ignored) { return raw.trim(); }
     }
 
+    /**
+     * Some Kinozal home layouts keep the poster separate from the title link.
+     * Resolve it from the torrent page og:image, also used by the details view.
+     */
+    private void loadHomePosterFromDetails(HomePoster item, ImageView target) {
+        io.execute(() -> {
+            try {
+                String html = client.fetch(item.torrent.href);
+                Document doc = Jsoup.parse(html, item.torrent.href);
+                Element image = doc.selectFirst("meta[property=og:image]");
+                String imageUrl = "";
+                if (image != null) {
+                    String raw = image.attr("content").trim();
+                    if (!raw.isEmpty()) imageUrl = doc.baseUri().isEmpty()
+                            ? resolveImageUrl(raw) : java.net.URI.create(doc.baseUri()).resolve(raw).toString();
+                }
+                if (imageUrl.isEmpty()) {
+                    Element poster = doc.selectFirst("img[src*=/poster/], img[data-src*=/poster/]");
+                    if (poster != null) {
+                        String raw = firstImageSource(poster);
+                        imageUrl = poster.absUrl("src");
+                        if (imageUrl.isEmpty()) imageUrl = resolveImageUrl(raw);
+                    }
+                }
+                if (imageUrl.isEmpty()) return;
+                byte[] bytes = client.fetchBytes(imageUrl, "image/*", item.torrent.href);
+                Bitmap bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.length);
+                if (bitmap != null) runOnUiThread(() -> {
+                    if (target.getParent() != null) target.setImageBitmap(bitmap);
+                });
+            } catch (Exception ignored) { }
+        });
+    }
+
     private void loadImageIntoView(String imageUrl, ImageView target) {
         loadImageIntoView(imageUrl, target, client.getMirror() + "/");
     }
@@ -448,7 +482,11 @@ public class MainActivity extends Activity {
                 cardParams.rightMargin = dp(8);
                 strip.addView(card, cardParams);
                 card.setOnClickListener(v -> showTorrent(item.torrent));
-                if (!item.imageUrl.isEmpty()) loadImageIntoView(item.imageUrl, poster, client.getMirror() + "/" + section.path);
+                if (!item.imageUrl.isEmpty()) {
+                    loadImageIntoView(item.imageUrl, poster, client.getMirror() + "/" + section.path);
+                } else {
+                    loadHomePosterFromDetails(item, poster);
+                }
             }
             horizontal.addView(strip);
             LinearLayout.LayoutParams rowParams = new LinearLayout.LayoutParams(-1, dp(238));
