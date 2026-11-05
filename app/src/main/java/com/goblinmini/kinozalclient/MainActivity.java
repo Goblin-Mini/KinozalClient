@@ -410,7 +410,6 @@ public class MainActivity extends Activity {
         menuScroll.addView(menuItems, new ScrollView.LayoutParams(-1, -2));
         sidebar.addView(menuScroll, new LinearLayout.LayoutParams(-1, 0, 1));
         addMenu("Главная", () -> loadInitialCatalog());
-        addMenu("Поиск", () -> focusSearch());
         addMenu("Все раздачи", () -> load("browse.php", "Все раздачи"));
         addMenu("Все сериалы", () -> load("browse.php?c=1001", "Все сериалы"));
         addMenu("Зарубежные сериалы", () -> load("browse.php?c=46", "Зарубежные сериалы"));
