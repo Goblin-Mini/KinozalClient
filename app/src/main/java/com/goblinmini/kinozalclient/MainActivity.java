@@ -155,6 +155,30 @@ public class MainActivity extends Activity {
         });
     }
 
+    private void loadHomeSectionsInBrowser(String[] paths, String[] titles, int index,
+            List<HomeSection> sections) {
+        if (index >= paths.length) {
+            int total = 0;
+            for (HomeSection section : sections) total += section.items.size();
+            progress.setVisibility(View.GONE);
+            status.setText("Главная · Постеров: " + total);
+            renderHome(sections);
+            return;
+        }
+        fetchBrowserPage(paths[index], null, html -> {
+            if (html == null || html.isEmpty()) {
+                progress.setVisibility(View.GONE);
+                status.setText("Нет соединения");
+                addEmpty("Не удалось загрузить каталог через сохранённую браузерную сессию.");
+                return;
+            }
+            HomeSection section = new HomeSection(titles[index], paths[index]);
+            section.items.addAll(parseHomePosters(Jsoup.parse(html, client.getMirror() + "/")));
+            sections.add(section);
+            loadHomeSectionsInBrowser(paths, titles, index + 1, sections);
+        });
+    }
+
     private List<HomePoster> parseHomePosters(Document doc) {
         List<HomePoster> out = new ArrayList<>();
         Elements anchors = doc.select("a[href*=details.php?id=]");
