@@ -675,36 +675,6 @@ public class MainActivity extends Activity {
         hint.setPadding(dp(12), dp(8), dp(12), dp(8));
         panel.addView(hint, new LinearLayout.LayoutParams(-1, -2));
 
-        // Native credentials stay visible above the website and invoke Android TV IME.
-        LinearLayout credentials = new LinearLayout(this);
-        credentials.setOrientation(LinearLayout.VERTICAL);
-        credentials.setPadding(dp(8), dp(4), dp(8), dp(6));
-        EditText webLogin = new EditText(this);
-        webLogin.setSingleLine(true);
-        webLogin.setTextColor(GOLD);
-        webLogin.setHintTextColor(TEAL);
-        webLogin.setHint("Логин Kinozal");
-        webLogin.setInputType(android.text.InputType.TYPE_CLASS_TEXT
-                | android.text.InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD);
-        webLogin.setSelectAllOnFocus(true);
-        webLogin.setBackground(shape(PANEL, TEAL));
-        webLogin.setPadding(dp(12), 0, dp(12), 0);
-        credentials.addView(webLogin, new LinearLayout.LayoutParams(-1, dp(46)));
-        EditText webPassword = new EditText(this);
-        webPassword.setSingleLine(true);
-        webPassword.setTextColor(GOLD);
-        webPassword.setHintTextColor(TEAL);
-        webPassword.setHint("Пароль Kinozal");
-        webPassword.setInputType(android.text.InputType.TYPE_CLASS_TEXT
-                | android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD);
-        webPassword.setSelectAllOnFocus(true);
-        webPassword.setBackground(shape(PANEL, TEAL));
-        webPassword.setPadding(dp(12), 0, dp(12), 0);
-        LinearLayout.LayoutParams webPasswordParams = new LinearLayout.LayoutParams(-1, dp(46));
-        webPasswordParams.topMargin = dp(6);
-        credentials.addView(webPassword, webPasswordParams);
-        panel.addView(credentials, new LinearLayout.LayoutParams(-1, -2));
-
         WebView web = new WebView(this);
         web.setBackgroundColor(Color.WHITE);
         web.setVisibility(View.VISIBLE);
@@ -749,33 +719,6 @@ public class MainActivity extends Activity {
                 return false;
             }
         });
-        Runnable fillWebsiteCredentials = () -> {
-            String loginValue = org.json.JSONObject.quote(webLogin.getText().toString());
-            String passwordValue = org.json.JSONObject.quote(webPassword.getText().toString());
-            String js = "(function(){"
-                    + "var u=document.querySelector('input[type=text],input[type=email],input:not([type]),input[name*=user i],input[name*=login i]');"
-                    + "var p=document.querySelector('input[type=password]');"
-                    + "function set(e,v){if(!e||!v)return;var d=Object.getOwnPropertyDescriptor(Object.getPrototypeOf(e),'value');"
-                    + "if(d&&d.set)d.set.call(e,v);else e.value=v;e.dispatchEvent(new Event('input',{bubbles:true}));"
-                    + "e.dispatchEvent(new Event('change',{bubbles:true}));}"
-                    + "set(u," + loginValue + ");set(p," + passwordValue + ");return !!(u||p);})()";
-            web.evaluateJavascript(js, null);
-        };
-        webLogin.addTextChangedListener(new android.text.TextWatcher() {
-            public void beforeTextChanged(CharSequence s, int st, int count, int after) {}
-            public void onTextChanged(CharSequence s, int st, int before, int count) {
-                if (web.getUrl() != null) fillWebsiteCredentials.run();
-            }
-            public void afterTextChanged(android.text.Editable e) {}
-        });
-        webPassword.addTextChangedListener(new android.text.TextWatcher() {
-            public void beforeTextChanged(CharSequence s, int st, int count, int after) {}
-            public void onTextChanged(CharSequence s, int st, int before, int count) {
-                if (web.getUrl() != null) fillWebsiteCredentials.run();
-            }
-            public void afterTextChanged(android.text.Editable e) {}
-        });
-
         web.setWebViewClient(new WebViewClient() {
             private boolean allowed(Uri uri) {
                 String host = uri == null ? null : uri.getHost();
@@ -798,7 +741,6 @@ public class MainActivity extends Activity {
             }
             @Override public void onPageFinished(WebView view, String url) {
                 super.onPageFinished(view, url);
-                fillWebsiteCredentials.run();
                 String cookie = browserCookies.getCookie(base);
                 if (cookie != null && !cookie.isEmpty()) {
                     try { client.importBrowserCookies(cookie); } catch (Exception ignored) { }
