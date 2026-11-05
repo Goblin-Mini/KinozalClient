@@ -645,6 +645,9 @@ public class MainActivity extends Activity {
         statusParams.topMargin = dp(4);
         sidebar.addView(status, statusParams);
 
+        heading = text("Главная", 25, GOLD, true);
+        main.addView(heading, new LinearLayout.LayoutParams(-1, dp(42)));
+
         LinearLayout searchBar = new LinearLayout(this); searchBar.setGravity(Gravity.CENTER_VERTICAL);
         search = new EditText(this);
         search.setSingleLine(true);
@@ -671,8 +674,6 @@ public class MainActivity extends Activity {
         });
         LinearLayout.LayoutParams sbp = new LinearLayout.LayoutParams(-1, dp(52)); sbp.bottomMargin = dp(8);
         main.addView(searchBar, sbp);
-        heading = text("Главная", 25, GOLD, true);
-        main.addView(heading, new LinearLayout.LayoutParams(-1, dp(42)));
         progress = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
         progress.setIndeterminate(true);
         progress.setVisibility(View.GONE);
