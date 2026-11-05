@@ -780,8 +780,14 @@ public class MainActivity extends Activity {
             browserCookies.flush();
             String cookie = browserCookies.getCookie(base);
             if (cookie != null && !cookie.isEmpty()) {
-                try { client.importBrowserCookies(cookie); } catch (Exception e) {
-                    showMessage("Не удалось сохранить cookies: " + safe(e.getMessage()));
+                try {
+                    client.importBrowserCookies(cookie);
+                    if (submittedLogin[0] != null && !submittedLogin[0].trim().isEmpty()
+                            && submittedPassword[0] != null && !submittedPassword[0].isEmpty()) {
+                        client.saveCredentials(submittedLogin[0], submittedPassword[0]);
+                    }
+                } catch (Exception e) {
+                    showMessage("Не удалось сохранить сессию: " + safe(e.getMessage()));
                     return;
                 }
             }
