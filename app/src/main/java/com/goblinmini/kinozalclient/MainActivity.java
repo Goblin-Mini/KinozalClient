@@ -223,35 +223,98 @@ public class MainActivity extends Activity {
 
     private void loadHomeSectionsInBrowser(String[] paths, String[] titles, int index,
             List<HomeSection> sections, int retry) {
-        if (index >= paths.length) {
-            removeHomeDuplicates(sections);
+        if (index != 0) return;
+        fetchBrowserPages(paths, htmlPages -> {
+            if (htmlPages == null || htmlPages.size() != paths.length) {
+                if (retry == 0) {
+                    status.setText("Повторное подключение к Kinozal…");
+                    browserHandler.postDelayed(() -> loadHomeSectionsInBrowser(
+                            paths, titles, 0, new ArrayList<>(), 1), 900);
+                } else {
+                    progress.setVisibility(View.GONE);
+                    status.setText("Нет соединения");
+                    addEmpty("Не удалось загрузить главную страницу через сохранённую браузерную сессию.");
+                }
+                return;
+            }
+            List<HomeSection> loaded = new ArrayList<>();
             int total = 0;
-            for (HomeSection section : sections) total += section.items.size();
-            // The first WebView pass can receive a Cloudflare/session warm-up page
-            // instead of the catalogue. Retry the complete home sequence once
-            // automatically so the user does not need to press Главная twice.
-            if (total == 0 && retry == 0) {
+            for (int i = 0; i < paths.length; i++) {
+                String html = htmlPages.get(i);
+                if (html == null || html.isEmpty()) continue;
+                HomeSection section = new HomeSection(titles[i], paths[i]);
+                section.items.addAll(parseHomePosters(Jsoup.parse(html, client.getMirror() + "/")));
+                loaded.add(section);
+                total += section.items.size();
+                diskCache.put("home|" + client.getMirror() + "|" + paths[i],
+                        html.getBytes(StandardCharsets.UTF_8));
+            }
+            removeHomeDuplicates(loaded);
+            int finalTotal = 0;
+            for (HomeSection section : loaded) finalTotal += section.items.size();
+            if (finalTotal == 0 && retry == 0) {
                 status.setText("Повторное подключение к Kinozal…");
                 browserHandler.postDelayed(() -> loadHomeSectionsInBrowser(
-                        paths, titles, 0, new ArrayList<>(), 1), 1500);
+                        paths, titles, 0, new ArrayList<>(), 1), 900);
                 return;
             }
             progress.setVisibility(View.GONE);
-            setCatalogStatus("Постеров", total);
-            renderHome(sections);
-            return;
-        }
-        fetchBrowserPage(paths[index], null, html -> {
-            if (html == null || html.isEmpty()) {
-                progress.setVisibility(View.GONE);
-                status.setText("Нет соединения");
-                addEmpty("Не удалось загрузить каталог через сохранённую браузерную сессию.");
+            setCatalogStatus("Постеров", finalTotal);
+            renderHome(loaded);
+        });
+    }
+
+    /**
+     * Load the first page as a normal WebView navigation to establish the
+     * authenticated origin, then fetch all remaining home sections concurrently.
+     */
+    private void fetchBrowserPages(String[] paths, java.util.function.Consumer<List<String>> callback) {
+        fetchBrowserPage(paths[0], null, firstHtml -> {
+            if (firstHtml == null || firstHtml.isEmpty()) {
+                callback.accept(null);
                 return;
             }
-            HomeSection section = new HomeSection(titles[index], paths[index]);
-            section.items.addAll(parseHomePosters(Jsoup.parse(html, client.getMirror() + "/")));
-            sections.add(section);
-            loadHomeSectionsInBrowser(paths, titles, index + 1, sections, retry);
+            if (paths.length == 1) {
+                List<String> only = new ArrayList<>();
+                only.add(firstHtml);
+                callback.accept(only);
+                return;
+            }
+            WebView web = sessionWebView;
+            if (web == null) {
+                callback.accept(null);
+                return;
+            }
+            org.json.JSONArray requested = new org.json.JSONArray();
+            for (int i = 1; i < paths.length; i++) {
+                requested.put(paths[i]);
+            }
+            String script = "(function(){var p=" + requested.toString() + ";"
+                    + "return Promise.all(p.map(function(u){return fetch(u,{credentials:'include',"
+                    + "cache:'no-store'}).then(function(r){if(!r.ok)throw new Error('HTTP '+r.status);"
+                    + "return r.text();});})).then(function(a){return JSON.stringify(a);});})()";
+            final boolean[] completed = {false};
+            Runnable timeout = () -> {
+                if (completed[0]) return;
+                completed[0] = true;
+                callback.accept(null);
+            };
+            browserHandler.postDelayed(timeout, 35000);
+            web.evaluateJavascript(script, value -> {
+                if (completed[0]) return;
+                completed[0] = true;
+                browserHandler.removeCallbacks(timeout);
+                try {
+                    String json = new org.json.JSONArray("[" + value + "]").getString(0);
+                    org.json.JSONArray array = new org.json.JSONArray(json);
+                    List<String> result = new ArrayList<>();
+                    result.add(firstHtml);
+                    for (int i = 0; i < array.length(); i++) result.add(array.getString(i));
+                    callback.accept(result);
+                } catch (Exception e) {
+                    callback.accept(null);
+                }
+            });
         });
     }
 
