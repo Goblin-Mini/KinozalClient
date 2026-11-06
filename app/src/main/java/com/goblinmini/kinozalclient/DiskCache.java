@@ -91,6 +91,30 @@ public final class DiskCache {
         }
     }
 
+    public synchronized long getSizeBytes() {
+        File[] files = directory.listFiles();
+        if (files == null) return 0L;
+        long total = 0L;
+        for (File file : files) {
+            if (file.isFile() && file.getName().endsWith(".cache")) total += file.length();
+        }
+        return total;
+    }
+
+    public synchronized int getEntryCount() {
+        File[] files = directory.listFiles();
+        if (files == null) return 0;
+        int count = 0;
+        for (File file : files) {
+            if (file.isFile() && file.getName().endsWith(".cache")) count++;
+        }
+        return count;
+    }
+
+    public long getMaxBytes() {
+        return maxBytes;
+    }
+
     /** Enforce the combined 200 MB budget using least-recently-used eviction. */
     public synchronized void trim() {
         File[] files = directory.listFiles();
