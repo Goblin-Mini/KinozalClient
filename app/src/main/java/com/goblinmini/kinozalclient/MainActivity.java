@@ -2340,25 +2340,47 @@ public class MainActivity extends Activity {
         LinearLayout posterColumn = new LinearLayout(this);
         posterColumn.setOrientation(LinearLayout.VERTICAL);
         posterColumn.setGravity(Gravity.TOP | Gravity.CENTER_HORIZONTAL);
+        LinearLayout actionRow = new LinearLayout(this);
+        actionRow.setOrientation(LinearLayout.HORIZONTAL);
+        actionRow.setGravity(Gravity.CENTER_VERTICAL);
+
         Button watch = button("Просмотр");
         watch.setTextSize(15);
         watch.setTextColor(Color.WHITE);
         watch.setBackground(shape(RED, 0));
         watch.setOnFocusChangeListener((v, focused) ->
                 v.setBackground(shape(focused ? Color.rgb(125, 48, 25) : RED, focused ? GOLD : 0)));
-        LinearLayout.LayoutParams watchParams = new LinearLayout.LayoutParams(-1, dp(48));
-        watchParams.bottomMargin = dp(10);
+        LinearLayout.LayoutParams watchParams = new LinearLayout.LayoutParams(0, dp(48), 1);
+        watchParams.rightMargin = dp(8);
+        actionRow.addView(watch, watchParams);
 
-        posterColumn.addView(watch, watchParams);
-        Button favorite = button(isFavorite(torrent) ? "★ В избранном" : "☆ В избранное");
-        favorite.setTextSize(13);
+        Button favorite = button(isFavorite(torrent) ? "★" : "☆");
+        favorite.setTextSize(25);
+        favorite.setTextColor(GOLD);
+        favorite.setGravity(Gravity.CENTER);
+        favorite.setContentDescription(isFavorite(torrent) ? "Убрать из избранного" : "Добавить в избранное");
+        favorite.setBackground(shape(PANEL, 0));
+        favorite.setOnFocusChangeListener((v, focused) ->
+                v.setBackground(shape(focused ? Color.rgb(65, 72, 73) : PANEL, focused ? GOLD : 0)));
         favorite.setOnClickListener(v -> {
             toggleFavorite(torrent);
-            favorite.setText(isFavorite(torrent) ? "★ В избранном" : "☆ В избранное");
+            boolean saved = isFavorite(torrent);
+            favorite.setText(saved ? "★" : "☆");
+            favorite.setContentDescription(saved ? "Убрать из избранного" : "Добавить в избранное");
         });
-        LinearLayout.LayoutParams favoriteParams = new LinearLayout.LayoutParams(-1, dp(42));
-        favoriteParams.bottomMargin = dp(10);
-        posterColumn.addView(favorite, favoriteParams);
+        actionRow.addView(favorite, new LinearLayout.LayoutParams(dp(48), dp(48)));
+        posterColumn.addView(actionRow);
+
+        Button downloadTorrent = button("↓  Скачать торрент");
+        downloadTorrent.setTextSize(14);
+        downloadTorrent.setTextColor(GOLD);
+        downloadTorrent.setBackground(shape(PANEL, 0));
+        downloadTorrent.setOnFocusChangeListener((v, focused) ->
+                v.setBackground(shape(focused ? Color.rgb(65, 72, 73) : PANEL, focused ? GOLD : 0)));
+        LinearLayout.LayoutParams downloadParams = new LinearLayout.LayoutParams(-1, dp(42));
+        downloadParams.topMargin = dp(8);
+        downloadParams.bottomMargin = dp(10);
+        posterColumn.addView(downloadTorrent, downloadParams);
 
         ImageView poster = new ImageView(this);
         poster.setScaleType(ImageView.ScaleType.FIT_CENTER);
@@ -2478,6 +2500,7 @@ public class MainActivity extends Activity {
         render.run();
 
         watch.setOnClickListener(v -> playTorrent(data));
+        downloadTorrent.setOnClickListener(v -> downloadTorrentFile(data));
         root.setLayoutParams(new ViewGroup.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         AlertDialog dialog = new AlertDialog.Builder(this)
@@ -2588,6 +2611,52 @@ public class MainActivity extends Activity {
         } else {
             downloadTorrentNative(data);
         }
+    }
+
+    private void downloadTorrentFile(TorrentDetails data) {
+        if (data.torrentLink == null || data.torrentLink.isEmpty()) {
+            showMessage("Не удалось найти download.php на странице раздачи.");
+            return;
+        }
+        if (data.torrentLink.startsWith("magnet:")) {
+            showMessage("На странице пока доступна только magnet-ссылка. Обработку magnet продолжим отдельно.");
+            return;
+        }
+        // Download the .torrent from download.php using the authenticated WebView
+        // session, so Kinozal cookies and the details-page referer are preserved.
+        WebView web = sessionWebView;
+        if (web == null) {
+            downloadTorrentNative(data);
+            return;
+        }
+        web.addJavascriptInterface(new Object() {
+            @JavascriptInterface
+            public void onTorrentDownloadResult(int statusCode, String base64, String error) {
+                runOnUiThread(() -> {
+                    if (statusCode >= 200 && statusCode < 300 && base64 != null && !base64.isEmpty()) {
+                        try {
+                            byte[] bytes = android.util.Base64.decode(base64, android.util.Base64.DEFAULT);
+                            deliverTorrentBytes(data, bytes);
+                        } catch (Exception e) {
+                            showMessage("Не удалось прочитать торрент: " + safe(e.getMessage()));
+                        }
+                    } else {
+                        downloadTorrentNative(data);
+                    }
+                });
+            }
+        }, "KinozalDownloadBridge");
+        String url = org.json.JSONObject.quote(data.torrentLink);
+        String script = "(function(){fetch(" + url
+                + ",{credentials:'include',redirect:'follow',cache:'no-store'})"
+                + ".then(function(r){if(!r.ok){window.KinozalDownloadBridge.onTorrentDownloadResult(r.status,'','HTTP '+r.status);return;}"
+                + "return r.blob().then(function(blob){var reader=new FileReader();"
+                + "reader.onloadend=function(){var value=String(reader.result||'');"
+                + "window.KinozalDownloadBridge.onTorrentDownloadResult(r.status,value.substring(value.indexOf(',')+1),'');};"
+                + "reader.onerror=function(){window.KinozalDownloadBridge.onTorrentDownloadResult(0,'','FileReader error');};"
+                + "reader.readAsDataURL(blob);});})"
+                + ".catch(function(e){window.KinozalDownloadBridge.onTorrentDownloadResult(0,'',String(e));});})()";
+        web.evaluateJavascript(script, null);
     }
 
     private void downloadTorrentNative(TorrentDetails data) {
