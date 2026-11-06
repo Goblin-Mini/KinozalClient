@@ -619,12 +619,9 @@ public class MainActivity extends Activity {
         sidebar.addView(brand, new LinearLayout.LayoutParams(-1, dp(58)));
         ScrollView menuScroll = new ScrollView(this);
         menuScroll.setFillViewport(false);
-        menuScroll.setVerticalScrollBarEnabled(true);
-        menuScroll.setScrollbarFadingEnabled(false);
-        // Reserve a narrow gutter for the scrollbar instead of drawing it
-        // over the right edge of focused menu buttons.
-        menuScroll.setScrollBarStyle(View.SCROLLBARS_INSIDE_INSET);
-        menuScroll.setPadding(0, 0, dp(22), 0);
+        menuScroll.setVerticalScrollBarEnabled(false);
+        menuScroll.setScrollbarFadingEnabled(true);
+        menuScroll.setPadding(0, 0, 0, 0);
         menuItems = new LinearLayout(this);
         menuItems.setOrientation(LinearLayout.VERTICAL);
         menuScroll.addView(menuItems, new ScrollView.LayoutParams(-1, -2));
@@ -646,23 +643,9 @@ public class MainActivity extends Activity {
         categoryGroup.setVisibility(View.GONE);
         menuItems.addView(categoryGroup);
 
-        Button seriesButton = button("Все сериалы  ▸");
-        seriesButton.setGravity(Gravity.CENTER_VERTICAL | Gravity.LEFT);
-        seriesButton.setTextSize(13);
-        seriesButton.setPadding(dp(22), 0, dp(8), 0);
-        categoryGroup.addView(seriesButton, new LinearLayout.LayoutParams(-1, dp(43)));
-        LinearLayout seriesGroup = new LinearLayout(this);
-        seriesGroup.setOrientation(LinearLayout.VERTICAL);
-        seriesGroup.setVisibility(View.GONE);
-        categoryGroup.addView(seriesGroup);
-        addSubMenu(seriesGroup, "Все сериалы", "browse.php?c=1001");
-        addSubMenu(seriesGroup, "Зарубежные сериалы", "browse.php?c=46");
-        addSubMenu(seriesGroup, "Российские сериалы", "browse.php?c=45");
-        seriesButton.setOnClickListener(v -> {
-            boolean expand = seriesGroup.getVisibility() != View.VISIBLE;
-            seriesGroup.setVisibility(expand ? View.VISIBLE : View.GONE);
-            seriesButton.setText(expand ? "Все сериалы  ▾" : "Все сериалы  ▸");
-        });
+        addSubMenu(categoryGroup, "Все сериалы", "browse.php?c=1001");
+        addSubMenu(categoryGroup, "Зарубежные сериалы", "browse.php?c=46");
+        addSubMenu(categoryGroup, "Российские сериалы", "browse.php?c=45");
 
         addSubMenu(categoryGroup, "Все фильмы", "browse.php?c=1002");
         addSubMenu(categoryGroup, "Советские фильмы", "browse.php?c=10");
@@ -679,7 +662,7 @@ public class MainActivity extends Activity {
             boolean expand = categoryGroup.getVisibility() != View.VISIBLE;
             categoryGroup.setVisibility(expand ? View.VISIBLE : View.GONE);
             categoriesButton.setText(expand ? "Категории  ▾" : "Категории  ▸");
-            if (expand) seriesButton.requestFocus();
+            if (expand) categoryGroup.getChildAt(0).requestFocus();
         });
 
         addMenu("Избранное", () -> showFavorites());
@@ -709,6 +692,12 @@ public class MainActivity extends Activity {
         LinearLayout.LayoutParams searchParams = new LinearLayout.LayoutParams(0, dp(48), 1f);
         searchParams.rightMargin = dp(8);
         searchBar.addView(search, searchParams);
+        Button history = button("История");
+        history.setTextSize(12);
+        LinearLayout.LayoutParams historyParams = new LinearLayout.LayoutParams(dp(82), dp(48));
+        historyParams.rightMargin = dp(6);
+        searchBar.addView(history, historyParams);
+        history.setOnClickListener(v -> showSearchHistory());
         Button find = button("Найти");
         find.setMinWidth(0);
         LinearLayout.LayoutParams findParams = new LinearLayout.LayoutParams(dp(104), dp(48));
@@ -1103,8 +1092,58 @@ public class MainActivity extends Activity {
         load(path, currentTitle);
     }
 
+    private static final String SEARCH_HISTORY_KEY = "search_history";
+
+    private java.util.ArrayList<String> readSearchHistory() {
+        java.util.ArrayList<String> history = new java.util.ArrayList<>();
+        String raw = getSharedPreferences(PREFS, MODE_PRIVATE).getString(SEARCH_HISTORY_KEY, "[]");
+        try {
+            org.json.JSONArray array = new org.json.JSONArray(raw);
+            for (int i = 0; i < array.length(); i++) {
+                String value = array.optString(i, "").trim();
+                if (!value.isEmpty() && !history.contains(value)) history.add(value);
+            }
+        } catch (Exception ignored) { }
+        return history;
+    }
+
+    private void saveSearchHistory(String query) {
+        java.util.ArrayList<String> history = readSearchHistory();
+        history.remove(query);
+        history.add(0, query);
+        while (history.size() > 30) history.remove(history.size() - 1);
+        org.json.JSONArray array = new org.json.JSONArray();
+        for (String value : history) array.put(value);
+        getSharedPreferences(PREFS, MODE_PRIVATE).edit()
+                .putString(SEARCH_HISTORY_KEY, array.toString()).apply();
+    }
+
+    private void showSearchHistory() {
+        java.util.ArrayList<String> history = readSearchHistory();
+        if (history.isEmpty()) {
+            showMessage("История поиска пока пуста");
+            return;
+        }
+        String[] items = history.toArray(new String[0]);
+        new AlertDialog.Builder(this)
+                .setTitle("История поиска")
+                .setItems(items, (dialog, which) -> {
+                    search.setText(items[which]);
+                    search.setSelection(search.length());
+                    submitSearch();
+                })
+                .setNeutralButton("Очистить", (dialog, which) -> {
+                    getSharedPreferences(PREFS, MODE_PRIVATE).edit()
+                            .remove(SEARCH_HISTORY_KEY).apply();
+                    showMessage("История поиска очищена");
+                })
+                .setNegativeButton("Закрыть", null)
+                .show();
+    }
+
     private void submitSearch() {
         String q = search.getText().toString().trim(); if (q.isEmpty()) return;
+        saveSearchHistory(q);
         try { load("browse.php?s=" + URLEncoder.encode(q, "UTF-8"), "Поиск: " + q); }
         catch (Exception e) { showMessage("Ошибка поиска"); }
     }
