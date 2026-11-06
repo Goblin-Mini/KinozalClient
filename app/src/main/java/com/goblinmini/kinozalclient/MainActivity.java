@@ -265,8 +265,8 @@ public class MainActivity extends Activity {
             } else {
                 setCatalogStatus("Постеров", total);
                 status.setText("Главная · Лент показано: " + sections.size() + "/" + paths.length
-                        + "\\nЗапросов обработано: " + paths.length + "/" + paths.length
-                        + (homeCacheDisplayed ? "\\nКэш обновлён" : ""));
+                        + "\nЗапросов обработано: " + paths.length + "/" + paths.length
+                        + (homeCacheDisplayed ? "\nКэш обновлён" : ""));
             }
             return;
         }
@@ -514,7 +514,7 @@ public class MainActivity extends Activity {
     private void setHomeProgress(int processed, int total, int displayed) {
         status.setText("Главная · Запросов: " + processed + "/" + total
                 + " · Лент отображено: " + displayed + "/" + total
-                + "\\nВерсия: " + getAppVersionName());
+                + "\nВерсия: " + getAppVersionName());
     }
 
     private void setCatalogStatus(String itemType, int count) {
@@ -1049,11 +1049,11 @@ public class MainActivity extends Activity {
         panel.setBackgroundColor(BG);
 
         TextView cacheInfo = text(
-                "Дисковый кэш Kinozal\\n"
-                + String.format(java.util.Locale.ROOT, "Занято: %.2f МБ из %.0f МБ (%.1f%%)\\n",
+                "Дисковый кэш Kinozal\n"
+                + String.format(java.util.Locale.ROOT, "Занято: %.2f МБ из %.0f МБ (%.1f%%)\n",
                         usedMb, limitMb, percent)
-                + String.format(java.util.Locale.ROOT, "Файлов в кэше: %d\\n", diskCache.getEntryCount())
-                + "Расположение: cache/kinozal_cache\\n"
+                + String.format(java.util.Locale.ROOT, "Файлов в кэше: %d\n", diskCache.getEntryCount())
+                + "Расположение: cache/kinozal_cache\n"
                 + homeCacheDiagnostic,
                 15, Color.WHITE, false);
         cacheInfo.setLineSpacing(dp(5), 1f);
@@ -1071,11 +1071,11 @@ public class MainActivity extends Activity {
                 .create();
         refresh.setOnClickListener(v -> {
             long current = diskCache.getSizeBytes();
-            cacheInfo.setText("Дисковый кэш Kinozal\\n"
-                    + String.format(java.util.Locale.ROOT, "Занято: %.2f МБ из %.0f МБ (%.1f%%)\\n",
+            cacheInfo.setText("Дисковый кэш Kinozal\n"
+                    + String.format(java.util.Locale.ROOT, "Занято: %.2f МБ из %.0f МБ (%.1f%%)\n",
                             current / (1024d * 1024d), limitMb, limit > 0 ? current * 100d / limit : 0d)
-                    + String.format(java.util.Locale.ROOT, "Файлов в кэше: %d\\n", diskCache.getEntryCount())
-                    + "Расположение: cache/kinozal_cache\\n"
+                    + String.format(java.util.Locale.ROOT, "Файлов в кэше: %d\n", diskCache.getEntryCount())
+                    + "Расположение: cache/kinozal_cache\n"
                     + homeCacheDiagnostic);
         });
         dialog.show();
@@ -1245,7 +1245,7 @@ public class MainActivity extends Activity {
         mainRelease.setEllipsize(android.text.TextUtils.TruncateAt.END);
         mainRelease.setPadding(dp(4), dp(2), dp(4), dp(5));
         panel.addView(mainRelease);
-        TextView status = text("Поиск по: " + searchTitle + "\\nПодключение к Jackett…", 13, TEAL, false);
+        TextView status = text("Поиск по: " + searchTitle + "\nПодключение к Jackett…", 13, TEAL, false);
         status.setPadding(dp(4), 0, dp(4), dp(8));
         panel.addView(status);
         ScrollView scroll = new ScrollView(this);
@@ -1312,7 +1312,7 @@ public class MainActivity extends Activity {
                 results.removeAllViews();
                 if (serverUsed == null) {
                     status.setText("Не удалось выполнить поиск. " + failure
-                            + "\\nПроверьте доступность сервера и адрес API.");
+                            + "\nПроверьте доступность сервера и адрес API.");
                     return;
                 }
                 status.setText("Найдено: " + items.size() + " · " + serverUsed);
