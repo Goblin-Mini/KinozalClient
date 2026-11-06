@@ -224,44 +224,46 @@ public class MainActivity extends Activity {
 
     private void loadHomeSectionsInBrowser(String[] paths, String[] titles, int index,
             List<HomeSection> sections, int retry) {
-        if (index != 0) return;
-        fetchBrowserPages(paths, htmlPages -> {
-            if (htmlPages == null || htmlPages.size() != paths.length) {
-                if (retry == 0) {
+        if (index >= paths.length) {
+            removeHomeDuplicates(sections);
+            int total = 0;
+            for (HomeSection section : sections) total += section.items.size();
+            progress.setVisibility(View.GONE);
+            if (total == 0) {
+                status.setText("Нет соединения");
+                addEmpty("Не удалось получить постеры Kinozal. Проверьте авторизацию и выбранное зеркало.");
+            } else {
+                setCatalogStatus("Постеров", total);
+                renderHome(sections);
+            }
+            return;
+        }
+
+        fetchBrowserPage(paths[index], null, html -> {
+            if (html == null || html.isEmpty()) {
+                if (index == 0 && retry == 0) {
                     status.setText("Повторное подключение к Kinozal…");
                     browserHandler.postDelayed(() -> loadHomeSectionsInBrowser(
-                            paths, titles, 0, new ArrayList<>(), 1), 900);
-                } else {
-                    progress.setVisibility(View.GONE);
-                    status.setText("Нет соединения");
-                    addEmpty("Не удалось загрузить главную страницу. Причина: " + safe(lastBrowserError));
+                            paths, titles, 0, new ArrayList<>(), 1), 1200);
+                    return;
                 }
+                // A failed category must not discard already loaded sections or
+                // prevent the remaining pages from being requested.
+                browserHandler.postDelayed(() -> loadHomeSectionsInBrowser(
+                        paths, titles, index + 1, sections, 0), 150);
                 return;
             }
-            List<HomeSection> loaded = new ArrayList<>();
-            int total = 0;
-            for (int i = 0; i < paths.length; i++) {
-                String html = htmlPages.get(i);
-                if (html == null || html.isEmpty()) continue;
-                HomeSection section = new HomeSection(titles[i], paths[i]);
-                section.items.addAll(parseHomePosters(Jsoup.parse(html, client.getMirror() + "/")));
-                loaded.add(section);
-                total += section.items.size();
-                diskCache.put("home|" + client.getMirror() + "|" + paths[i],
+
+            HomeSection section = new HomeSection(titles[index], paths[index]);
+            section.items.addAll(parseHomePosters(Jsoup.parse(html, client.getMirror() + "/")));
+            if (!section.items.isEmpty()) {
+                sections.add(section);
+                diskCache.put("home|" + client.getMirror() + "|" + paths[index],
                         html.getBytes(StandardCharsets.UTF_8));
             }
-            removeHomeDuplicates(loaded);
-            int finalTotal = 0;
-            for (HomeSection section : loaded) finalTotal += section.items.size();
-            if (finalTotal == 0 && retry == 0) {
-                status.setText("Повторное подключение к Kinozal…");
-                browserHandler.postDelayed(() -> loadHomeSectionsInBrowser(
-                        paths, titles, 0, new ArrayList<>(), 1), 900);
-                return;
-            }
-            progress.setVisibility(View.GONE);
-            setCatalogStatus("Постеров", finalTotal);
-            renderHome(loaded);
+            status.setText("Загружено разделов: " + (index + 1) + " из " + paths.length);
+            browserHandler.postDelayed(() -> loadHomeSectionsInBrowser(
+                    paths, titles, index + 1, sections, 0), 100);
         });
     }
 
