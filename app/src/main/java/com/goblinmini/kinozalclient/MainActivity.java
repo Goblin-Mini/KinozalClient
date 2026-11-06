@@ -68,6 +68,7 @@ public class MainActivity extends Activity {
     private int page = 0;
     private String searchSort = "date";
     private boolean searchSortDescending = true;
+    private String pendingSortFocus = null;
     private static final String FAVORITES_KEY = "local_favorites";
     private volatile String lastHtml = "";
     private WebView sessionWebView;
@@ -625,24 +626,59 @@ public class MainActivity extends Activity {
         sidebar.addView(menuScroll, new LinearLayout.LayoutParams(-1, 0, 1));
         addMenu("Главная", () -> loadInitialCatalog());
         addMenu("Все раздачи", () -> load("browse.php", "Все раздачи"));
-        addMenu("Все сериалы", () -> load("browse.php?c=1001", "Все сериалы"));
-        addMenu("Зарубежные сериалы", () -> load("browse.php?c=46", "Зарубежные сериалы"));
-        addMenu("Российские сериалы", () -> load("browse.php?c=45", "Российские сериалы"));
-        addMenu("Все фильмы", () -> load("browse.php?c=1002", "Все фильмы"));
-        addMenu("Советские фильмы", () -> load("browse.php?c=10", "Советские фильмы"));
-        addMenu("Мультфильмы", () -> load("browse.php?c=1003", "Мультфильмы"));
-        addMenu("Российские мульты", () -> load("browse.php?c=22", "Российские мульты"));
-        addMenu("Зарубежные мульты", () -> load("browse.php?c=21", "Зарубежные мульты"));
-        addMenu("Аниме", () -> load("browse.php?c=20", "Аниме"));
-        addMenu("Спортивные передачи", () -> load("browse.php?c=37", "Спортивные передачи"));
-        addMenu("Российское ТВ", () -> load("browse.php?c=49", "Российское ТВ"));
-        addMenu("Зарубежное ТВ", () -> load("browse.php?c=50", "Зарубежное ТВ"));
-        addMenu("Концерты", () -> load("browse.php?c=48", "Концерты"));
-        addMenu("Видеоклипы", () -> load("browse.php?c=1", "Видеоклипы"));
+
+        Button categoriesButton = button("Категории  ▾");
+        categoriesButton.setGravity(Gravity.CENTER_VERTICAL | Gravity.LEFT);
+        categoriesButton.setTextSize(14);
+        categoriesButton.setPadding(dp(14), 0, dp(8), 0);
+        LinearLayout.LayoutParams categoryButtonParams = new LinearLayout.LayoutParams(-1, dp(47));
+        categoryButtonParams.rightMargin = dp(5);
+        categoryButtonParams.bottomMargin = dp(3);
+        menuItems.addView(categoriesButton, categoryButtonParams);
+
+        LinearLayout categoryGroup = new LinearLayout(this);
+        categoryGroup.setOrientation(LinearLayout.VERTICAL);
+        categoryGroup.setVisibility(View.GONE);
+        menuItems.addView(categoryGroup);
+
+        Button seriesButton = button("Все сериалы  ▸");
+        seriesButton.setGravity(Gravity.CENTER_VERTICAL | Gravity.LEFT);
+        seriesButton.setTextSize(13);
+        seriesButton.setPadding(dp(22), 0, dp(8), 0);
+        categoryGroup.addView(seriesButton, new LinearLayout.LayoutParams(-1, dp(43)));
+        LinearLayout seriesGroup = new LinearLayout(this);
+        seriesGroup.setOrientation(LinearLayout.VERTICAL);
+        seriesGroup.setVisibility(View.GONE);
+        categoryGroup.addView(seriesGroup);
+        addSubMenu(seriesGroup, "Все сериалы", "browse.php?c=1001");
+        addSubMenu(seriesGroup, "Зарубежные сериалы", "browse.php?c=46");
+        addSubMenu(seriesGroup, "Российские сериалы", "browse.php?c=45");
+        seriesButton.setOnClickListener(v -> {
+            boolean expand = seriesGroup.getVisibility() != View.VISIBLE;
+            seriesGroup.setVisibility(expand ? View.VISIBLE : View.GONE);
+            seriesButton.setText(expand ? "Все сериалы  ▾" : "Все сериалы  ▸");
+        });
+
+        addSubMenu(categoryGroup, "Все фильмы", "browse.php?c=1002");
+        addSubMenu(categoryGroup, "Советские фильмы", "browse.php?c=10");
+        addSubMenu(categoryGroup, "Мультфильмы", "browse.php?c=1003");
+        addSubMenu(categoryGroup, "Российские мульты", "browse.php?c=22");
+        addSubMenu(categoryGroup, "Зарубежные мульты", "browse.php?c=21");
+        addSubMenu(categoryGroup, "Аниме", "browse.php?c=20");
+        addSubMenu(categoryGroup, "Спортивные передачи", "browse.php?c=37");
+        addSubMenu(categoryGroup, "Российское ТВ", "browse.php?c=49");
+        addSubMenu(categoryGroup, "Зарубежное ТВ", "browse.php?c=50");
+        addSubMenu(categoryGroup, "Концерты", "browse.php?c=48");
+        addSubMenu(categoryGroup, "Видеоклипы", "browse.php?c=1");
+        categoriesButton.setOnClickListener(v -> {
+            boolean expand = categoryGroup.getVisibility() != View.VISIBLE;
+            categoryGroup.setVisibility(expand ? View.VISIBLE : View.GONE);
+            categoriesButton.setText(expand ? "Категории  ▾" : "Категории  ▸");
+            if (expand) seriesButton.requestFocus();
+        });
+
         addMenu("Избранное", () -> showFavorites());
-        addMenu("Авторизация", () -> showLogin());
-        addMenu("Зеркало", () -> chooseMirror());
-        addMenu("Проверить обновления", () -> new UpdateManager(this).check());
+        addMenu("Настройки", () -> showSettings());
         status = text("Подключение…", 11, TEAL, false);
         LinearLayout.LayoutParams statusParams = new LinearLayout.LayoutParams(-1, dp(28));
         statusParams.topMargin = dp(4);
@@ -688,6 +724,31 @@ public class MainActivity extends Activity {
         main.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1));
         setContentView(root);
         if (menuItems.getChildCount() > 0) menuItems.getChildAt(0).requestFocus();
+    }
+
+    private void addSubMenu(LinearLayout parent, String label, String path) {
+        Button b = button(label);
+        b.setGravity(Gravity.CENTER_VERTICAL | Gravity.LEFT);
+        b.setTextSize(12);
+        b.setPadding(dp(34), 0, dp(8), 0);
+        LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(-1, dp(39));
+        p.rightMargin = dp(5);
+        p.bottomMargin = dp(2);
+        parent.addView(b, p);
+        b.setOnClickListener(v -> load(path, label));
+    }
+
+    private void showSettings() {
+        String[] options = {"Авторизация / проверка Kinozal", "Выбрать зеркало", "Проверить обновления"};
+        new AlertDialog.Builder(this)
+                .setTitle("Настройки")
+                .setItems(options, (dialog, which) -> {
+                    if (which == 0) showLogin();
+                    else if (which == 1) chooseMirror();
+                    else new UpdateManager(this).check();
+                })
+                .setNegativeButton("Закрыть", null)
+                .show();
     }
 
     private void addMenu(String label, Runnable action) {
@@ -922,6 +983,7 @@ public class MainActivity extends Activity {
     private void setSearchSort(String key) {
         if (key.equals(searchSort)) searchSortDescending = !searchSortDescending;
         else { searchSort = key; searchSortDescending = true; }
+        pendingSortFocus = key;
         list.removeAllViews();
         renderTorrents(torrents);
     }
@@ -963,9 +1025,9 @@ public class MainActivity extends Activity {
             LinearLayout sortBar = new LinearLayout(this);
             sortBar.setGravity(Gravity.CENTER_VERTICAL);
             sortBar.setPadding(dp(8), dp(4), dp(8), dp(8));
-            Button date = button("Дата");
-            Button size = button("Размер");
-            Button seeds = button("Сиды");
+            Button date = button("Дата" + ("date".equals(searchSort) ? (searchSortDescending ? " ↓" : " ↑") : ""));
+            Button size = button("Размер" + ("size".equals(searchSort) ? (searchSortDescending ? " ↓" : " ↑") : ""));
+            Button seeds = button("Сиды" + ("seeds".equals(searchSort) ? (searchSortDescending ? " ↓" : " ↑") : ""));
             for (Button b : new Button[]{date, size, seeds}) {
                 LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(0, dp(38), 1f);
                 p.rightMargin = dp(5);
@@ -975,6 +1037,12 @@ public class MainActivity extends Activity {
             size.setOnClickListener(v -> setSearchSort("size"));
             seeds.setOnClickListener(v -> setSearchSort("seeds"));
             list.addView(sortBar);
+            if (pendingSortFocus != null) {
+                Button target = "size".equals(pendingSortFocus) ? size
+                        : "seeds".equals(pendingSortFocus) ? seeds : date;
+                pendingSortFocus = null;
+                target.post(target::requestFocus);
+            }
         }
         LinearLayout header = new LinearLayout(this);
         header.setGravity(Gravity.CENTER_VERTICAL);
