@@ -2228,11 +2228,6 @@ public class MainActivity extends Activity {
             }
         });
 
-        TextView hint = text("Пройдите проверку на сайте. Посторонние рекламные переходы и всплывающие окна блокируются.",
-                13, TEAL, false);
-        hint.setPadding(dp(8), dp(5), dp(8), dp(5));
-        panel.addView(hint, new LinearLayout.LayoutParams(-1, -2));
-
         // Username and password are visible together at the top for quick TV input.
         LinearLayout credentials = new LinearLayout(this);
         credentials.setGravity(Gravity.CENTER_VERTICAL);
@@ -2245,33 +2240,32 @@ public class MainActivity extends Activity {
 
         Button insert = button("Вставить");
         Button signIn = button("Вход");
+        Button done = button("Готово");
         LinearLayout.LayoutParams smallAction = new LinearLayout.LayoutParams(dp(112), dp(44));
         smallAction.leftMargin = dp(6);
         credentials.addView(insert, smallAction);
         LinearLayout.LayoutParams signParams = new LinearLayout.LayoutParams(dp(100), dp(44));
         signParams.leftMargin = dp(6);
         credentials.addView(signIn, signParams);
+        LinearLayout.LayoutParams doneTopParams = new LinearLayout.LayoutParams(dp(112), dp(44));
+        doneTopParams.leftMargin = dp(6);
+        credentials.addView(done, doneTopParams);
         panel.addView(credentials, new LinearLayout.LayoutParams(-1, -2));
 
         LinearLayout actions = new LinearLayout(this);
         actions.setGravity(Gravity.CENTER_VERTICAL);
         actions.setPadding(0, dp(6), 0, dp(6));
-        Button close = button("Закрыть");
         Button refresh = button("Обновить");
-        Button done = button("Готово");
+        Button close = button("Закрыть");
         LinearLayout.LayoutParams actionParams = new LinearLayout.LayoutParams(0, dp(46), 1f);
-        actions.addView(close, actionParams);
-        LinearLayout.LayoutParams refreshParams = new LinearLayout.LayoutParams(0, dp(46), 1f);
-        refreshParams.leftMargin = dp(6);
-        actions.addView(refresh, refreshParams);
-        LinearLayout.LayoutParams doneParams = new LinearLayout.LayoutParams(0, dp(46), 1f);
-        doneParams.leftMargin = dp(6);
-        actions.addView(done, doneParams);
+        actions.addView(refresh, actionParams);
+        LinearLayout.LayoutParams closeParams = new LinearLayout.LayoutParams(0, dp(46), 1f);
+        closeParams.leftMargin = dp(6);
+        actions.addView(close, closeParams);
         panel.addView(actions, new LinearLayout.LayoutParams(-1, -2));
         panel.addView(web, new LinearLayout.LayoutParams(-1, 0, 1f));
 
         AlertDialog dialog = new AlertDialog.Builder(this)
-                .setTitle("Проверка Kinozal")
                 .setView(panel)
                 .create();
 
