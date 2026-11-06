@@ -2105,7 +2105,6 @@ public class MainActivity extends Activity {
         if (data.torrentLink.startsWith("magnet:")) {
             try {
                 Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(data.torrentLink));
-                // Use Android resolver; do not hardcode a specific TorrServe package.
                 intent.putExtra("poster", data.poster == null ? "" : data.poster);
                 intent.putExtra("title", data.title == null ? "" : data.title);
                 startActivity(intent);
@@ -2121,10 +2120,6 @@ public class MainActivity extends Activity {
             return;
         }
 
-        // Details are now parsed by the native client, so the shared WebView is
-        // not necessarily displaying this torrent. Navigate it to the exact
-        // details page first: Kinozal may validate the download Referer as well
-        // as the authenticated cookies.
         fetchBrowserPage(data.sourcePage, null, pageHtml -> {
             if (pageHtml == null || pageHtml.isEmpty()) {
                 downloadTorrentNative(data);
@@ -2137,6 +2132,24 @@ public class MainActivity extends Activity {
             }
             activeWeb.addJavascriptInterface(new Object() {
                 @JavascriptInterface
+                public void onTorrentResponse(int statusCode, String contentType, String disposition,
+                        String finalUrl, boolean redirected, int byteCount, String prefixHex,
+                        String preview, String error) {
+                    String details = "HTTP " + statusCode
+                            + ", type=" + safeDiag(contentType)
+                            + ", disposition=" + safeDiag(disposition)
+                            + ", url=" + safeNetworkUrl(finalUrl)
+                            + ", redirected=" + redirected
+                            + ", bytes=" + byteCount
+                            + ", first=" + safeDiag(prefixHex)
+                            + (error == null || error.isEmpty() ? "" : ", error=" + safeDiag(error));
+                    magnetDiag("TORRENT_RESPONSE", details);
+                    if (preview != null && !preview.isEmpty()) {
+                        magnetDiag("TORRENT_BODY_PREVIEW", safeDiag(preview));
+                    }
+                }
+
+                @JavascriptInterface
                 public void onTorrentResult(int statusCode, String base64, String error) {
                     runOnUiThread(() -> {
                         if (statusCode >= 200 && statusCode < 300 && base64 != null && !base64.isEmpty()) {
@@ -2147,21 +2160,28 @@ public class MainActivity extends Activity {
                                 showMessage("Не удалось прочитать торрент: " + safe(e.getMessage()));
                             }
                         } else {
-                            downloadTorrentNative(data);
+                            magnetDiag("TORRENT_FETCH_FAILED", "HTTP " + statusCode + ", " + safeDiag(error));
+                            if (statusCode == 0) downloadTorrentNative(data);
+                            else showMessage("Kinozal не вернул .torrent. Подробности записаны в диагностический журнал.");
                         }
                     });
                 }
             }, "KinozalTorrentBridge");
+
             String url = org.json.JSONObject.quote(data.torrentLink);
-            String script = "(function(){fetch(" + url
-                    + ",{credentials:'include',redirect:'follow',cache:'no-store'})"
-                    + ".then(function(r){if(!r.ok){window.KinozalTorrentBridge.onTorrentResult(r.status,'','HTTP '+r.status);return;}"
-                    + "return r.blob().then(function(blob){var reader=new FileReader();"
-                    + "reader.onloadend=function(){var value=String(reader.result||'');"
-                    + "window.KinozalTorrentBridge.onTorrentResult(r.status,value.substring(value.indexOf(',')+1),'');};"
-                    + "reader.onerror=function(){window.KinozalTorrentBridge.onTorrentResult(0,'','FileReader error');};"
-                    + "reader.readAsDataURL(blob);});})"
-                    + ".catch(function(e){window.KinozalTorrentBridge.onTorrentResult(0,'',String(e));});})()";
+            String script = "(function(){"
+                    + "function hex(a){return Array.prototype.map.call(new Uint8Array(a.slice(0,16)),function(x){return ('0'+x.toString(16)).slice(-2)}).join(' ');}"
+                    + "function decode(a){try{return new TextDecoder('windows-1251').decode(a)}catch(e){try{return new TextDecoder('utf-8').decode(a)}catch(x){return ''}}}"
+                    + "fetch(" + url + ",{credentials:'include',redirect:'follow',cache:'no-store'})"
+                    + ".then(function(r){return r.arrayBuffer().then(function(buf){"
+                    + "var a=new Uint8Array(buf), isTorrent=a.length>=20&&a[0]===100, preview='';"
+                    + "if(!isTorrent){preview=decode(a).replace(/<script[\\s\\S]*?<\\/script>/ig,' ').replace(/<style[\\s\\S]*?<\\/style>/ig,' ').replace(/<[^>]+>/g,' ').replace(/\\s+/g,' ').trim().substring(0,1800);}"
+                    + "window.KinozalTorrentBridge.onTorrentResponse(r.status,r.headers.get('content-type')||'',r.headers.get('content-disposition')||'',r.url||'',r.redirected,a.length,hex(buf),preview,'');"
+                    + "if(!r.ok||!isTorrent){window.KinozalTorrentBridge.onTorrentResult(r.status,'',isTorrent?'HTTP '+r.status:'Response is not a bencoded torrent');return;}"
+                    + "var binary='';for(var i=0;i<a.length;i++)binary+=String.fromCharCode(a[i]);"
+                    + "window.KinozalTorrentBridge.onTorrentResult(r.status,btoa(binary),'');"
+                    + "});})"
+                    + ".catch(function(e){window.KinozalTorrentBridge.onTorrentResponse(0,'','','',false,0,'','',String(e));window.KinozalTorrentBridge.onTorrentResult(0,'',String(e));});})()";
             activeWeb.evaluateJavascript(script, null);
         });
     }
