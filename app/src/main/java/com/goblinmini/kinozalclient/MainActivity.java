@@ -989,7 +989,13 @@ public class MainActivity extends Activity {
         panel.setOrientation(LinearLayout.VERTICAL);
         panel.setPadding(dp(12), dp(8), dp(12), dp(8));
         panel.setBackgroundColor(BG);
-        TextView status = text("Поиск: " + searchTitle + "\\nПодключение к Jackett…", 13, TEAL, false);
+        TextView mainRelease = text(query == null ? "" : query.trim(), 16, Color.WHITE, true);
+        mainRelease.setMaxLines(2);
+        mainRelease.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        mainRelease.setPadding(dp(4), dp(2), dp(4), dp(5));
+        panel.addView(mainRelease);
+        TextView status = text("Поиск по: " + searchTitle + "\\nПодключение к Jackett…", 13, TEAL, false);
+        status.setPadding(dp(4), 0, dp(4), dp(8));
         panel.addView(status);
         ScrollView scroll = new ScrollView(this);
         scroll.setFocusable(false);
@@ -1124,13 +1130,19 @@ public class MainActivity extends Activity {
     private String extractJackettSearchTitle(String fullTitle) {
         if (fullTitle == null) return "";
         String value = fullTitle.trim();
-        int slash = value.indexOf('/');
-        if (slash >= 0 && slash + 1 < value.length()) {
-            String english = value.substring(slash + 1).trim();
-            int nextSlash = english.indexOf('/');
-            if (nextSlash >= 0) english = english.substring(0, nextSlash).trim();
-            if (!english.isEmpty()) return english;
+        String[] parts = value.split("/");
+        // Pick the first slash-separated segment that contains an actual
+        // Latin title. This skips a year or other numeric metadata after '/'.
+        for (int i = 1; i < parts.length; i++) {
+            String candidate = parts[i].trim();
+            if (candidate.matches(".*[A-Za-z].*")
+                    && candidate.matches(".*[A-Za-z]{2,}.*")) {
+                candidate = candidate.replaceAll("\\s+", " ").trim();
+                if (!candidate.isEmpty()) return candidate;
+            }
         }
+        // No separate English segment: keep the original title so Russian
+        // releases are still searchable instead of accidentally querying a year.
         return value;
     }
 
