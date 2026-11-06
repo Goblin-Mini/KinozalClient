@@ -2103,8 +2103,8 @@ public class MainActivity extends Activity {
         panel.setOrientation(LinearLayout.VERTICAL);
         panel.setBackgroundColor(BG);
         panel.setMinimumHeight((int)(getResources().getDisplayMetrics().heightPixels * 0.72f));
-        panel.setLayoutParams(new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        panel.setPadding(dp(8), dp(4), dp(8), dp(4));
+
         WebView existingWeb = sessionWebView;
         if (existingWeb == null) {
             existingWeb = new WebView(this);
@@ -2115,11 +2115,11 @@ public class MainActivity extends Activity {
         final WebView web = existingWeb;
         web.setBackgroundColor(Color.WHITE);
         web.setVisibility(View.VISIBLE);
-        web.setMinimumHeight(dp(360));
+        web.setMinimumHeight(dp(300));
         web.setFocusable(true);
         web.setFocusableInTouchMode(true);
         web.setDescendantFocusability(ViewGroup.FOCUS_AFTER_DESCENDANTS);
-        // Let WebView handle DPAD/ENTER itself so focused HTML inputs can open Android TV IME.
+
         WebSettings settings = web.getSettings();
         settings.setJavaScriptEnabled(true);
         settings.setDomStorageEnabled(true);
@@ -2127,6 +2127,7 @@ public class MainActivity extends Activity {
         settings.setSupportMultipleWindows(false);
         settings.setLoadsImagesAutomatically(true);
         settings.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
+
         CookieManager browserCookies = CookieManager.getInstance();
         browserCookies.setAcceptCookie(true);
         CookieManager.setAcceptFileSchemeCookies(false);
@@ -2134,6 +2135,19 @@ public class MainActivity extends Activity {
         final boolean[] textEntryOpen = {false};
         final String[] submittedLogin = {null};
         final String[] submittedPassword = {null};
+
+        String[] saved = client.getSavedCredentials();
+        EditText loginField = new EditText(this);
+        EditText passwordField = new EditText(this);
+        styleCompactCredentialField(loginField, "Логин");
+        styleCompactCredentialField(passwordField, "Пароль");
+        passwordField.setInputType(android.text.InputType.TYPE_CLASS_TEXT
+                | android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD);
+        if (saved != null) {
+            loginField.setText(saved[0]);
+            passwordField.setText(saved[1]);
+        }
+
         web.addJavascriptInterface(new Object() {
             @JavascriptInterface
             public void onTextFieldFocused(String fieldType) {
@@ -2149,29 +2163,24 @@ public class MainActivity extends Activity {
                 submittedPassword[0] = password;
             }
         }, "AndroidTV");
+
         web.setWebChromeClient(new WebChromeClient() {
             @Override public boolean onCreateWindow(WebView view, boolean isDialog,
-                    boolean isUserGesture, android.os.Message resultMsg) {
-                return false;
-            }
+                    boolean isUserGesture, android.os.Message resultMsg) { return false; }
         });
         web.setWebViewClient(new WebViewClient() {
             private boolean allowed(Uri uri) {
                 String host = uri == null ? null : uri.getHost();
-                if (host == null) return false;
-                host = host.toLowerCase(java.util.Locale.ROOT);
-                return host.equals(allowedHost);
+                return host != null && host.equalsIgnoreCase(allowedHost);
             }
             @Override public boolean shouldOverrideUrlLoading(WebView view, String url) {
-                Uri uri = Uri.parse(url);
-                if (allowed(uri)) return false;
+                if (allowed(Uri.parse(url))) return false;
                 showMessage("Переход на посторонний сайт заблокирован.");
                 return true;
             }
             @Override public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
                 if (!request.isForMainFrame()) return false;
-                Uri uri = request.getUrl();
-                if (allowed(uri)) return false;
+                if (allowed(request.getUrl())) return false;
                 showMessage("Рекламный переход заблокирован.");
                 return true;
             }
@@ -2187,7 +2196,8 @@ public class MainActivity extends Activity {
                         callback.onPage(html, html.isEmpty() ? "Пустая страница браузера" : null);
                     });
                 }
-                view.evaluateJavascript("(function(){if(window.__kinozalInputHook)return;window.__kinozalInputHook=true;"
+                view.evaluateJavascript("(function(){"
+                        + "if(!window.__kinozalInputHook){window.__kinozalInputHook=true;"
                         + "document.addEventListener('focusin',function(ev){var e=ev.target;if(!e)return;"
                         + "var tag=(e.tagName||'').toLowerCase(),type=(e.type||'text').toLowerCase();"
                         + "if((tag==='input'&&['text','password','email','search','tel','url','number'].indexOf(type)>=0)"
@@ -2196,7 +2206,11 @@ public class MainActivity extends Activity {
                         + "window.AndroidTV.onTextFieldFocused(type==='password'?'password':'text');}},true);"
                         + "document.addEventListener('submit',function(ev){var f=ev.target,p=f.querySelector('input[type=password]');"
                         + "if(!p||!window.AndroidTV)return;var u=f.querySelector('input[type=text],input[type=email],input:not([type])');"
-                        + "window.AndroidTV.onLoginSubmit(u?u.value:'',p.value);},true);})();", null);
+                        + "window.AndroidTV.onLoginSubmit(u?u.value:'',p.value);},true);}"
+                        + "var c=document.querySelector('input[type=checkbox]');if(c){c.focus();}"
+                        + "var f=document.querySelector('iframe[title*=Widget],iframe[title*=challenge],#challenge-form iframe');"
+                        + "if(f){f.setAttribute('tabindex','0');f.focus();}"
+                        + "})();", null);
                 String cookie = browserCookies.getCookie(base);
                 if (cookie != null && !cookie.isEmpty()) {
                     try {
@@ -2207,33 +2221,110 @@ public class MainActivity extends Activity {
             }
         });
 
+        TextView hint = text("Пройдите проверку на сайте. Посторонние рекламные переходы и всплывающие окна блокируются.",
+                13, TEAL, false);
+        hint.setPadding(dp(8), dp(5), dp(8), dp(5));
+        panel.addView(hint, new LinearLayout.LayoutParams(-1, -2));
+
+        // Username and password are visible together at the top for quick TV input.
+        LinearLayout credentials = new LinearLayout(this);
+        credentials.setGravity(Gravity.CENTER_VERTICAL);
+        credentials.setOrientation(LinearLayout.HORIZONTAL);
+        LinearLayout.LayoutParams fieldParams = new LinearLayout.LayoutParams(0, dp(44), 1f);
+        credentials.addView(loginField, fieldParams);
+        LinearLayout.LayoutParams passParams = new LinearLayout.LayoutParams(0, dp(44), 1f);
+        passParams.leftMargin = dp(6);
+        credentials.addView(passwordField, passParams);
+
+        Button insert = button("Вставить");
+        Button signIn = button("Вход");
+        LinearLayout.LayoutParams smallAction = new LinearLayout.LayoutParams(dp(112), dp(44));
+        smallAction.leftMargin = dp(6);
+        credentials.addView(insert, smallAction);
+        LinearLayout.LayoutParams signParams = new LinearLayout.LayoutParams(dp(100), dp(44));
+        signParams.leftMargin = dp(6);
+        credentials.addView(signIn, signParams);
+        panel.addView(credentials, new LinearLayout.LayoutParams(-1, -2));
+
         LinearLayout actions = new LinearLayout(this);
         actions.setGravity(Gravity.CENTER_VERTICAL);
-        actions.setPadding(dp(8), dp(6), dp(8), dp(6));
+        actions.setPadding(0, dp(6), 0, dp(6));
         Button close = button("Закрыть");
+        Button refresh = button("Обновить");
         Button done = button("Готово");
-        actions.addView(close, new LinearLayout.LayoutParams(0, dp(46), 1f));
+        LinearLayout.LayoutParams actionParams = new LinearLayout.LayoutParams(0, dp(46), 1f);
+        actions.addView(close, actionParams);
+        LinearLayout.LayoutParams refreshParams = new LinearLayout.LayoutParams(0, dp(46), 1f);
+        refreshParams.leftMargin = dp(6);
+        actions.addView(refresh, refreshParams);
         LinearLayout.LayoutParams doneParams = new LinearLayout.LayoutParams(0, dp(46), 1f);
-        doneParams.leftMargin = dp(8);
+        doneParams.leftMargin = dp(6);
         actions.addView(done, doneParams);
-        TextView hint = text("Пройдите проверку на сайте. Посторонние рекламные переходы и всплывающие окна блокируются.", 13, TEAL, false);
-        hint.setPadding(dp(12), dp(8), dp(12), dp(8));
-        panel.addView(hint, new LinearLayout.LayoutParams(-1, -2));
-        // Match the supplied screenshot: hint, then action buttons, then the site page.
         panel.addView(actions, new LinearLayout.LayoutParams(-1, -2));
-        LinearLayout.LayoutParams webParams = new LinearLayout.LayoutParams(-1, 0, 1f);
-        panel.addView(web, webParams);
+        panel.addView(web, new LinearLayout.LayoutParams(-1, 0, 1f));
 
         AlertDialog dialog = new AlertDialog.Builder(this)
                 .setTitle("Проверка Kinozal")
                 .setView(panel)
                 .create();
-        close.setOnClickListener(v -> {
+
+        Runnable detachWeb = () -> {
             web.stopLoading();
             if (web.getParent() instanceof ViewGroup) ((ViewGroup) web.getParent()).removeView(web);
             web.setVisibility(View.INVISIBLE);
-            root.addView(web, new LinearLayout.LayoutParams(1, 1));
-            dialog.dismiss();
+            if (web.getParent() == null) root.addView(web, new LinearLayout.LayoutParams(1, 1));
+        };
+        close.setOnClickListener(v -> { detachWeb.run(); dialog.dismiss(); });
+        refresh.setOnClickListener(v -> {
+            web.stopLoading();
+            web.reload();
+            status.setText("Обновление проверки Kinozal…");
+        });
+        insert.setOnClickListener(v -> {
+            String username = loginField.getText().toString();
+            String password = passwordField.getText().toString();
+            if (username.trim().isEmpty() || password.isEmpty()) {
+                showMessage("Заполните логин и пароль.");
+                return;
+            }
+            String u = org.json.JSONObject.quote(username);
+            String p = org.json.JSONObject.quote(password);
+            web.evaluateJavascript("(function(){"
+                    + "var f=document.querySelector('form');if(!f)return 'NO_FORM';"
+                    + "var u=f.querySelector('input[type=text],input[type=email],input:not([type])');"
+                    + "var p=f.querySelector('input[type=password]');if(!u||!p)return 'NO_FIELDS';"
+                    + "u.value=" + u + ";p.value=" + p + ";"
+                    + "u.dispatchEvent(new Event('input',{bubbles:true}));"
+                    + "p.dispatchEvent(new Event('input',{bubbles:true}));"
+                    + "return 'OK';})()", result -> {
+                if (result == null || result.contains("NO_")) showMessage("На текущей странице нет формы входа.");
+                else {
+                    submittedLogin[0] = username;
+                    submittedPassword[0] = password;
+                    try { client.saveCredentials(username, password); }
+                    catch (Exception e) { showMessage("Не удалось сохранить данные входа: " + safe(e.getMessage())); }
+                }
+            });
+        });
+        signIn.setOnClickListener(v -> {
+            String username = loginField.getText().toString();
+            String password = passwordField.getText().toString();
+            if (username.trim().isEmpty() || password.isEmpty()) {
+                showMessage("Заполните логин и пароль.");
+                return;
+            }
+            String u = org.json.JSONObject.quote(username);
+            String p = org.json.JSONObject.quote(password);
+            web.evaluateJavascript("(function(){var f=document.querySelector('form');if(!f)return 'NO_FORM';"
+                    + "var u=f.querySelector('input[type=text],input[type=email],input:not([type])');"
+                    + "var p=f.querySelector('input[type=password]');if(!u||!p)return 'NO_FIELDS';"
+                    + "u.value=" + u + ";p.value=" + p + ";"
+                    + "u.dispatchEvent(new Event('input',{bubbles:true}));"
+                    + "p.dispatchEvent(new Event('input',{bubbles:true}));"
+                    + "if(f.requestSubmit)f.requestSubmit();else f.submit();return 'SUBMITTED';})()", result -> {
+                try { client.saveCredentials(username, password); }
+                catch (Exception e) { showMessage("Не удалось сохранить данные входа: " + safe(e.getMessage())); }
+            });
         });
         done.setOnClickListener(v -> {
             browserCookies.flush();
@@ -2251,10 +2342,7 @@ public class MainActivity extends Activity {
                     return;
                 }
             }
-            web.stopLoading();
-            if (web.getParent() instanceof ViewGroup) ((ViewGroup) web.getParent()).removeView(web);
-            web.setVisibility(View.INVISIBLE);
-            root.addView(web, new LinearLayout.LayoutParams(1, 1));
+            detachWeb.run();
             dialog.dismiss();
             showMessage("Браузерная сессия сохранена. Загружаю каталог через WebView.");
             status.setText("Браузерная сессия активна");
@@ -2269,13 +2357,26 @@ public class MainActivity extends Activity {
         });
         dialog.show();
         dialog.getWindow().setLayout(
-                (int)(getResources().getDisplayMetrics().widthPixels * 0.88f),
-                (int)(getResources().getDisplayMetrics().heightPixels * 0.88f));
+                (int)(getResources().getDisplayMetrics().widthPixels * 0.90f),
+                (int)(getResources().getDisplayMetrics().heightPixels * 0.90f));
         web.post(() -> {
             web.requestLayout();
             web.requestFocus();
             web.loadUrl(base + "/login.php?m=5");
         });
+    }
+
+    private void styleCompactCredentialField(EditText field, String hint) {
+        field.setSingleLine(true);
+        field.setTextColor(Color.WHITE);
+        field.setHintTextColor(TEAL);
+        field.setHint(hint);
+        field.setTextSize(14);
+        field.setSelectAllOnFocus(true);
+        field.setFocusable(true);
+        field.setFocusableInTouchMode(true);
+        field.setPadding(dp(10), dp(5), dp(10), dp(5));
+        field.setBackground(shape(PANEL, TEAL));
     }
 
     /**
