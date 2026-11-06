@@ -159,10 +159,8 @@ public class MainActivity extends Activity {
         ratings.addView(kinopoisk);
         ratings.addView(kinozal);
         card.addView(ratings, new LinearLayout.LayoutParams(dp(126), -2));
-        card.setOnFocusChangeListener((v, focused) -> {
-            v.setBackground(shape(focused ? Color.rgb(57, 68, 70) : PANEL, focused ? GOLD : 0));
-            if (focused) loadPosterRatings(item, imdb, kinopoisk, kinozal);
-        });
+        // Focus listener is installed by renderHome so it can also keep the
+        // card highlight without replacing the rating loader.
     }
 
     private void loadPosterRatings(HomePoster item, TextView imdb, TextView kinopoisk, TextView kinozal) {
@@ -605,8 +603,21 @@ public class MainActivity extends Activity {
                 card.setBackground(shape(PANEL, 0));
                 card.setFocusable(true);
                 card.setClickable(true);
-                card.setOnFocusChangeListener((v, focused) ->
-                        v.setBackground(shape(focused ? Color.rgb(57, 68, 70) : PANEL, focused ? GOLD : 0)));
+                card.setOnFocusChangeListener((v, focused) -> {
+                    v.setBackground(shape(focused ? Color.rgb(57, 68, 70) : PANEL, focused ? GOLD : 0));
+                    if (focused) {
+                        View ratingView = card.getChildAt(2);
+                        if (ratingView instanceof LinearLayout) {
+                            LinearLayout ratingRows = (LinearLayout) ratingView;
+                            if (ratingRows.getChildCount() >= 3) {
+                                loadPosterRatings(item,
+                                        (TextView) ratingRows.getChildAt(0),
+                                        (TextView) ratingRows.getChildAt(1),
+                                        (TextView) ratingRows.getChildAt(2));
+                            }
+                        }
+                    }
+                });
                 ImageView poster = new ImageView(this);
                 poster.setScaleType(ImageView.ScaleType.CENTER_CROP);
                 poster.setBackground(shape(Color.rgb(40, 45, 49), 0));
@@ -628,7 +639,8 @@ public class MainActivity extends Activity {
                 }
             }
             horizontal.addView(strip);
-            LinearLayout.LayoutParams rowParams = new LinearLayout.LayoutParams(-1, dp(238));
+            // Poster + title + three rating rows; keep the complete card visible.
+            LinearLayout.LayoutParams rowParams = new LinearLayout.LayoutParams(-1, dp(282));
             list.addView(horizontal, rowParams);
         }
         if (sections.isEmpty()) addEmpty("На главной пока нет подборок.");
