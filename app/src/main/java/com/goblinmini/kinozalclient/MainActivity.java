@@ -1679,9 +1679,16 @@ public class MainActivity extends Activity {
     private void showPlaybackDiagnostics() {
         try {
             java.io.File file = playbackLogFile();
-            String report = file.exists()
-                    ? new String(java.nio.file.Files.readAllBytes(file.toPath()), java.nio.charset.StandardCharsets.UTF_8)
-                    : "Журнал пока пуст.";
+            String report = "Журнал пока пуст.";
+            if (file.exists()) {
+                try (java.io.FileInputStream in = new java.io.FileInputStream(file);
+                     java.io.ByteArrayOutputStream buffer = new java.io.ByteArrayOutputStream()) {
+                    byte[] chunk = new byte[4096];
+                    int count;
+                    while ((count = in.read(chunk)) != -1) buffer.write(chunk, 0, count);
+                    report = new String(buffer.toByteArray(), java.nio.charset.StandardCharsets.UTF_8);
+                }
+            }
             TextView body = text(report, 12, Color.WHITE, false);
             body.setTextIsSelectable(true);
             ScrollView scroll = new ScrollView(this);
