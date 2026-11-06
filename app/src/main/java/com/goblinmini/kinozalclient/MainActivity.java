@@ -1448,10 +1448,19 @@ public class MainActivity extends Activity {
             if (poster != null) data.poster = poster.absUrl("src");
         }
 
-        Element download = doc.selectFirst("a[href*=/download.php], a[href$=.torrent], a[href*=magnet:]");
-        if (download != null) {
-            String href = download.attr("href").trim();
-            data.torrentLink = href.startsWith("magnet:") ? href : download.absUrl("href");
+        // Prefer the magnet URI when Kinozal exposes one. This avoids requesting
+        // a .torrent download for every item and therefore avoids that download quota.
+        // Keep the authenticated .torrent endpoint as a fallback for older pages.
+        Element magnet = doc.selectFirst("a[href^=magnet:]");
+        if (magnet != null) {
+            data.torrentLink = magnet.attr("href").trim();
+        } else {
+            Element download = doc.selectFirst("a[href*=/download.php], a[href$=.torrent]");
+            if (download != null) {
+                String href = download.attr("href").trim();
+                data.torrentLink = download.absUrl("href");
+                if (data.torrentLink.isEmpty()) data.torrentLink = href;
+            }
         }
         return data;
     }
