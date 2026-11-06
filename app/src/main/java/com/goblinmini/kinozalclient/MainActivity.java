@@ -1131,22 +1131,20 @@ public class MainActivity extends Activity {
         if (fullTitle == null) return "";
         String value = fullTitle.trim();
         java.util.regex.Matcher yearMatcher =
-                java.util.regex.Pattern.compile("(?<!\\\\d)(?:19|20)\\\\d{2}(?!\\\\d)").matcher(value);
+                java.util.regex.Pattern.compile("(?<!\\d)(?:19|20)\\d{2}(?!\\d)").matcher(value);
         String year = yearMatcher.find() ? yearMatcher.group() : "";
         String[] parts = value.split("/");
         String title = "";
-        // Select the first slash-separated segment containing a Latin title,
-        // skipping numeric metadata such as the year.
         for (int i = 1; i < parts.length; i++) {
             String candidate = parts[i].trim();
             if (candidate.matches(".*[A-Za-z].*")
                     && candidate.matches(".*[A-Za-z]{2,}.*")) {
-                title = candidate.replaceAll("\\\\s+", " ").trim();
+                title = candidate.replaceAll("\\s+", " ").trim();
                 break;
             }
         }
         if (title.isEmpty()) title = value;
-        if (!year.isEmpty() && !title.matches("(?s).*\\\\b" + year + "\\\\b.*")) {
+        if (!year.isEmpty() && !title.matches("(?s).*\\b" + year + "\\b.*")) {
             title = title + " " + year;
         }
         return title;
