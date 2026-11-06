@@ -597,8 +597,7 @@ public class MainActivity extends Activity {
             try { encoded = new org.json.JSONArray("[" + result + "]").getString(0); }
             catch (Exception ignored) { }
             if (encoded == null || encoded.isEmpty() || "null".equals(encoded)) {
-                loadImageWithHttp(imageUrl, target, referer);
-                return;
+                loadImageWithHttp(imageUrl, target, referer);                return;
             }
             final String base64 = encoded;
             io.execute(() -> {
@@ -1098,7 +1097,7 @@ public class MainActivity extends Activity {
         if (view == null) return;
         String script = "(function(){if(window.__kzNetProbe)return;window.__kzNetProbe=true;" +
             "function clean(u){try{var x=new URL(String(u),location.href),q=[];x.searchParams.forEach(function(v,k){q.push(k+'='+(['id','action','type','page','t','d','f','k','w'].indexOf(k.toLowerCase())>=0?v:'[redacted]'));});return x.origin+x.pathname+(q.length?'?'+q.join('&'):'');}catch(e){return '[url]';}}" +
-            "var f=window.fetch;if(f)window.fetch=function(){var a=arguments[0],u=a&&a.url?a.url:a,label=clean(u);return f.apply(this,arguments).then(function(r){var ct=r.headers.get('content-type')||'',cd=(r.headers.get('content-disposition')||'').replace(/[\\r\\n]+/g,' ').slice(0,120),finalUrl=clean(r.url||u);console.log('KZNET|FETCH '+r.status+' '+label+' ct='+ct);if(/download\\.php|\\.torrent/i.test(String(u))){r.clone().arrayBuffer().then(function(b){var v=new Uint8Array(b),h=[];for(var i=0;i<Math.min(v.length,32);i++)h.push(('0'+v[i].toString(16)).slice(-2));console.log('KZNET|FETCH_DOWNLOAD '+label+' final='+finalUrl+' redirected='+r.redirected+' bytes='+v.length+' prefix='+h.join('')+' ct='+ct+' attachment='+(cd.toLowerCase().indexOf('attachment')>=0)+' filenameTorrent=/\\.torrent(?:[;\\\" ]|$)/i.test(cd));}).catch(function(e){console.log('KZNET|FETCH_DOWNLOAD_ERROR '+label+' '+String(e));});}else{r.clone().text().then(function(t){var n=(t.match(/magnet:/ig)||[]).length;if(n||/TSA_magnet|get_srv_details|download\\.php/i.test(t))console.log('KZNET|FETCH_BODY '+label+' chars='+t.length+' magnet='+n+' tsa='+(t.indexOf('TSA_magnet')>=0)+' srv='+(t.indexOf('get_srv_details')>=0));}).catch(function(){});}return r;},function(e){console.log('KZNET|FETCH_ERROR '+label+' '+String(e));throw e;});};" +
+            "var f=window.fetch;if(f)window.fetch=function(){var a=arguments[0],u=a&&a.url?a.url:a,label=clean(u);return f.apply(this,arguments).then(function(r){var ct=r.headers.get('content-type')||'',cd=(r.headers.get('content-disposition')||'').replace(/[\\r\\n]+/g,' ').slice(0,120),finalUrl=clean(r.url||u);console.log('KZNET|FETCH '+r.status+' '+label+' ct='+ct);if(/download\\.php|\\.torrent/i.test(String(a&&a.url?a.url:u))){r.clone().arrayBuffer().then(function(b){var v=new Uint8Array(b),h=[];for(var i=0;i<Math.min(v.length,32);i++)h.push(('0'+v[i].toString(16)).slice(-2));console.log('KZNET|FETCH_DOWNLOAD '+label+' final='+finalUrl+' redirected='+r.redirected+' bytes='+v.length+' prefix='+h.join('')+' ct='+ct+' attachment='+(cd.toLowerCase().indexOf('attachment')>=0)+' filenameTorrent=/\\.torrent(?:[;\\\" ]|$)/i.test(cd));if(/text\\/html|application\\/(?:json|xml)/i.test(ct)){try{var txt=new TextDecoder('windows-1251').decode(v);var plain=txt.replace(/<script\\b[\\s\\S]*?<\\/script>/gi,' ').replace(/<style\\b[\\s\\S]*?<\\/style>/gi,' ').replace(/<[^>]*>/g,' ').replace(/&nbsp;|&#160;/gi,' ').replace(/&amp;/gi,'&').replace(/&lt;/gi,'<').replace(/&gt;/gi,'>').replace(/\\s+/g,' ').trim().slice(0,1800);var links=[];txt.replace(/<a\\b[^>]*href\\s*=\\s*(['\\\"])(.*?)\\1[^>]*>([\\s\\S]*?)<\\/a>/gi,function(_,q,href,body){if(links.length<12){var labelText=body.replace(/<[^>]*>/g,' ').replace(/\\s+/g,' ').trim().slice(0,100);links.push(clean(href)+' ['+labelText+']');}return _;});console.log('KZNET|FETCH_DOWNLOAD_HTML '+label+' title='+((txt.match(/<title[^>]*>([\\s\\S]*?)<\\/title>/i)||[])[1]||'').replace(/<[^>]*>/g,' ').trim().slice(0,160)+' links='+links.join(' || ')+' text='+plain);}catch(e){console.log('KZNET|FETCH_DOWNLOAD_HTML_ERROR '+label+' '+String(e));}}}).catch(function(e){console.log('KZNET|FETCH_DOWNLOAD_ERROR '+label+' '+String(e));});}else{r.clone().text().then(function(t){var n=(t.match(/magnet:/ig)||[]).length;if(n||/TSA_magnet|get_srv_details|download\\.php/i.test(t))console.log('KZNET|FETCH_BODY '+label+' chars='+t.length+' magnet='+n+' tsa='+(t.indexOf('TSA_magnet')>=0)+' srv='+(t.indexOf('get_srv_details')>=0));}).catch(function(){});}return r;},function(e){console.log('KZNET|FETCH_ERROR '+label+' '+String(e));throw e;});};" +
             "var op=XMLHttpRequest.prototype.open,send=XMLHttpRequest.prototype.send;XMLHttpRequest.prototype.open=function(m,u){this.__kz={m:m,u:clean(u)};return op.apply(this,arguments);};XMLHttpRequest.prototype.send=function(){var x=this,z=x.__kz||{};x.addEventListener('loadend',function(){var ct='';try{ct=x.getResponseHeader('content-type')||'';}catch(e){}console.log('KZNET|XHR '+x.status+' '+(z.m||'')+' '+(z.u||'')+' ct='+ct);try{var t=typeof x.responseText==='string'?x.responseText:'',n=(t.match(/magnet:/ig)||[]).length;if(n||/TSA_magnet|get_srv_details|download\\.php/i.test(t))console.log('KZNET|XHR_BODY '+(z.u||'')+' chars='+t.length+' magnet='+n+' tsa='+(t.indexOf('TSA_magnet')>=0)+' srv='+(t.indexOf('get_srv_details')>=0));}catch(e){}});return send.apply(this,arguments);};console.log('KZNET|PROBE_INSTALLED '+location.pathname);})();";
         view.evaluateJavascript(script, null);
     }
@@ -1197,8 +1196,7 @@ public class MainActivity extends Activity {
             String name = a.text().trim();
             if (name.length() < 3) continue;
 
-            Element row = a.closest("tr");
-            String href = a.absUrl("href");
+            Element row = a.closest("tr");            String href = a.absUrl("href");
             if (href.isEmpty()) href = a.attr("href");
 
             Torrent t = new Torrent();
@@ -1797,8 +1795,7 @@ public class MainActivity extends Activity {
                                 String magnet = fetchMagnetFromServer(selected);
                                 if (!magnet.isEmpty()) result.torrentLink = magnet;
                             } catch (Exception ignored) { }
-                            if (requestId != torrentRequestSerial) return;
-                            runOnUiThread(() -> {
+                            if (requestId != torrentRequestSerial) return;                            runOnUiThread(() -> {
                                 if (requestId != torrentRequestSerial || isFinishing()) return;
                                 progress.setVisibility(View.GONE);
                                 showTorrentDetails(selected, result);
