@@ -361,7 +361,7 @@ public class MainActivity extends Activity {
 
     private void setCatalogStatus(String itemType, int count) {
         status.setText(currentTitle + " · Загружено: " + count + " " + itemType
-                + "\\nВерсия: " + getAppVersionName());
+                + "\nВерсия: " + getAppVersionName());
     }
 
     private String getAppVersionName() {
