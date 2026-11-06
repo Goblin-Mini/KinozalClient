@@ -1448,20 +1448,18 @@ public class MainActivity extends Activity {
             if (poster != null) data.poster = poster.absUrl("src");
         }
 
-        // Prefer the magnet URI when Kinozal exposes one. This avoids requesting
-        // a .torrent download for every item and therefore avoids that download quota.
-        // Keep the authenticated .torrent endpoint as a fallback for older pages.
-        Element magnet = doc.selectFirst("a[href^=magnet:]");
-        if (magnet != null) {
-            data.torrentLink = magnet.attr("href").trim();
-        } else {
-            Element download = doc.selectFirst("a[href*=/download.php], a[href$=.torrent]");
-            if (download != null) {
-                String href = download.attr("href").trim();
-                data.torrentLink = download.absUrl("href");
-                if (data.torrentLink.isEmpty()) data.torrentLink = href;
+        // Magnet-only mode: inspect anchor attributes directly. The previous
+        // unquoted CSS selector treated the colon in "magnet:" ambiguously.
+        // Never fall back to .torrent/download.php: that endpoint may return HTTP 403.
+        for (Element link : doc.select("a[href]")) {
+            String href = link.attr("href").trim();
+            if (href.regionMatches(true, 0, "magnet:", 0, 7)) {
+                data.torrentLink = href.replace("&amp;", "&");
+                break;
             }
         }
+        playbackLog("DETAIL_MAGNET_PARSE found=" + !data.torrentLink.isEmpty()
+                + " anchors=" + doc.select("a[href]").size());
         return data;
     }
 
@@ -1718,7 +1716,7 @@ public class MainActivity extends Activity {
                 + " linkType=" + (data.torrentLink == null ? "null"
                 : data.torrentLink.startsWith("magnet:") ? "magnet" : "torrent"));
         if (data.torrentLink == null || data.torrentLink.isEmpty()) {
-            showMessage("Не удалось найти ссылку на торрент на странице раздачи.");
+            showMessage("На странице раздачи не найдена magnet-ссылка. Файлы .torrent больше не загружаются.");
             return;
         }
         if (data.torrentLink.startsWith("magnet:")) {
