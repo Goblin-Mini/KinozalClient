@@ -789,7 +789,7 @@ public class MainActivity extends Activity {
                 if (pendingBrowserCallback != null) {
                     BrowserPageCallback cb = pendingBrowserCallback;
                     pendingBrowserCallback = null;
-                    view.evaluateJavascript("(document.documentElement ? document.documentElement.outerHTML : '')", value -> {
+                    view.evaluateJavascript("(function(){var d=document.documentElement;if(!d)return '';var m=document.querySelector('a.TSA_magnet[href],a[href^=\"magnet:\"]');if(m){var b=document.createElement('a');b.id='__kinozal_magnet_bridge';b.setAttribute('href',m.getAttribute('href'));d.appendChild(b);}return d.outerHTML;})()", value -> {
                         String html = "";
                         try { html = new org.json.JSONArray("[" + value + "]").getString(0); }
                         catch (Exception ignored) { }
@@ -1467,6 +1467,7 @@ public class MainActivity extends Activity {
         // Kinozal's magnet button is <a class="TSA_magnet" href="magnet:?...">.
         // Prefer this exact control; never interpret a torrent download link as a magnet.
         Element magnetControl = doc.selectFirst("a.TSA_magnet[href]");
+        if (magnetControl == null) magnetControl = doc.selectFirst("#__kinozal_magnet_bridge[href]");
         if (magnetControl == null) magnetControl = doc.selectFirst("a[href^=magnet:]");
         if (magnetControl != null) {
             String href = org.jsoup.parser.Parser.unescapeEntities(
