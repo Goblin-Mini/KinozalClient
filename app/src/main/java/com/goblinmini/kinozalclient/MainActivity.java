@@ -615,9 +615,8 @@ public class MainActivity extends Activity {
         LinearLayout main = new LinearLayout(this); main.setOrientation(LinearLayout.VERTICAL);
         main.setPadding(dp(16), dp(8), dp(8), dp(8));
         root.addView(main, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1));
-        LinearLayout brand = new LinearLayout(this); brand.setGravity(Gravity.CENTER_VERTICAL);
+        LinearLayout brand = new LinearLayout(this); brand.setGravity(Gravity.CENTER);
         TextView logo = text("KINOZAL", 23, GOLD, true); brand.addView(logo);
-        TextView sub = text("  NATIVE TV", 11, TEAL, true); brand.addView(sub);
         sidebar.addView(brand, new LinearLayout.LayoutParams(-1, dp(58)));
         ScrollView menuScroll = new ScrollView(this);
         menuScroll.setFillViewport(false);
@@ -628,10 +627,10 @@ public class MainActivity extends Activity {
         menuItems.setOrientation(LinearLayout.VERTICAL);
         menuScroll.addView(menuItems, new ScrollView.LayoutParams(-1, -2));
         sidebar.addView(menuScroll, new LinearLayout.LayoutParams(-1, 0, 1));
-        addMenu("Главная", () -> loadInitialCatalog());
-        addMenu("Все раздачи", () -> load("browse.php", "Все раздачи"));
+        addMenu("⌂", "Главная", () -> loadInitialCatalog());
+        addMenu("⇩", "Все раздачи", () -> load("browse.php", "Все раздачи"));
 
-        Button categoriesButton = button("Категории  ▾");
+        Button categoriesButton = button("▦   Категории  ▾");
         categoriesButton.setGravity(Gravity.CENTER_VERTICAL | Gravity.LEFT);
         categoriesButton.setTextSize(14);
         categoriesButton.setPadding(dp(14), 0, dp(8), 0);
@@ -645,21 +644,21 @@ public class MainActivity extends Activity {
         categoryGroup.setVisibility(View.GONE);
         menuItems.addView(categoryGroup);
 
-        addSubMenu(categoryGroup, "Все сериалы", "browse.php?c=1001");
-        addSubMenu(categoryGroup, "Зарубежные сериалы", "browse.php?c=46");
-        addSubMenu(categoryGroup, "Российские сериалы", "browse.php?c=45");
+        addSubMenu(categoryGroup, "▣  Все сериалы", "browse.php?c=1001");
+        addSubMenu(categoryGroup, "▣  Зарубежные сериалы", "browse.php?c=46");
+        addSubMenu(categoryGroup, "▣  Российские сериалы", "browse.php?c=45");
 
-        addSubMenu(categoryGroup, "Все фильмы", "browse.php?c=1002");
-        addSubMenu(categoryGroup, "Советские фильмы", "browse.php?c=10");
-        addSubMenu(categoryGroup, "Мультфильмы", "browse.php?c=1003");
-        addSubMenu(categoryGroup, "Российские мульты", "browse.php?c=22");
-        addSubMenu(categoryGroup, "Зарубежные мульты", "browse.php?c=21");
-        addSubMenu(categoryGroup, "Аниме", "browse.php?c=20");
-        addSubMenu(categoryGroup, "Спортивные передачи", "browse.php?c=37");
-        addSubMenu(categoryGroup, "Российское ТВ", "browse.php?c=49");
-        addSubMenu(categoryGroup, "Зарубежное ТВ", "browse.php?c=50");
-        addSubMenu(categoryGroup, "Концерты", "browse.php?c=48");
-        addSubMenu(categoryGroup, "Видеоклипы", "browse.php?c=1");
+        addSubMenu(categoryGroup, "▤  Все фильмы", "browse.php?c=1002");
+        addSubMenu(categoryGroup, "▤  Советские фильмы", "browse.php?c=10");
+        addSubMenu(categoryGroup, "▧  Мультфильмы", "browse.php?c=1003");
+        addSubMenu(categoryGroup, "▧  Российские мульты", "browse.php?c=22");
+        addSubMenu(categoryGroup, "▧  Зарубежные мульты", "browse.php?c=21");
+        addSubMenu(categoryGroup, "✧  Аниме", "browse.php?c=20");
+        addSubMenu(categoryGroup, "⚑  Спортивные передачи", "browse.php?c=37");
+        addSubMenu(categoryGroup, "▣  Российское ТВ", "browse.php?c=49");
+        addSubMenu(categoryGroup, "▣  Зарубежное ТВ", "browse.php?c=50");
+        addSubMenu(categoryGroup, "♫  Концерты", "browse.php?c=48");
+        addSubMenu(categoryGroup, "▸  Видеоклипы", "browse.php?c=1");
         categoriesButton.setOnClickListener(v -> {
             boolean expand = categoryGroup.getVisibility() != View.VISIBLE;
             categoryGroup.setVisibility(expand ? View.VISIBLE : View.GONE);
@@ -667,11 +666,13 @@ public class MainActivity extends Activity {
             if (expand) categoryGroup.getChildAt(0).requestFocus();
         });
 
-        addMenu("Избранное", () -> showFavorites());
-        addMenu("Настройки", () -> showSettings());
+        addMenu("★", "Избранное", () -> showFavorites());
+        addMenu("⚙", "Настройки", () -> showSettings());
         status = text("Подключение…", 11, TEAL, false);
-        LinearLayout.LayoutParams statusParams = new LinearLayout.LayoutParams(-1, dp(28));
-        statusParams.topMargin = dp(4);
+        status.setGravity(Gravity.CENTER);
+        status.setLineSpacing(dp(2), 1f);
+        LinearLayout.LayoutParams statusParams = new LinearLayout.LayoutParams(-1, dp(44));
+        statusParams.topMargin = dp(6);
         sidebar.addView(status, statusParams);
 
         heading = text("Главная", 25, GOLD, true);
@@ -790,8 +791,8 @@ public class MainActivity extends Activity {
         login.requestFocus();
     }
 
-    private void addMenu(String label, Runnable action) {
-        Button b = button(label);
+    private void addMenu(String icon, String label, Runnable action) {
+        Button b = button(icon + "   " + label);
         b.setGravity(Gravity.CENTER_VERTICAL | Gravity.LEFT);
         b.setTextSize(14);
         b.setPadding(dp(14), 0, dp(8), 0);
