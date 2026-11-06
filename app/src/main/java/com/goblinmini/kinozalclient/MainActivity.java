@@ -57,6 +57,7 @@ public class MainActivity extends Activity {
 
     private final ExecutorService io = Executors.newSingleThreadExecutor();
     private KinozalHttpClient client;
+    private DiskCache diskCache;
     private String mirror;
     private String currentPath = "browse.php";
     private String currentTitle = "Все раздачи";
@@ -99,6 +100,7 @@ public class MainActivity extends Activity {
         super.onCreate(state);
         mirror = getSharedPreferences(PREFS, MODE_PRIVATE).getString("mirror", MIRRORS[0]);
         client = new KinozalHttpClient(this, mirror);
+        diskCache = new DiskCache(this, 200L * 1024L * 1024L);
         buildShell();
         String savedBrowserCookies = client.getSavedBrowserCookies();
         if (savedBrowserCookies != null) {
@@ -459,6 +461,11 @@ public class MainActivity extends Activity {
 
     private void loadImageIntoView(String imageUrl, ImageView target, String referer) {
         if (imageUrl == null || imageUrl.isEmpty()) return;
+        byte[] cachedImage = diskCache.get("image|" + imageUrl, 0L);
+        if (cachedImage != null) {
+            Bitmap cachedBitmap = BitmapFactory.decodeByteArray(cachedImage, 0, cachedImage.length);
+            if (cachedBitmap != null) { target.setImageBitmap(cachedBitmap); return; }
+        }
         WebView web = sessionWebView;
         if (web == null) {
             loadImageWithHttp(imageUrl, target, referer);
@@ -482,6 +489,7 @@ public class MainActivity extends Activity {
             io.execute(() -> {
                 try {
                     byte[] bytes = android.util.Base64.decode(base64, android.util.Base64.DEFAULT);
+                    diskCache.put("image|" + imageUrl, bytes);
                     Bitmap bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.length);
                     if (bitmap != null) runOnUiThread(() -> {
                         if (target.getParent() != null) target.setImageBitmap(bitmap);
@@ -499,7 +507,11 @@ public class MainActivity extends Activity {
     private void loadImageWithHttp(String imageUrl, ImageView target, String referer) {
         io.execute(() -> {
             try {
-                byte[] bytes = client.fetchBytes(imageUrl, "image/*", referer);
+                byte[] bytes = diskCache.get("image|" + imageUrl, 0L);
+                if (bytes == null) {
+                    bytes = client.fetchBytes(imageUrl, "image/*", referer);
+                    diskCache.put("image|" + imageUrl, bytes);
+                }
                 Bitmap bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.length);
                 if (bitmap != null) runOnUiThread(() -> {
                     if (target.getParent() != null) target.setImageBitmap(bitmap);
@@ -1250,14 +1262,23 @@ public class MainActivity extends Activity {
     private void load(String path, String title, String postBody) {
         currentPath = path; currentTitle = title; heading.setText(title);
         String cacheKey = (postBody == null ? "GET|" + path : "POST|" + path + "|" + postBody);
+        String scopedCacheKey = client.getMirror() + "|" + cacheKey;
         String cachedPage;
         synchronized (pageCache) { cachedPage = pageCache.get(cacheKey); }
+        if (cachedPage == null && postBody == null) {
+            byte[] saved = diskCache.get("page|" + scopedCacheKey, 3L * 60L * 1000L);
+            if (saved != null) {
+                cachedPage = new String(saved, StandardCharsets.UTF_8);
+                synchronized (pageCache) { pageCache.put(cacheKey, cachedPage); }
+            }
+        }
         if (cachedPage != null) { showLoadedPage(cachedPage); return; }
         showPageLoading("Загрузка каталога…");
         if (sessionWebView != null) {
             fetchBrowserPage(path, postBody, html -> {
                 if (html != null && !html.isEmpty()) {
                     synchronized (pageCache) { pageCache.put(cacheKey, html); }
+                    if (postBody == null) diskCache.put("page|" + scopedCacheKey, html.getBytes(StandardCharsets.UTF_8));
                     showLoadedPage(html);
                 } else {
                     progress.setVisibility(View.GONE);
@@ -1270,6 +1291,7 @@ public class MainActivity extends Activity {
                 try {
                     String html = postBody == null ? client.fetch(path) : client.fetchPost(path, postBody);
                     synchronized (pageCache) { pageCache.put(cacheKey, html); }
+                    if (postBody == null) diskCache.put("page|" + scopedCacheKey, html.getBytes(StandardCharsets.UTF_8));
                     runOnUiThread(() -> showLoadedPage(html));
                 } catch (Exception e) {
                     runOnUiThread(() -> { progress.setVisibility(View.GONE); status.setText("Нет соединения");
