@@ -38,6 +38,7 @@ public final class KinozalHttpClient {
     private final Context context;
     private final CookieManager cookies = new CookieManager(null, CookiePolicy.ACCEPT_ALL);
     private String baseUrl;
+    private volatile java.net.Proxy networkProxy = java.net.Proxy.NO_PROXY;
 
     public KinozalHttpClient(Context context, String mirror) {
         this.context = context.getApplicationContext();
@@ -54,6 +55,11 @@ public final class KinozalHttpClient {
     }
 
     public synchronized String getMirror() { return baseUrl; }
+
+    /** Route native HTTP requests through the app-owned local SOCKS5 bridge. */
+    public void setProxy(java.net.Proxy proxy) {
+        networkProxy = proxy == null ? java.net.Proxy.NO_PROXY : proxy;
+    }
 
     public synchronized boolean isAuthenticated() {
         try {
@@ -180,7 +186,7 @@ public final class KinozalHttpClient {
         String current = target.startsWith("http") ? target : baseUrl + "/" + target.replaceFirst("^/+", "");
         for (int redirect = 0; redirect < 9; redirect++) {
             URL url = new URL(current);
-            HttpURLConnection connection = (HttpURLConnection) url.openConnection();
+            HttpURLConnection connection = (HttpURLConnection) url.openConnection(networkProxy);
             connection.setConnectTimeout(15000);
             connection.setReadTimeout(25000);
             connection.setInstanceFollowRedirects(false);
@@ -237,7 +243,7 @@ public final class KinozalHttpClient {
         String currentBody = body;
         for (int redirect = 0; redirect < 9; redirect++) {
             URL url = new URL(current);
-            HttpURLConnection connection = (HttpURLConnection) url.openConnection();
+            HttpURLConnection connection = (HttpURLConnection) url.openConnection(networkProxy);
             connection.setConnectTimeout(15000);
             connection.setReadTimeout(20000);
             connection.setInstanceFollowRedirects(false);
