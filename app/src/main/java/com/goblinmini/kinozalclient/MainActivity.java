@@ -935,7 +935,7 @@ public class MainActivity extends Activity {
                     | android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD);
             panel.addView(field, new LinearLayout.LayoutParams(-1, dp(44)));
         }
-        TextView note = text("Используется Torznab API. Для публичных серверов может потребоваться их API Key.",
+        TextView note = text("Используется Torznab API. Для указанных публичных серверов API Key не требуется. Для своего сервера ключ можно оставить пустым или указать при необходимости.",
                 12, Color.LTGRAY, false);
         note.setPadding(0, dp(8), 0, 0);
         panel.addView(note);
@@ -984,11 +984,6 @@ public class MainActivity extends Activity {
     }
 
     private void searchJackett(String query) {
-        if (jackettApiKey().isEmpty()) {
-            showMessage("Сначала укажите API Key в Настройки → Поиск Jackett.");
-            showJackettSettings();
-            return;
-        }
         LinearLayout panel = new LinearLayout(this);
         panel.setOrientation(LinearLayout.VERTICAL);
         panel.setPadding(dp(12), dp(8), dp(12), dp(8));
@@ -1018,10 +1013,11 @@ public class MainActivity extends Activity {
             for (String server : servers) {
                 try {
                     String encoded = URLEncoder.encode(query, "UTF-8");
+                    String apiKey = jackettApiKey();
                     String endpoint = server.replaceAll("/+$", "")
-                            + "/api/v2.0/indexers/all/results/torznab/api?apikey="
-                            + URLEncoder.encode(jackettApiKey(), "UTF-8")
-                            + "&t=search&q=" + encoded;
+                            + "/api/v2.0/indexers/all/results/torznab/api?"
+                            + (apiKey.isEmpty() ? "" : "apikey=" + URLEncoder.encode(apiKey, "UTF-8") + "&")
+                            + "t=search&q=" + encoded;
                     java.net.HttpURLConnection connection =
                             (java.net.HttpURLConnection) new java.net.URL(endpoint).openConnection();
                     connection.setConnectTimeout(9000);
@@ -1056,7 +1052,7 @@ public class MainActivity extends Activity {
                 results.removeAllViews();
                 if (serverUsed == null) {
                     status.setText("Не удалось выполнить поиск. " + failure
-                            + "\\nПроверьте адрес сервера и API Key в настройках.");
+                            + "\\nПроверьте доступность сервера и адрес API.");
                     return;
                 }
                 status.setText("Найдено: " + items.size() + " · " + serverUsed);
