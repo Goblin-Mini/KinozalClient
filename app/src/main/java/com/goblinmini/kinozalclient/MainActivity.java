@@ -806,16 +806,14 @@ public class MainActivity extends Activity {
     private void showSettings() {
         LinearLayout panel = new LinearLayout(this);
         panel.setOrientation(LinearLayout.VERTICAL);
-        panel.setPadding(dp(18), dp(10), dp(18), dp(12));
+        panel.setPadding(dp(18), dp(14), dp(18), dp(12));
         panel.setBackgroundColor(BG);
-        TextView caption = text("Управление приложением и подключением", 13, TEAL, false);
-        caption.setPadding(dp(4), 0, dp(4), dp(12));
-        panel.addView(caption);
         Button login = button("◎   Авторизация / проверка Kinozal");
         Button mirrorButton = button("◇   Выбрать зеркало");
         Button updates = button("↻   Проверить обновления");
+        Button about = button("ⓘ   О приложении");
         Button close = button("Закрыть");
-        for (Button action : new Button[]{login, mirrorButton, updates, close}) {
+        for (Button action : new Button[]{login, mirrorButton, updates, about, close}) {
             action.setTextSize(15);
             action.setGravity(Gravity.CENTER);
             LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-1, dp(48));
@@ -825,8 +823,9 @@ public class MainActivity extends Activity {
         login.setOnClickListener(v -> { settingsDialog.dismiss(); showLogin(); });
         mirrorButton.setOnClickListener(v -> { settingsDialog.dismiss(); chooseMirror(); });
         updates.setOnClickListener(v -> { settingsDialog.dismiss(); new UpdateManager(this).check(); });
+        about.setOnClickListener(v -> showAbout());
         close.setOnClickListener(v -> settingsDialog.dismiss());
-        settingsDialog = new AlertDialog.Builder(this).setTitle("Настройки").setView(panel).create();
+        settingsDialog = new AlertDialog.Builder(this).setView(panel).create();
         settingsDialog.show();
         if (settingsDialog.getWindow() != null) {
             settingsDialog.getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(BG));
@@ -834,6 +833,53 @@ public class MainActivity extends Activity {
                     ViewGroup.LayoutParams.WRAP_CONTENT);
         }
         login.requestFocus();
+    }
+
+    private void showAbout() {
+        LinearLayout panel = new LinearLayout(this);
+        panel.setOrientation(LinearLayout.VERTICAL);
+        panel.setPadding(dp(20), dp(12), dp(20), dp(8));
+        panel.setBackgroundColor(BG);
+
+        TextView description = text(
+                "Kinozal Client — приложение для удобного просмотра каталога Kinozal на Android и Android TV.",
+                15, Color.WHITE, false);
+        description.setLineSpacing(dp(3), 1f);
+        panel.addView(description);
+
+        TextView github = text("GitHub: github.com/Goblin-Mini/KinozalClient",
+                14, TEAL, false);
+        github.setPadding(0, dp(14), 0, dp(14));
+        github.setFocusable(true);
+        github.setOnClickListener(v -> {
+            try {
+                startActivity(new Intent(Intent.ACTION_VIEW,
+                        Uri.parse("https://github.com/Goblin-Mini/KinozalClient")));
+            } catch (Exception e) {
+                showMessage("Не удалось открыть GitHub.");
+            }
+        });
+        panel.addView(github);
+
+        TextView authors = text("Авторство: GoblinMini и ChatGPT", 14, GOLD, true);
+        panel.addView(authors);
+
+        AlertDialog aboutDialog = new AlertDialog.Builder(this)
+                .setTitle("О приложении")
+                .setView(panel)
+                .setPositiveButton("Закрыть", null)
+                .create();
+        aboutDialog.show();
+        if (aboutDialog.getWindow() != null) {
+            aboutDialog.getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(BG));
+            aboutDialog.getWindow().setLayout(Math.min(dp(520),
+                    getResources().getDisplayMetrics().widthPixels - dp(48)),
+                    ViewGroup.LayoutParams.WRAP_CONTENT);
+        }
+        aboutDialog.getButton(AlertDialog.BUTTON_POSITIVE).setTextColor(GOLD);
+        github.setOnFocusChangeListener((v, focused) ->
+                github.setTextColor(focused ? GOLD : TEAL));
+        github.requestFocus();
     }
 
     private void addMenu(String icon, String label, Runnable action) {
