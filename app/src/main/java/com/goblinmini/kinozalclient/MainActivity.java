@@ -945,6 +945,36 @@ public class MainActivity extends Activity {
                                     + ", magnetAnchors=" + magnetCount + ", tsaAnchors=" + tsaCount
                                     + ", htmlBytes=" + html.length()
                                     + ", body=" + safeDiag(body));
+                            if (pageUrl.toLowerCase(java.util.Locale.ROOT).contains("details.php?id=")) {
+                                lastDetailsHtml = html;
+                                lastDetailsUrl = pageUrl;
+                                Document diagnosticDoc = Jsoup.parse(html, pageUrl);
+                                Elements anchors = diagnosticDoc.select("a[href]");
+                                int magnetLinks = 0, downloadLinks = 0;
+                                for (Element anchor : anchors) {
+                                    String href = anchor.attr("href").toLowerCase(java.util.Locale.ROOT);
+                                    if (href.startsWith("magnet:")) magnetLinks++;
+                                    if (href.contains("download.php") || href.contains(".torrent")
+                                            || href.contains("get_srv_details")) downloadLinks++;
+                                }
+                                StringBuilder candidates = new StringBuilder();
+                                for (Element anchor : anchors) {
+                                    String href = anchor.attr("href");
+                                    String low = href.toLowerCase(java.util.Locale.ROOT);
+                                    if (low.startsWith("magnet:") || low.contains("download.php")
+                                            || low.contains("get_srv_details") || low.contains(".torrent")) {
+                                        if (candidates.length() > 0) candidates.append(" ; ");
+                                        candidates.append(anchor.text().replaceAll("\\s+", " ").trim())
+                                                .append(" -> ").append(safeDiag(href));
+                                        if (candidates.length() > 3500) break;
+                                    }
+                                }
+                                magnetDiag("DETAILS_HTML_CAPTURED", "chars=" + html.length()
+                                        + ", links=" + anchors.size() + ", magnet=" + magnetLinks
+                                        + ", downloadRelated=" + downloadLinks
+                                        + ", scripts=" + diagnosticDoc.select("script").size()
+                                        + ", candidates=" + safeDiag(candidates.toString()));
+                            }
                             if (html.isEmpty()) {
                                 cb.onPage(null, "Пустая страница браузера");
                                 return;
