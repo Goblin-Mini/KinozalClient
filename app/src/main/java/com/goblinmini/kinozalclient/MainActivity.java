@@ -160,8 +160,14 @@ public class MainActivity extends Activity {
         if (sessionWebView != null) {
             loadHomeSectionsInBrowser(new String[]{"novinki.php", "top.php?c=0&d=0&f=0&j=&k=0&s=0&t=0",
                     "top.php?c=0&d=0&f=0&j=&k=0&s=0&t=0&w=1",
-                    "top.php?c=0&d=0&f=0&j=&k=0&s=0&t=0&w=2"},
-                    new String[]{"Новинки", "Топ раздач", "Топ недели", "Топ месяца"}, 0,
+                    "top.php?c=0&d=0&f=0&j=&k=0&s=0&t=0&w=2",
+                    "top.php?j=%D0%BB%D1%83%D1%87%D1%88%D0%B8%D0%B9%20%D1%84%D0%B8%D0%BB%D1%8C%D0%BC%20%D0%9E%D1%81%D0%BA%D0%B0%D1%80",
+                    "top.php?j=Netflix",
+                    "top.php?j=HBO",
+                    "top.php?j=Walt%20Disney%20Pictures",
+                    "top.php?j=Marvel"},
+                    new String[]{"Новинки", "Топ раздач", "Топ недели", "Топ месяца",
+                            "Топ Оскар", "Топ Netflix", "Топ HBO", "Топ Walt Disney", "Топ Marvel"}, 0,
                     new ArrayList<>(), 0);
             return;
         }
@@ -171,9 +177,15 @@ public class MainActivity extends Activity {
                         "novinki.php",
                         "top.php?c=0&d=0&f=0&j=&k=0&s=0&t=0",
                         "top.php?c=0&d=0&f=0&j=&k=0&s=0&t=0&w=1",
-                        "top.php?c=0&d=0&f=0&j=&k=0&s=0&t=0&w=2"
+                        "top.php?c=0&d=0&f=0&j=&k=0&s=0&t=0&w=2",
+                        "top.php?j=%D0%BB%D1%83%D1%87%D1%88%D0%B8%D0%B9%20%D1%84%D0%B8%D0%BB%D1%8C%D0%BC%20%D0%9E%D1%81%D0%BA%D0%B0%D1%80",
+                        "top.php?j=Netflix",
+                        "top.php?j=HBO",
+                        "top.php?j=Walt%20Disney%20Pictures",
+                        "top.php?j=Marvel"
                 };
-                String[] titles = {"Новинки", "Топ раздач", "Топ недели", "Топ месяца"};
+                String[] titles = {"Новинки", "Топ раздач", "Топ недели", "Топ месяца",
+                        "Топ Оскар", "Топ Netflix", "Топ HBO", "Топ Walt Disney", "Топ Marvel"};
                 List<HomeSection> sections = new ArrayList<>();
                 for (int i = 0; i < paths.length; i++) {
                     String html = client.fetch(paths[i]);
