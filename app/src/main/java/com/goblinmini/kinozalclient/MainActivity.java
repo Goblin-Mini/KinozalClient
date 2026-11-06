@@ -221,13 +221,24 @@ public class MainActivity extends Activity {
                 List<HomeSection> sections = new ArrayList<>();
                 for (int i = 0; i < homePaths.length; i++) {
                     String html = client.fetch(homePaths[i]);
-                    if (html != null && !html.isEmpty()) {
-                        diskCache.put("home|" + client.getMirror() + "|" + homePaths[i],
-                                html.getBytes(StandardCharsets.UTF_8));
-                    }
+                    if (html == null || html.trim().isEmpty()) continue;
                     HomeSection section = new HomeSection(homeTitles[i], homePaths[i]);
-                    section.items.addAll(parseHomePosters(Jsoup.parse(html, client.getMirror() + "/")));
-                    sections.add(section);
+                    try {
+                        section.items.addAll(parseHomePosters(
+                                Jsoup.parse(html, client.getMirror() + "/")));
+                        if (!section.items.isEmpty()) {
+                            List<HomeSection> oneFeed = new ArrayList<>();
+                            oneFeed.add(section);
+                            removeHomeDuplicates(oneFeed);
+                            if (!section.items.isEmpty()) {
+                                diskCache.put("home|" + client.getMirror() + "|" + homePaths[i],
+                                        html.getBytes(StandardCharsets.UTF_8));
+                                sections.add(section);
+                            }
+                        }
+                    } catch (Exception ignored) {
+                        // A malformed or challenge response must not poison the cache.
+                    }
                 }
                 removeHomeDuplicates(sections);
                 int total = countHomeCards(sections);
@@ -290,13 +301,19 @@ public class MainActivity extends Activity {
             io.execute(() -> {
                 HomeSection section = new HomeSection(titles[index], paths[index]);
                 try {
-                    diskCache.put("home|" + client.getMirror() + "|" + paths[index],
-                            html.getBytes(StandardCharsets.UTF_8));
+                    // Parse and validate first. Never replace a known-good cache
+                    // entry with a Cloudflare challenge, login page or empty response.
                     section.items.addAll(parseHomePosters(
                             Jsoup.parse(html, client.getMirror() + "/")));
-                    List<HomeSection> oneFeed = new ArrayList<>();
-                    oneFeed.add(section);
-                    removeHomeDuplicates(oneFeed);
+                    if (!section.items.isEmpty()) {
+                        List<HomeSection> oneFeed = new ArrayList<>();
+                        oneFeed.add(section);
+                        removeHomeDuplicates(oneFeed);
+                        if (!section.items.isEmpty()) {
+                            diskCache.put("home|" + client.getMirror() + "|" + paths[index],
+                                    html.getBytes(StandardCharsets.UTF_8));
+                        }
+                    }
                 } catch (Exception ignored) { }
 
                 runOnUiThread(() -> {
