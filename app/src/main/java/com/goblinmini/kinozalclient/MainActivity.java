@@ -17,6 +17,7 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.view.inputmethod.EditorInfo;
 import android.widget.Button;
+import android.widget.CheckBox;
 import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.ProgressBar;
@@ -37,11 +38,17 @@ import org.jsoup.nodes.Element;
 import org.jsoup.select.Elements;
 
 import java.net.URLEncoder;
+import java.net.Proxy;
+import java.net.HttpURLConnection;
+import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import androidx.webkit.ProxyConfig;
+import androidx.webkit.ProxyController;
+import androidx.webkit.WebViewFeature;
 
 public class MainActivity extends Activity {
     private static final int BG = Color.rgb(16, 19, 23);
@@ -57,6 +64,7 @@ public class MainActivity extends Activity {
 
     private final ExecutorService io = Executors.newSingleThreadExecutor();
     private KinozalHttpClient client;
+    private Socks5ProxyBridge socks5Bridge;
     private DiskCache diskCache;
     private String mirror;
     private String currentPath = "browse.php";
@@ -107,15 +115,141 @@ public class MainActivity extends Activity {
         client = new KinozalHttpClient(this, mirror);
         diskCache = new DiskCache(this, 200L * 1024L * 1024L);
         buildShell();
+        socks5Bridge = new Socks5ProxyBridge(this);
         String savedBrowserCookies = client.getSavedBrowserCookies();
-        if (savedBrowserCookies != null) {
-            restoreBrowserSession(savedBrowserCookies);
-        } else {
-            // Wait until the TV window is actually focused before the first request.
-            markStartupCatalogReady();
+        initializeNetwork(savedBrowserCookies);
+    }
+
+
+    private void initializeNetwork(String savedBrowserCookies) {
+        Socks5ProxyBridge.Settings config = socks5Bridge.getSettings();
+        if (!config.enabled) {
+            client.setProxy(Proxy.NO_PROXY);
+            continueStartup(savedBrowserCookies);
+            return;
+        }
+        try {
+            Proxy localProxy = socks5Bridge.start();
+            if (!WebViewFeature.isFeatureSupported(WebViewFeature.PROXY_OVERRIDE)) {
+                socks5Bridge.stop();
+                throw new IllegalStateException("Компонент WebView не поддерживает прокси. Обновите Android System WebView.");
+            }
+            applyWebViewProxy(true, () -> {
+                client.setProxy(localProxy);
+                continueStartup(savedBrowserCookies);
+            });
+        } catch (Exception e) {
+            client.setProxy(Proxy.NO_PROXY);
+            status.setText("SOCKS5 не запущен: " + safe(e.getMessage()));
+            showMessage("Не удалось включить SOCKS5: " + safe(e.getMessage())
+                    + "\\nПрямое подключение не используется.");
         }
     }
 
+    private void continueStartup(String savedBrowserCookies) {
+        if (savedBrowserCookies != null) restoreBrowserSession(savedBrowserCookies);
+        else markStartupCatalogReady();
+    }
+
+    private void applyWebViewProxy(boolean enabled, Runnable callback) {
+        if (!WebViewFeature.isFeatureSupported(WebViewFeature.PROXY_OVERRIDE)) {
+            if (enabled) throw new IllegalStateException("Эта версия WebView не поддерживает прокси");
+            callback.run();
+            return;
+        }
+        ProxyConfig.Builder builder = new ProxyConfig.Builder();
+        if (enabled) builder.addProxyRule("http://127.0.0.1:" + socks5Bridge.getLocalPort());
+        else builder.addDirect();
+        ProxyController.getInstance().setProxyOverride(builder.build(),
+                command -> runOnUiThread(command), callback);
+    }
+
+    private void showSocks5Settings() {
+        Socks5ProxyBridge.Settings cfg = socks5Bridge.getSettings();
+        LinearLayout panel = new LinearLayout(this);
+        panel.setOrientation(LinearLayout.VERTICAL);
+        panel.setPadding(dp(18), dp(12), dp(18), dp(8));
+        panel.setBackgroundColor(BG);
+        CheckBox enabled = new CheckBox(this);
+        enabled.setText("Использовать SOCKS5 для приложения");
+        enabled.setTextColor(GOLD);
+        enabled.setButtonTintList(android.content.res.ColorStateList.valueOf(TEAL));
+        enabled.setChecked(cfg.enabled);
+        panel.addView(enabled);
+        EditText host = proxyField("Адрес сервера", cfg.host, android.text.InputType.TYPE_CLASS_TEXT
+                | android.text.InputType.TYPE_TEXT_VARIATION_URI);
+        EditText port = proxyField("Порт", String.valueOf(cfg.port), android.text.InputType.TYPE_CLASS_NUMBER);
+        EditText username = proxyField("Логин (если требуется)", cfg.username,
+                android.text.InputType.TYPE_CLASS_TEXT | android.text.InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD);
+        EditText password = proxyField("Пароль (если требуется)", cfg.password,
+                android.text.InputType.TYPE_CLASS_TEXT | android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD);
+        addProxyField(panel, "Сервер", host);
+        addProxyField(panel, "Порт", port);
+        addProxyField(panel, "Логин", username);
+        addProxyField(panel, "Пароль", password);
+        TextView note = text("Прокси применяется к WebView, каталогу, карточкам и диагностике. Пароль хранится зашифрованным в Android Keystore.",
+                12, TEAL, false);
+        note.setPadding(0, dp(8), 0, dp(4));
+        panel.addView(note);
+        AlertDialog dialog = new AlertDialog.Builder(this).setTitle("SOCKS5").setView(panel)
+                .setNegativeButton("Отмена", null).setPositiveButton("Сохранить", null).create();
+        dialog.setOnShowListener(ignored -> {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setTextColor(GOLD);
+            dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setTextColor(TEAL);
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
+                int portValue;
+                try { portValue = Integer.parseInt(port.getText().toString().trim()); }
+                catch (Exception e) { showMessage("Укажите корректный порт SOCKS5"); return; }
+                try {
+                    socks5Bridge.saveSettings(enabled.isChecked(), host.getText().toString(),
+                            portValue, username.getText().toString(), password.getText().toString());
+                    Proxy local = enabled.isChecked() ? socks5Bridge.start() : Proxy.NO_PROXY;
+                    if (enabled.isChecked() && !WebViewFeature.isFeatureSupported(WebViewFeature.PROXY_OVERRIDE)) {
+                        socks5Bridge.stop();
+                        throw new IllegalStateException("Обновите Android System WebView: нет поддержки прокси");
+                    }
+                    applyWebViewProxy(enabled.isChecked(), () -> {
+                        client.setProxy(local);
+                        dialog.dismiss();
+                        showMessage(enabled.isChecked() ? "SOCKS5 включён" : "SOCKS5 отключён");
+                        if (sessionWebView != null) loadInitialCatalog();
+                    });
+                } catch (Exception e) {
+                    client.setProxy(Proxy.NO_PROXY);
+                    showMessage("Ошибка SOCKS5: " + safe(e.getMessage()));
+                }
+            });
+        });
+        dialog.show();
+        if (dialog.getWindow() != null) {
+            dialog.getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(BG));
+            dialog.getWindow().setLayout(Math.min(dp(560),
+                    getResources().getDisplayMetrics().widthPixels - dp(48)),
+                    ViewGroup.LayoutParams.WRAP_CONTENT);
+        }
+        enabled.requestFocus();
+    }
+
+    private EditText proxyField(String hint, String value, int inputType) {
+        EditText field = new EditText(this);
+        field.setSingleLine(true);
+        field.setText(value);
+        field.setHint(hint);
+        field.setTextColor(Color.WHITE);
+        field.setHintTextColor(TEAL);
+        field.setTextSize(14);
+        field.setInputType(inputType);
+        field.setPadding(dp(10), dp(7), dp(10), dp(7));
+        field.setBackground(shape(PANEL, TEAL));
+        return field;
+    }
+
+    private void addProxyField(LinearLayout panel, String label, EditText field) {
+        TextView caption = text(label, 13, TEAL, true);
+        caption.setPadding(0, dp(5), 0, dp(2));
+        panel.addView(caption);
+        panel.addView(field, new LinearLayout.LayoutParams(-1, dp(43)));
+    }
 
     @Override public void onWindowFocusChanged(boolean hasFocus) {
         super.onWindowFocusChanged(hasFocus);
@@ -1032,10 +1166,11 @@ public class MainActivity extends Activity {
         Button mirrorButton = button("◇   Выбрать зеркало");
         Button updates = button("↻   Проверить обновления");
         Button diagnostics = button("▤   Диагностика / кэш");
+        Button socks5 = button("◉   SOCKS5 прокси");
         Button jackett = button("⌕   Поиск Jackett");
         Button about = button("ⓘ   О приложении");
         Button close = button("Закрыть");
-        for (Button action : new Button[]{login, mirrorButton, updates, diagnostics, jackett, about, close}) {
+        for (Button action : new Button[]{login, mirrorButton, updates, diagnostics, socks5, jackett, about, close}) {
             action.setTextSize(15);
             action.setGravity(Gravity.CENTER);
             LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-1, dp(48));
@@ -1046,6 +1181,7 @@ public class MainActivity extends Activity {
         mirrorButton.setOnClickListener(v -> { settingsDialog.dismiss(); chooseMirror(); });
         updates.setOnClickListener(v -> { settingsDialog.dismiss(); new UpdateManager(this).check(); });
         diagnostics.setOnClickListener(v -> { settingsDialog.dismiss(); showDiagnostics(); });
+        socks5.setOnClickListener(v -> showSocks5Settings());
         jackett.setOnClickListener(v -> showJackettSettings());
         about.setOnClickListener(v -> showAbout());
         close.setOnClickListener(v -> settingsDialog.dismiss());
