@@ -172,32 +172,69 @@ public class MainActivity extends Activity {
         String[] homeTitles = {"Новинки", "Топ раздач", "Топ недели", "Топ месяца",
                 "Топ Оскар", "Топ Netflix", "Топ HBO", "Топ Walt Disney", "Топ Marvel"};
 
-        homeCacheDisplayed = loadHomeSectionsFromCache(homePaths, homeTitles);
-        if (sessionWebView != null) {
-            loadHomeSectionsInBrowser(homePaths, homeTitles, 0, new ArrayList<>(), startupRetry);
-            return;
-        }
+        // Cache I/O and Jsoup parsing can be expensive for large HTML files.
+        // Never do this work on Android's UI thread: it caused startup freezes
+        // and could trigger an ANR or process death on TV devices.
+        io.execute(() -> {
+            List<HomeSection> cached = new ArrayList<>();
+            int cachedFiles = 0;
+            long startedAt = android.os.SystemClock.elapsedRealtime();
+            for (int i = 0; i < homePaths.length; i++) {
+                byte[] bytes = diskCache.get("home|" + client.getMirror() + "|" + homePaths[i],
+                        7L * 24L * 60L * 60L * 1000L);
+                if (bytes == null || bytes.length == 0) continue;
+                cachedFiles++;
+                try {
+                    String html = new String(bytes, StandardCharsets.UTF_8);
+                    HomeSection section = new HomeSection(homeTitles[i], homePaths[i]);
+                    section.items.addAll(parseHomePosters(Jsoup.parse(html, client.getMirror() + "/")));
+                    if (!section.items.isEmpty()) cached.add(section);
+                } catch (Exception ignored) { }
+            }
+            removeHomeDuplicates(cached);
+            int total = countHomeCards(cached);
+            long elapsed = android.os.SystemClock.elapsedRealtime() - startedAt;
+            String diagnostic = String.format(java.util.Locale.ROOT,
+                    "Главная: файлов прочитано %d из %d; лент восстановлено %d; карточек восстановлено %d; чтение %.1f мс",
+                    cachedFiles, homePaths.length, cached.size(), total, (double) elapsed);
+            runOnUiThread(() -> {
+                homeCacheDiagnostic = diagnostic;
+                homeCacheDisplayed = total > 0;
+                if (homeCacheDisplayed) {
+                    setCatalogStatus("Постеров в кэше", total);
+                    renderHome(cached);
+                    progress.setVisibility(View.GONE);
+                    status.setText("Сохранённые ленты: " + cached.size() + " · обновление…");
+                }
+                if (sessionWebView != null) {
+                    loadHomeSectionsInBrowser(homePaths, homeTitles, 0, new ArrayList<>(), startupRetry);
+                } else {
+                    loadInitialCatalogFromHttp(homePaths, homeTitles);
+                }
+            });
+        });
+    }
+
+    private void loadInitialCatalogFromHttp(String[] homePaths, String[] homeTitles) {
         io.execute(() -> {
             try {
                 List<HomeSection> sections = new ArrayList<>();
                 for (int i = 0; i < homePaths.length; i++) {
                     String html = client.fetch(homePaths[i]);
-                    HomeSection section = new HomeSection(homeTitles[i], homePaths[i]);
                     if (html != null && !html.isEmpty()) {
                         diskCache.put("home|" + client.getMirror() + "|" + homePaths[i],
                                 html.getBytes(StandardCharsets.UTF_8));
                     }
+                    HomeSection section = new HomeSection(homeTitles[i], homePaths[i]);
                     section.items.addAll(parseHomePosters(Jsoup.parse(html, client.getMirror() + "/")));
                     sections.add(section);
                 }
                 removeHomeDuplicates(sections);
-                int total = 0;
-                for (HomeSection section : sections) total += section.items.size();
-                final int finalTotal = total;
+                int total = countHomeCards(sections);
                 runOnUiThread(() -> {
                     progress.setVisibility(View.GONE);
                     if (!homeCacheDisplayed) {
-                        setCatalogStatus("Постеров", finalTotal);
+                        setCatalogStatus("Постеров", total);
                         renderHome(sections);
                     }
                 });
@@ -211,41 +248,6 @@ public class MainActivity extends Activity {
                 });
             }
         });
-    }
-
-    private boolean loadHomeSectionsFromCache(String[] paths, String[] titles) {
-        long startedAt = android.os.SystemClock.elapsedRealtime();
-        List<HomeSection> cached = new ArrayList<>();
-        int cachedFiles = 0;
-        int restoredCards = 0;
-        for (int i = 0; i < paths.length; i++) {
-            byte[] bytes = diskCache.get("home|" + client.getMirror() + "|" + paths[i],
-                    7L * 24L * 60L * 60L * 1000L);
-            if (bytes == null || bytes.length == 0) continue;
-            cachedFiles++;
-            try {
-                String html = new String(bytes, StandardCharsets.UTF_8);
-                HomeSection section = new HomeSection(titles[i], paths[i]);
-                section.items.addAll(parseHomePosters(Jsoup.parse(html, client.getMirror() + "/")));
-                if (!section.items.isEmpty()) {
-                    restoredCards += section.items.size();
-                    cached.add(section);
-                }
-            } catch (Exception ignored) { }
-        }
-        removeHomeDuplicates(cached);
-        int total = 0;
-        for (HomeSection section : cached) total += section.items.size();
-        long elapsed = android.os.SystemClock.elapsedRealtime() - startedAt;
-        homeCacheDiagnostic = String.format(java.util.Locale.ROOT,
-                "Главная: файлов прочитано %d из %d; лент восстановлено %d; карточек восстановлено %d; чтение %.1f мс",
-                cachedFiles, paths.length, cached.size(), total, (double) elapsed);
-        if (total == 0) return false;
-        setCatalogStatus("Постеров в кэше", total);
-        renderHome(cached);
-        progress.setVisibility(View.GONE);
-        status.setText("Сохранённые ленты: " + cached.size() + " · обновление…");
-        return true;
     }
 
     private void loadHomeSectionsInBrowser(String[] paths, String[] titles, int index,
