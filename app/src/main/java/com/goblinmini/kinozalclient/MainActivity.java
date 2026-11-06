@@ -285,36 +285,51 @@ public class MainActivity extends Activity {
                 callback.accept(null);
                 return;
             }
+
             org.json.JSONArray requested = new org.json.JSONArray();
-            for (int i = 1; i < paths.length; i++) {
-                requested.put(paths[i]);
-            }
-            String script = "(function(){var p=" + requested.toString() + ";"
-                    + "return Promise.all(p.map(function(u){return fetch(u,{credentials:'include',"
-                    + "cache:'no-store'}).then(function(r){if(!r.ok)return '';return r.text();}"
-                    + ").catch(function(){return '';});})).then(function(a){return JSON.stringify(a);});})()";
+            for (int i = 1; i < paths.length; i++) requested.put(paths[i]);
+
             final boolean[] completed = {false};
-            Runnable timeout = () -> {
+            final Runnable[] timeoutHolder = {null};
+            web.addJavascriptInterface(new Object() {
+                @JavascriptInterface
+                public void onHomePagesResult(String json) {
+                    runOnUiThread(() -> {
+                        if (completed[0]) return;
+                        completed[0] = true;
+                        if (timeoutHolder[0] != null) browserHandler.removeCallbacks(timeoutHolder[0]);
+                        web.removeJavascriptInterface("KinozalHomeBridge");
+                        try {
+                            org.json.JSONArray array = new org.json.JSONArray(json);
+                            List<String> result = new ArrayList<>();
+                            result.add(firstHtml);
+                            for (int i = 0; i < array.length(); i++) {
+                                String html = array.optString(i, "");
+                                result.add(html);
+                            }
+                            callback.accept(result);
+                        } catch (Exception e) {
+                            callback.accept(null);
+                        }
+                    });
+                }
+            }, "KinozalHomeBridge");
+
+            timeoutHolder[0] = () -> {
                 if (completed[0]) return;
                 completed[0] = true;
+                web.removeJavascriptInterface("KinozalHomeBridge");
                 callback.accept(null);
             };
-            browserHandler.postDelayed(timeout, 35000);
-            web.evaluateJavascript(script, value -> {
-                if (completed[0]) return;
-                completed[0] = true;
-                browserHandler.removeCallbacks(timeout);
-                try {
-                    String json = new org.json.JSONArray("[" + value + "]").getString(0);
-                    org.json.JSONArray array = new org.json.JSONArray(json);
-                    List<String> result = new ArrayList<>();
-                    result.add(firstHtml);
-                    for (int i = 0; i < array.length(); i++) result.add(array.getString(i));
-                    callback.accept(result);
-                } catch (Exception e) {
-                    callback.accept(null);
-                }
-            });
+            browserHandler.postDelayed(timeoutHolder[0], 35000);
+
+            String script = "(function(){var p=" + requested.toString() + ";"
+                    + "Promise.all(p.map(function(u){return fetch(u,{credentials:'include',"
+                    + "cache:'no-store'}).then(function(r){if(!r.ok)return '';return r.text();}"
+                    + ").catch(function(){return '';});})).then(function(a){"
+                    + "window.KinozalHomeBridge.onHomePagesResult(JSON.stringify(a));"
+                    + "}).catch(function(e){window.KinozalHomeBridge.onHomePagesResult('[]');});})()";
+            web.evaluateJavascript(script, null);
         });
     }
 
