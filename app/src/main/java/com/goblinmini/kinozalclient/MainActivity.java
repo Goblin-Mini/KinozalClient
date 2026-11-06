@@ -139,11 +139,16 @@ public class MainActivity extends Activity {
                 continueStartup(savedBrowserCookies);
             });
         } catch (Exception e) {
-            client.setProxy(Proxy.NO_PROXY);
+            client.setProxy(blockedProxy());
             status.setText("SOCKS5 не запущен: " + safe(e.getMessage()));
             showMessage("Не удалось включить SOCKS5: " + safe(e.getMessage())
                     + "\\nПрямое подключение не используется.");
         }
+    }
+
+    private Proxy blockedProxy() {
+        // Fail closed if an enabled proxy cannot start; never silently fall back to direct traffic.
+        return new Proxy(Proxy.Type.HTTP, new java.net.InetSocketAddress("127.0.0.1", 1));
     }
 
     private void continueStartup(String savedBrowserCookies) {
@@ -203,7 +208,9 @@ public class MainActivity extends Activity {
                 try {
                     socks5Bridge.saveSettings(enabled.isChecked(), host.getText().toString(),
                             portValue, username.getText().toString(), password.getText().toString());
-                    Proxy local = enabled.isChecked() ? socks5Bridge.start() : Proxy.NO_PROXY;
+                    Proxy local;
+                    if (enabled.isChecked()) local = socks5Bridge.start();
+                    else { socks5Bridge.stop(); local = Proxy.NO_PROXY; }
                     if (enabled.isChecked() && !WebViewFeature.isFeatureSupported(WebViewFeature.PROXY_OVERRIDE)) {
                         socks5Bridge.stop();
                         throw new IllegalStateException("Обновите Android System WebView: нет поддержки прокси");
@@ -215,7 +222,7 @@ public class MainActivity extends Activity {
                         if (sessionWebView != null) loadInitialCatalog();
                     });
                 } catch (Exception e) {
-                    client.setProxy(Proxy.NO_PROXY);
+                    client.setProxy(enabled.isChecked() ? blockedProxy() : Proxy.NO_PROXY);
                     showMessage("Ошибка SOCKS5: " + safe(e.getMessage()));
                 }
             });
@@ -1181,7 +1188,7 @@ public class MainActivity extends Activity {
         mirrorButton.setOnClickListener(v -> { settingsDialog.dismiss(); chooseMirror(); });
         updates.setOnClickListener(v -> { settingsDialog.dismiss(); new UpdateManager(this).check(); });
         diagnostics.setOnClickListener(v -> { settingsDialog.dismiss(); showDiagnostics(); });
-        socks5.setOnClickListener(v -> showSocks5Settings());
+        socks5.setOnClickListener(v -> { settingsDialog.dismiss(); showSocks5Settings(); });
         jackett.setOnClickListener(v -> showJackettSettings());
         about.setOnClickListener(v -> showAbout());
         close.setOnClickListener(v -> settingsDialog.dismiss());
