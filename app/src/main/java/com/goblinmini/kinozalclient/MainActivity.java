@@ -2622,40 +2622,78 @@ public class MainActivity extends Activity {
             showMessage("На странице пока доступна только magnet-ссылка. Обработку magnet продолжим отдельно.");
             return;
         }
-        // Download the .torrent from download.php using the authenticated WebView
-        // session, so Kinozal cookies and the details-page referer are preserved.
+
         WebView web = sessionWebView;
         if (web == null) {
             downloadTorrentNative(data);
             return;
         }
+
+        // The hidden WebView may still be on the home/catalogue page on the
+        // first visit to a details card. Load the actual details page first:
+        // this establishes the correct same-origin context and Referer before
+        // requesting download.php. fetchBrowserPage waits for onPageFinished.
+        String detailsPage = data.sourcePage;
+        if (detailsPage == null || detailsPage.trim().isEmpty()) {
+            detailsPage = data.torrentLink;
+        }
+        fetchBrowserPage(detailsPage, null, html -> {
+            if (html == null || html.isEmpty()) {
+                downloadTorrentNative(data);
+                return;
+            }
+            startTorrentWebViewFetch(data, web, 0);
+        });
+    }
+
+    private void startTorrentWebViewFetch(TorrentDetails data, WebView web, int retry) {
+        final boolean[] completed = {false};
+        final Runnable fallback = () -> {
+            if (completed[0]) return;
+            completed[0] = true;
+            downloadTorrentNative(data);
+        };
+        final Runnable timeout = () -> fallback.run();
+        browserHandler.postDelayed(timeout, 20000);
+
         web.addJavascriptInterface(new Object() {
             @JavascriptInterface
             public void onTorrentDownloadResult(int statusCode, String base64, String error) {
                 runOnUiThread(() -> {
+                    if (completed[0]) return;
                     if (statusCode >= 200 && statusCode < 300 && base64 != null && !base64.isEmpty()) {
                         try {
                             byte[] bytes = android.util.Base64.decode(base64, android.util.Base64.DEFAULT);
-                            deliverTorrentBytes(data, bytes);
-                        } catch (Exception e) {
-                            showMessage("Не удалось прочитать торрент: " + safe(e.getMessage()));
-                        }
+                            if (bytes.length >= 20 && bytes[0] == 'd') {
+                                completed[0] = true;
+                                browserHandler.removeCallbacks(timeout);
+                                deliverTorrentBytes(data, bytes);
+                                return;
+                            }
+                        } catch (Exception ignored) { }
+                    }
+                    browserHandler.removeCallbacks(timeout);
+                    if (retry == 0) {
+                        // One fresh request handles transient first-load/session races.
+                        startTorrentWebViewFetch(data, web, 1);
                     } else {
-                        downloadTorrentNative(data);
+                        fallback.run();
                     }
                 });
             }
         }, "KinozalDownloadBridge");
+
         String url = org.json.JSONObject.quote(data.torrentLink);
-        String script = "(function(){fetch(" + url
-                + ",{credentials:'include',redirect:'follow',cache:'no-store'})"
+        String script = "(function(){try{"
+                + "fetch(" + url + ",{credentials:'include',redirect:'follow',cache:'no-store'})"
                 + ".then(function(r){if(!r.ok){window.KinozalDownloadBridge.onTorrentDownloadResult(r.status,'','HTTP '+r.status);return;}"
                 + "return r.blob().then(function(blob){var reader=new FileReader();"
                 + "reader.onloadend=function(){var value=String(reader.result||'');"
                 + "window.KinozalDownloadBridge.onTorrentDownloadResult(r.status,value.substring(value.indexOf(',')+1),'');};"
                 + "reader.onerror=function(){window.KinozalDownloadBridge.onTorrentDownloadResult(0,'','FileReader error');};"
                 + "reader.readAsDataURL(blob);});})"
-                + ".catch(function(e){window.KinozalDownloadBridge.onTorrentDownloadResult(0,'',String(e));});})()";
+                + ".catch(function(e){window.KinozalDownloadBridge.onTorrentDownloadResult(0,'',String(e));});"
+                + "}catch(e){window.KinozalDownloadBridge.onTorrentDownloadResult(0,'',String(e));}})()";
         web.evaluateJavascript(script, null);
     }
 
