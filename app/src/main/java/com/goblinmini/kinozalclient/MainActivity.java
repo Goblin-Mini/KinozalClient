@@ -82,6 +82,7 @@ public class MainActivity extends Activity {
     private boolean startupCatalogReady = false;
     private boolean startupCatalogStarted = false;
     private boolean automaticUpdateCheckScheduled = false;
+    private volatile String lastBrowserError = "Причина пока не определена";
     private interface BrowserPageCallback { void onPage(String html, String error); }
     private final java.util.LinkedHashMap<String, String> pageCache =
             new java.util.LinkedHashMap<String, String>(12, 0.75f, true) {
@@ -233,7 +234,7 @@ public class MainActivity extends Activity {
                 } else {
                     progress.setVisibility(View.GONE);
                     status.setText("Нет соединения");
-                    addEmpty("Не удалось загрузить главную страницу через сохранённую браузерную сессию.");
+                    addEmpty("Не удалось загрузить главную страницу. Причина: " + safe(lastBrowserError));
                 }
                 return;
             }
@@ -271,6 +272,8 @@ public class MainActivity extends Activity {
     private void fetchBrowserPages(String[] paths, java.util.function.Consumer<List<String>> callback) {
         fetchBrowserPage(paths[0], null, firstHtml -> {
             if (firstHtml == null || firstHtml.isEmpty()) {
+                if (lastBrowserError == null || lastBrowserError.isEmpty())
+                    lastBrowserError = "Первый запрос novinki.php не вернул HTML";
                 callback.accept(null);
                 return;
             }
@@ -309,6 +312,7 @@ public class MainActivity extends Activity {
                             }
                             callback.accept(result);
                         } catch (Exception e) {
+                            lastBrowserError = "Ошибка разбора ответа JS-моста: " + e.getMessage();
                             callback.accept(null);
                         }
                     });
@@ -319,6 +323,7 @@ public class MainActivity extends Activity {
                 if (completed[0]) return;
                 completed[0] = true;
                 web.removeJavascriptInterface("KinozalHomeBridge");
+                lastBrowserError = "Тайм-аут параллельных запросов (35 секунд)";
                 callback.accept(null);
             };
             browserHandler.postDelayed(timeoutHolder[0], 35000);
@@ -1419,6 +1424,38 @@ public class MainActivity extends Activity {
             @Override public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
                 return request.isForMainFrame() && !isMirror(request.getUrl());
             }
+            @Override public void onReceivedError(WebView view, WebResourceRequest request,
+                    android.webkit.WebResourceError error) {
+                super.onReceivedError(view, request, error);
+                if (request.isForMainFrame() && pendingBrowserCallback != null) {
+                    lastBrowserError = "Ошибка WebView: " + error.getErrorCode() + " "
+                            + error.getDescription() + "; URL: " + request.getUrl();
+                    BrowserPageCallback cb = pendingBrowserCallback;
+                    pendingBrowserCallback = null;
+                    cb.onPage(null, lastBrowserError);
+                }
+            }
+            @Override public void onReceivedHttpError(WebView view, WebResourceRequest request,
+                    android.webkit.WebResourceResponse response) {
+                super.onReceivedHttpError(view, request, response);
+                if (request.isForMainFrame() && pendingBrowserCallback != null) {
+                    lastBrowserError = "HTTP " + response.getStatusCode() + " "
+                            + response.getReasonPhrase() + "; URL: " + request.getUrl();
+                    BrowserPageCallback cb = pendingBrowserCallback;
+                    pendingBrowserCallback = null;
+                    cb.onPage(null, lastBrowserError);
+                }
+            }
+            @Override public void onReceivedSslError(WebView view,
+                    android.webkit.SslErrorHandler handler, android.net.http.SslError error) {
+                handler.cancel();
+                if (pendingBrowserCallback != null) {
+                    lastBrowserError = "Ошибка SSL: " + error.toString();
+                    BrowserPageCallback cb = pendingBrowserCallback;
+                    pendingBrowserCallback = null;
+                    cb.onPage(null, lastBrowserError);
+                }
+            }
             @Override public void onPageFinished(WebView view, String url) {
                 super.onPageFinished(view, url);
                 if (pendingBrowserCallback != null) {
@@ -1429,16 +1466,19 @@ public class MainActivity extends Activity {
                         try { html = new org.json.JSONArray("[" + value + "]").getString(0); }
                         catch (Exception ignored) { }
                         if (html.isEmpty()) {
-                            cb.onPage(null, "Пустая страница браузера");
+                            lastBrowserError = "WebView завершил загрузку, но DOM пустой. URL: " + url;
+                            cb.onPage(null, lastBrowserError);
                             return;
                         }
                         Document loaded = Jsoup.parse(html);
                         boolean loginForm = !loaded.select("form:has(input[type=password])").isEmpty();
                         String pageUrl = view.getUrl() == null ? "" : view.getUrl().toLowerCase(java.util.Locale.ROOT);
                         if (loginForm || pageUrl.contains("login.php") || pageUrl.contains("takelogin.php")) {
-                            cb.onPage(null, "Сессия Kinozal не активна: сайт снова показывает форму входа. Откройте «Авторизация» и войдите.");
+                            lastBrowserError = "Сайт перенаправил на авторизацию. URL: " + view.getUrl();
+                            cb.onPage(null, lastBrowserError);
                             return;
                         }
+                        lastBrowserError = "Первичная страница загружена: " + url + ", HTML=" + html.length() + " символов";
                         cb.onPage(html, null);
                     });
                 }
