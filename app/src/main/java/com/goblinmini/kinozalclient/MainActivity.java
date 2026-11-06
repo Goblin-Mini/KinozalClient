@@ -1519,6 +1519,12 @@ public class MainActivity extends Activity {
         LinearLayout.LayoutParams watchParams = new LinearLayout.LayoutParams(-1, dp(48));
         watchParams.bottomMargin = dp(10);
         posterColumn.addView(watch, watchParams);
+        Button diagnostics = button("Журнал диагностики");
+        diagnostics.setTextSize(12);
+        diagnostics.setOnClickListener(v -> showPlaybackDiagnostics());
+        LinearLayout.LayoutParams diagnosticsParams = new LinearLayout.LayoutParams(-1, dp(40));
+        diagnosticsParams.bottomMargin = dp(8);
+        posterColumn.addView(diagnostics, diagnosticsParams);
 
         ImageView poster = new ImageView(this);
         poster.setScaleType(ImageView.ScaleType.FIT_CENTER);
@@ -1613,11 +1619,11 @@ public class MainActivity extends Activity {
         AlertDialog dialog = new AlertDialog.Builder(this)
                 .setView(root)
                 .create();
-        // Keep the details dialog open. Launching a torrent handler must not
-        // dismiss the user's current page or permanently disable the Watch button.
-        // Post the hand-off to the main queue so it runs after the click/focus event.
         watch.setOnClickListener(v -> {
-            Toast.makeText(this, "Передача ссылки на воспроизведение…", Toast.LENGTH_SHORT).show();
+            playbackLog("WATCH_CLICK title=" + safe(data.title)
+                    + " linkType=" + (data.torrentLink == null ? "null"
+                    : data.torrentLink.startsWith("magnet:") ? "magnet" : "torrent"));
+            Toast.makeText(this, "Нажатие «Просмотр» получено", Toast.LENGTH_SHORT).show();
             v.post(() -> playTorrent(data));
         });
         dialog.show();
@@ -1655,7 +1661,54 @@ public class MainActivity extends Activity {
         }
     }
 
+    private java.io.File playbackLogFile() {
+        return new java.io.File(getFilesDir(), "playback-diagnostics.txt");
+    }
+
+    private void playbackLog(String message) {
+        String line = new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS",
+                java.util.Locale.US).format(new java.util.Date()) + " " + message + "\n";
+        android.util.Log.i("KinozalPlayback", message);
+        try (java.io.FileOutputStream out = new java.io.FileOutputStream(playbackLogFile(), true)) {
+            out.write(line.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        } catch (Exception e) {
+            android.util.Log.e("KinozalPlayback", "Cannot write diagnostic log", e);
+        }
+    }
+
+    private void showPlaybackDiagnostics() {
+        try {
+            java.io.File file = playbackLogFile();
+            String report = file.exists()
+                    ? new String(java.nio.file.Files.readAllBytes(file.toPath()), java.nio.charset.StandardCharsets.UTF_8)
+                    : "Журнал пока пуст.";
+            TextView body = text(report, 12, Color.WHITE, false);
+            body.setTextIsSelectable(true);
+            ScrollView scroll = new ScrollView(this);
+            scroll.addView(body);
+            new AlertDialog.Builder(this).setTitle("Диагностика запуска")
+                    .setView(scroll)
+                    .setPositiveButton("Копировать", (d, w) -> {
+                        android.content.ClipboardManager clipboard =
+                                (android.content.ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
+                        clipboard.setPrimaryClip(android.content.ClipData.newPlainText("Kinozal diagnostics", report));
+                        Toast.makeText(this, "Журнал скопирован", Toast.LENGTH_SHORT).show();
+                    })
+                    .setNegativeButton("Закрыть", null)
+                    .setNeutralButton("Очистить", (d, w) -> {
+                        playbackLogFile().delete();
+                        Toast.makeText(this, "Журнал очищен", Toast.LENGTH_SHORT).show();
+                    }).show();
+        } catch (Exception e) {
+            showMessage("Не удалось открыть журнал: " + safe(e.getMessage()));
+        }
+    }
+
     private void playTorrent(TorrentDetails data) {
+        playbackLog("PLAY_ENTER title=" + safe(data.title)
+                + " source=" + safe(data.sourcePage)
+                + " linkType=" + (data.torrentLink == null ? "null"
+                : data.torrentLink.startsWith("magnet:") ? "magnet" : "torrent"));
         if (data.torrentLink == null || data.torrentLink.isEmpty()) {
             showMessage("Не удалось найти ссылку на торрент на странице раздачи.");
             return;
@@ -1665,11 +1718,22 @@ public class MainActivity extends Activity {
             intent.putExtra("poster", data.poster == null ? "" : data.poster);
             intent.putExtra("title", data.title == null ? "" : data.title);
             try {
+                android.content.pm.PackageManager pm = getPackageManager();
+                java.util.List<android.content.pm.ResolveInfo> handlers =
+                        pm.queryIntentActivities(intent, android.content.pm.PackageManager.MATCH_DEFAULT_ONLY);
+                playbackLog("MAGNET_RESOLVE handlers=" + handlers.size()
+                        + " default=" + (intent.resolveActivity(pm) != null));
+                for (android.content.pm.ResolveInfo ri : handlers) {
+                    playbackLog("MAGNET_HANDLER " + ri.activityInfo.packageName + "/" + ri.activityInfo.name);
+                }
                 // Let Android resolve the URI to any compatible torrent client.
                 startActivity(intent);
+                playbackLog("MAGNET_START_ACTIVITY_RETURNED");
             } catch (android.content.ActivityNotFoundException e) {
+                playbackLog("MAGNET_NO_HANDLER " + e);
                 showMessage("Не найдено приложение, которое умеет открывать magnet-ссылки.");
             } catch (Exception e) {
+                playbackLog("MAGNET_START_ERROR " + e);
                 showMessage("Не удалось передать magnet-ссылку: " + safe(e.getMessage()));
             }
             return;
@@ -1678,6 +1742,8 @@ public class MainActivity extends Activity {
         // Download through the same WebView session that opened the details page.
         // This preserves Cloudflare/session cookies and the real details-page Referer.
         WebView web = sessionWebView;
+        playbackLog("TORRENT_FETCH path=" + (web != null ? "webview" : "native")
+                + " webView=" + (web != null) + " urlHost=" + safe(hostOf(data.torrentLink)));
         if (web != null) {
             // evaluateJavascript does not await a returned Promise. Use a JS bridge
             // so the response is delivered only after the authenticated fetch finishes.
@@ -1685,6 +1751,9 @@ public class MainActivity extends Activity {
                 @JavascriptInterface
                 public void onTorrentResult(int statusCode, String base64, String error) {
                     runOnUiThread(() -> {
+                        playbackLog("WEB_FETCH_RESULT http=" + statusCode
+                                + " base64Length=" + (base64 == null ? -1 : base64.length())
+                                + " error=" + safe(error));
                         if (statusCode >= 200 && statusCode < 300 && base64 != null && !base64.isEmpty()) {
                             try {
                                 byte[] bytes = android.util.Base64.decode(base64, android.util.Base64.DEFAULT);
@@ -1716,7 +1785,12 @@ public class MainActivity extends Activity {
         }
     }
 
+    private String hostOf(String value) {
+        try { return Uri.parse(value).getHost(); } catch (Exception e) { return "unknown"; }
+    }
+
     private void downloadTorrentNative(TorrentDetails data) {
+        playbackLog("NATIVE_FETCH_BEGIN host=" + safe(hostOf(data.torrentLink)));
         io.execute(() -> {
             try {
                 String browserCookies = CookieManager.getInstance().getCookie(client.getMirror());
@@ -1727,8 +1801,10 @@ public class MainActivity extends Activity {
                         "application/x-bittorrent,application/octet-stream,*/*",
                         data.sourcePage == null || data.sourcePage.isEmpty()
                                 ? client.getMirror() + "/" : data.sourcePage);
+                playbackLog("NATIVE_FETCH_OK bytes=" + (bytes == null ? -1 : bytes.length));
                 deliverTorrentBytes(data, bytes);
             } catch (Exception e) {
+                playbackLog("NATIVE_FETCH_ERROR " + e);
                 runOnUiThread(() -> showMessage("Не удалось передать торрент: " + safe(e.getMessage())));
             }
         });
@@ -1736,6 +1812,8 @@ public class MainActivity extends Activity {
 
     private void deliverTorrentBytes(TorrentDetails data, byte[] bytes) {
         try {
+            playbackLog("DELIVER_BYTES length=" + (bytes == null ? -1 : bytes.length)
+                    + " bencode=" + (bytes != null && bytes.length > 0 && bytes[0] == 'd'));
             if (bytes == null || bytes.length < 20 || bytes[0] != 'd') {
                 throw new java.io.IOException("Сайт вернул не .torrent-файл. Возможно, сессия истекла или зеркало отклонило запрос.");
             }
@@ -1760,16 +1838,22 @@ public class MainActivity extends Activity {
             send.setClipData(android.content.ClipData.newUri(getContentResolver(), "torrent", fileUri));
             runOnUiThread(() -> {
                 try {
+                    playbackLog("TORRENT_VIEW_INTENT uri=" + fileUri);
                     startActivity(view);
+                    playbackLog("TORRENT_VIEW_START_ACTIVITY_RETURNED");
                 } catch (android.content.ActivityNotFoundException firstError) {
+                    playbackLog("TORRENT_VIEW_NO_HANDLER " + firstError);
                     try {
                         startActivity(send);
+                        playbackLog("TORRENT_SEND_START_ACTIVITY_RETURNED");
                     } catch (android.content.ActivityNotFoundException secondError) {
+                        playbackLog("TORRENT_SEND_NO_HANDLER " + secondError);
                         showMessage("Не найдено приложение для открытия торрент-файлов.");
                     } catch (Exception e) {
                         showMessage("Не удалось передать торрент: " + safe(e.getMessage()));
                     }
                 } catch (Exception e) {
+                    playbackLog("TORRENT_VIEW_START_ERROR " + e);
                     showMessage("Не удалось открыть торрент: " + safe(e.getMessage()));
                 }
             });
