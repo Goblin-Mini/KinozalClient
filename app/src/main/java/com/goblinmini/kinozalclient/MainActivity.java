@@ -668,6 +668,7 @@ public class MainActivity extends Activity {
         });
 
         addMenu("★", "Избранное", () -> showFavorites());
+        addMenu("◷", "Недавно смотрели", () -> showRecentlyViewed());
         addMenu("⚙", "Настройки", () -> showSettings());
         status = text("Подключение…", 11, TEAL, false);
         status.setGravity(Gravity.CENTER);
@@ -1670,6 +1671,65 @@ public class MainActivity extends Activity {
     }
 
 
+    private static final String RECENTLY_VIEWED_KEY = "recently_viewed";
+
+    private java.util.LinkedHashMap<String, Torrent> readRecentlyViewed() {
+        java.util.LinkedHashMap<String, Torrent> result = new java.util.LinkedHashMap<>();
+        String raw = getSharedPreferences(PREFS, MODE_PRIVATE).getString(RECENTLY_VIEWED_KEY, "[]");
+        try {
+            org.json.JSONArray array = new org.json.JSONArray(raw);
+            for (int i = 0; i < array.length(); i++) {
+                org.json.JSONObject o = array.optJSONObject(i);
+                if (o == null) continue;
+                Torrent t = new Torrent();
+                t.title = o.optString("title", "");
+                t.href = o.optString("href", "");
+                t.size = o.optString("size", "—");
+                t.seeds = o.optString("seeds", "—");
+                t.leeches = o.optString("leeches", "—");
+                t.uploaded = o.optString("uploaded", "—");
+                if (!t.href.isEmpty()) result.put(t.href, t);
+            }
+        } catch (Exception ignored) { }
+        return result;
+    }
+
+    private void saveRecentlyViewed(Torrent torrent) {
+        if (torrent == null || torrent.href == null || torrent.href.isEmpty()) return;
+        java.util.LinkedHashMap<String, Torrent> recent = readRecentlyViewed();
+        recent.remove(torrent.href);
+        recent.put(torrent.href, torrent);
+        while (recent.size() > 30) {
+            String oldest = recent.keySet().iterator().next();
+            recent.remove(oldest);
+        }
+        org.json.JSONArray array = new org.json.JSONArray();
+        java.util.List<Torrent> values = new java.util.ArrayList<>(recent.values());
+        for (int i = values.size() - 1; i >= 0; i--) {
+            Torrent t = values.get(i);
+            org.json.JSONObject o = new org.json.JSONObject();
+            try {
+                o.put("title", t.title); o.put("href", t.href); o.put("size", t.size);
+                o.put("seeds", t.seeds); o.put("leeches", t.leeches); o.put("uploaded", t.uploaded);
+                array.put(o);
+            } catch (Exception ignored) { }
+        }
+        getSharedPreferences(PREFS, MODE_PRIVATE).edit()
+                .putString(RECENTLY_VIEWED_KEY, array.toString()).apply();
+    }
+
+    private void showRecentlyViewed() {
+        currentPath = "local:recently-viewed";
+        currentTitle = "Недавно смотрели";
+        heading.setText(currentTitle);
+        java.util.List<Torrent> saved = new java.util.ArrayList<>(readRecentlyViewed().values());
+        java.util.Collections.reverse(saved);
+        list.removeAllViews();
+        setCatalogStatus("Недавно смотрели", saved.size());
+        if (saved.isEmpty()) addEmpty("Здесь появятся открытые вами раздачи.");
+        else renderTorrents(saved);
+    }
+
     private static class TorrentDetails {
         String title = "", poster = "", torrentLink = "", sourcePage = "";
         String imdbRating = "—", kinopoiskRating = "—", kinozalRating = "—", kinozalStars = "☆☆☆☆☆☆☆☆☆☆", kinozalVotes = "";
@@ -1688,6 +1748,7 @@ public class MainActivity extends Activity {
                 try {
                     Document doc = Jsoup.parse(html, t.href);
                     TorrentDetails details = parseTorrentDetails(doc, t);
+                    saveRecentlyViewed(t);
                     showTorrentDetails(t, details);
                 } catch (Exception e) {
                     showMessage("Не удалось разобрать карточку: " + safe(e.getMessage()));
@@ -1702,6 +1763,7 @@ public class MainActivity extends Activity {
                 TorrentDetails details = parseTorrentDetails(doc, t);
                 runOnUiThread(() -> {
                     progress.setVisibility(View.GONE);
+                    saveRecentlyViewed(t);
                     showTorrentDetails(t, details);
                 });
             } catch (Exception e) {
@@ -1868,6 +1930,11 @@ public class MainActivity extends Activity {
         kinozalRating.setGravity(Gravity.CENTER);
         kinozalRating.setPadding(0, dp(3), 0, 0);
         ratings.addView(kinozalRating, new LinearLayout.LayoutParams(-1, -2));
+
+        TextView stars = text(data.kinozalStars, 13, GOLD, true);
+        stars.setGravity(Gravity.CENTER);
+        stars.setPadding(0, dp(3), 0, 0);
+        ratings.addView(stars, new LinearLayout.LayoutParams(-1, -2));
 
         posterColumn.addView(ratings, new LinearLayout.LayoutParams(-1, -2));
         LinearLayout.LayoutParams posterParams = new LinearLayout.LayoutParams(dp(190), -1);
