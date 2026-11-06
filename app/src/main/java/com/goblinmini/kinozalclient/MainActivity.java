@@ -812,9 +812,10 @@ public class MainActivity extends Activity {
         Button login = button("◎   Авторизация / проверка Kinozal");
         Button mirrorButton = button("◇   Выбрать зеркало");
         Button updates = button("↻   Проверить обновления");
+        Button jackett = button("⌕   Поиск Jackett");
         Button about = button("ⓘ   О приложении");
         Button close = button("Закрыть");
-        for (Button action : new Button[]{login, mirrorButton, updates, about, close}) {
+        for (Button action : new Button[]{login, mirrorButton, updates, jackett, about, close}) {
             action.setTextSize(15);
             action.setGravity(Gravity.CENTER);
             LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-1, dp(48));
@@ -824,6 +825,7 @@ public class MainActivity extends Activity {
         login.setOnClickListener(v -> { settingsDialog.dismiss(); showLogin(); });
         mirrorButton.setOnClickListener(v -> { settingsDialog.dismiss(); chooseMirror(); });
         updates.setOnClickListener(v -> { settingsDialog.dismiss(); new UpdateManager(this).check(); });
+        jackett.setOnClickListener(v -> showJackettSettings());
         about.setOnClickListener(v -> showAbout());
         close.setOnClickListener(v -> settingsDialog.dismiss());
         settingsDialog = new AlertDialog.Builder(this).setView(panel).create();
@@ -881,6 +883,220 @@ public class MainActivity extends Activity {
         github.setOnFocusChangeListener((v, focused) ->
                 github.setTextColor(focused ? GOLD : TEAL));
         github.requestFocus();
+    }
+
+    private static final String JACKETT_PREFS = "jackett_settings";
+
+    private String jackettPrimary() {
+        return getSharedPreferences(JACKETT_PREFS, MODE_PRIVATE)
+                .getString("primary", "https://jac.red").trim();
+    }
+
+    private String jackettBackup() {
+        return getSharedPreferences(JACKETT_PREFS, MODE_PRIVATE)
+                .getString("backup", "https://jr.maxvol.pro").trim();
+    }
+
+    private String jackettCustom() {
+        return getSharedPreferences(JACKETT_PREFS, MODE_PRIVATE)
+                .getString("custom", "").trim();
+    }
+
+    private String jackettApiKey() {
+        return getSharedPreferences(JACKETT_PREFS, MODE_PRIVATE)
+                .getString("apikey", "").trim();
+    }
+
+    private void showJackettSettings() {
+        LinearLayout panel = new LinearLayout(this);
+        panel.setOrientation(LinearLayout.VERTICAL);
+        panel.setPadding(dp(18), dp(10), dp(18), dp(8));
+        panel.setBackgroundColor(BG);
+        EditText primary = new EditText(this);
+        EditText backup = new EditText(this);
+        EditText custom = new EditText(this);
+        EditText key = new EditText(this);
+        EditText[] fields = {primary, backup, custom, key};
+        String[] labels = {"Основной сервер", "Резервный сервер", "Свой сервер (необязательно)", "API Key"};
+        String[] values = {jackettPrimary(), jackettBackup(), jackettCustom(), jackettApiKey()};
+        for (int i = 0; i < fields.length; i++) {
+            TextView label = text(labels[i], 13, TEAL, true);
+            label.setPadding(0, dp(5), 0, dp(2));
+            panel.addView(label);
+            EditText field = fields[i];
+            field.setSingleLine(true);
+            field.setText(values[i]);
+            field.setTextColor(Color.WHITE);
+            field.setHintTextColor(TEAL);
+            field.setTextSize(14);
+            field.setPadding(dp(10), dp(7), dp(10), dp(7));
+            field.setBackground(shape(PANEL, TEAL));
+            if (i == 3) field.setInputType(android.text.InputType.TYPE_CLASS_TEXT
+                    | android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD);
+            panel.addView(field, new LinearLayout.LayoutParams(-1, dp(44)));
+        }
+        TextView note = text("Используется Torznab API. Для публичных серверов может потребоваться их API Key.",
+                12, Color.LTGRAY, false);
+        note.setPadding(0, dp(8), 0, 0);
+        panel.addView(note);
+        AlertDialog dialog = new AlertDialog.Builder(this)
+                .setTitle("Поиск Jackett")
+                .setView(panel)
+                .setPositiveButton("Сохранить", null)
+                .setNegativeButton("Отмена", null)
+                .create();
+        dialog.setOnShowListener(v -> {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setTextColor(GOLD);
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(button -> {
+                String p = primary.getText().toString().trim();
+                String b = backup.getText().toString().trim();
+                String c = custom.getText().toString().trim();
+                if (!validJackettBase(p) || !validJackettBase(b)
+                        || (!c.isEmpty() && !validJackettBase(c))) {
+                    showMessage("Укажите корректные адреса серверов с http:// или https://");
+                    return;
+                }
+                getSharedPreferences(JACKETT_PREFS, MODE_PRIVATE).edit()
+                        .putString("primary", p.replaceAll("/+$", ""))
+                        .putString("backup", b.replaceAll("/+$", ""))
+                        .putString("custom", c.replaceAll("/+$", ""))
+                        .putString("apikey", key.getText().toString().trim()).apply();
+                dialog.dismiss();
+                showMessage("Настройки Jackett сохранены");
+            });
+        });
+        dialog.show();
+        if (dialog.getWindow() != null) {
+            dialog.getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(BG));
+            dialog.getWindow().setLayout(Math.min(dp(560),
+                    getResources().getDisplayMetrics().widthPixels - dp(48)),
+                    ViewGroup.LayoutParams.WRAP_CONTENT);
+        }
+    }
+
+    private boolean validJackettBase(String value) {
+        try {
+            Uri uri = Uri.parse(value);
+            return ("https".equalsIgnoreCase(uri.getScheme())
+                    || "http".equalsIgnoreCase(uri.getScheme()))
+                    && uri.getHost() != null;
+        } catch (Exception ignored) { return false; }
+    }
+
+    private void searchJackett(String query) {
+        if (jackettApiKey().isEmpty()) {
+            showMessage("Сначала укажите API Key в Настройки → Поиск Jackett.");
+            showJackettSettings();
+            return;
+        }
+        LinearLayout panel = new LinearLayout(this);
+        panel.setOrientation(LinearLayout.VERTICAL);
+        panel.setPadding(dp(12), dp(8), dp(12), dp(8));
+        panel.setBackgroundColor(BG);
+        TextView status = text("Поиск: " + query + "\\nПодключение к Jackett…", 13, TEAL, false);
+        panel.addView(status);
+        ScrollView scroll = new ScrollView(this);
+        LinearLayout results = new LinearLayout(this);
+        results.setOrientation(LinearLayout.VERTICAL);
+        scroll.addView(results);
+        panel.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1));
+        AlertDialog dialog = new AlertDialog.Builder(this).setTitle("Другие раздачи")
+                .setView(panel).setNegativeButton("Закрыть", null).create();
+        dialog.show();
+        if (dialog.getWindow() != null) {
+            dialog.getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(BG));
+            dialog.getWindow().setLayout(ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.MATCH_PARENT);
+        }
+        io.execute(() -> {
+            String[] servers = !jackettCustom().isEmpty()
+                    ? new String[]{jackettCustom()}
+                    : new String[]{jackettPrimary(), jackettBackup()};
+            List<Element> found = new ArrayList<>();
+            String used = null;
+            String error = "Серверы не ответили";
+            for (String server : servers) {
+                try {
+                    String encoded = URLEncoder.encode(query, "UTF-8");
+                    String endpoint = server.replaceAll("/+$", "")
+                            + "/api/v2.0/indexers/all/results/torznab/api?apikey="
+                            + URLEncoder.encode(jackettApiKey(), "UTF-8")
+                            + "&t=search&q=" + encoded;
+                    java.net.HttpURLConnection connection =
+                            (java.net.HttpURLConnection) new java.net.URL(endpoint).openConnection();
+                    connection.setConnectTimeout(9000);
+                    connection.setReadTimeout(18000);
+                    connection.setRequestMethod("GET");
+                    connection.setRequestProperty("Accept", "application/xml, text/xml");
+                    int code = connection.getResponseCode();
+                    if (code < 200 || code >= 300) {
+                        error = "HTTP " + code + " от " + server;
+                        connection.disconnect();
+                        continue;
+                    }
+                    java.io.InputStream input = connection.getInputStream();
+                    StringBuilder xml = new StringBuilder();
+                    byte[] buffer = new byte[8192];
+                    int count;
+                    while ((count = input.read(buffer)) != -1) xml.append(new String(buffer, 0, count, StandardCharsets.UTF_8));
+                    input.close();
+                    connection.disconnect();
+                    Document rss = Jsoup.parse(xml.toString(), "", org.jsoup.parser.Parser.xmlParser());
+                    found = new ArrayList<>(rss.select("item"));
+                    used = server;
+                    break;
+                } catch (Exception e) {
+                    error = safe(e.getMessage());
+                }
+            }
+            final List<Element> items = found;
+            final String serverUsed = used;
+            final String failure = error;
+            runOnUiThread(() -> {
+                results.removeAllViews();
+                if (serverUsed == null) {
+                    status.setText("Не удалось выполнить поиск. " + failure
+                            + "\\nПроверьте адрес сервера и API Key в настройках.");
+                    return;
+                }
+                status.setText("Найдено: " + items.size() + " · " + serverUsed);
+                if (items.isEmpty()) {
+                    results.addView(text("По этому названию ничего не найдено.", 14, Color.LTGRAY, false));
+                    return;
+                }
+                for (Element item : items) {
+                    String name = item.selectFirst("title") == null ? "Без названия" : item.selectFirst("title").text();
+                    String size = item.selectFirst("size") == null ? "—" : item.selectFirst("size").text();
+                    String seeders = item.selectFirst("seeders") == null ? "—" : item.selectFirst("seeders").text();
+                    String peers = item.selectFirst("peers") == null ? "—" : item.selectFirst("peers").text();
+                    String tracker = item.selectFirst("jackettindexer") == null ? "" : item.selectFirst("jackettindexer").text();
+                    Element link = item.selectFirst("link");
+                    String target = link == null ? "" : link.text().trim();
+                    if (target.isEmpty() && link != null) target = link.attr("href");
+                    if (target.isEmpty()) {
+                        Element enclosure = item.selectFirst("enclosure");
+                        if (enclosure != null) target = enclosure.attr("url");
+                    }
+                    LinearLayout row = new LinearLayout(this);
+                    row.setOrientation(LinearLayout.VERTICAL);
+                    row.setPadding(dp(10), dp(8), dp(10), dp(8));
+                    row.setBackground(shape(PANEL, 0));
+                    row.setFocusable(true);
+                    TextView titleView = text(name, 14, Color.WHITE, true);
+                    row.addView(titleView);
+                    row.addView(text((tracker.isEmpty() ? "" : tracker + " · ")
+                            + "Размер: " + size + " · Сиды: " + seeders + " · Пиры: " + peers,
+                            11, TEAL, false));
+                    if (!target.isEmpty()) row.setOnClickListener(v -> {
+                        try { startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(target))); }
+                        catch (Exception e) { showMessage("Не удалось открыть ссылку результата."); }
+                    });
+                    LinearLayout.LayoutParams rowParams = new LinearLayout.LayoutParams(-1, -2);
+                    rowParams.bottomMargin = dp(6);
+                    results.addView(row, rowParams);
+                }
+            });
+        });
     }
 
     private void addMenu(String icon, String label, Runnable action) {
@@ -2080,10 +2296,14 @@ public class MainActivity extends Activity {
         tabs.setOrientation(LinearLayout.HORIZONTAL);
         Button descriptionTab = button("Описание");
         Button technicalTab = button("Техданные");
+        Button jackettTab = button("Другие раздачи");
         tabs.addView(descriptionTab, new LinearLayout.LayoutParams(0, dp(44), 1));
         LinearLayout.LayoutParams technicalParams = new LinearLayout.LayoutParams(0, dp(44), 1);
         technicalParams.leftMargin = dp(6);
         tabs.addView(technicalTab, technicalParams);
+        LinearLayout.LayoutParams jackettParams = new LinearLayout.LayoutParams(0, dp(44), 1);
+        jackettParams.leftMargin = dp(6);
+        tabs.addView(jackettTab, jackettParams);
         detailsColumn.addView(tabs);
 
         ScrollView detailsScroll = new ScrollView(this);
@@ -2152,6 +2372,7 @@ public class MainActivity extends Activity {
                 v.setBackground(shape(focused ? Color.rgb(65, 72, 73) : PANEL, focused ? GOLD : 0)));
         descriptionTab.setOnClickListener(v -> { active[0] = 0; render.run(); });
         technicalTab.setOnClickListener(v -> { active[0] = 1; render.run(); });
+        jackettTab.setOnClickListener(v -> searchJackett(torrent.title));
         render.run();
 
         watch.setOnClickListener(v -> playTorrent(data));
