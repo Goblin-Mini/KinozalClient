@@ -83,6 +83,7 @@ public class MainActivity extends Activity {
     private boolean startupCatalogStarted = false;
     private boolean automaticUpdateCheckScheduled = false;
     private boolean homeCacheDisplayed = false;
+    private String homeCacheDiagnostic = "Кэш главной ещё не проверялся";
 
     private volatile String lastBrowserError = "Причина пока не определена";
     private interface BrowserPageCallback { void onPage(String html, String error); }
@@ -182,12 +183,12 @@ public class MainActivity extends Activity {
                 for (int i = 0; i < homePaths.length; i++) {
                     String html = client.fetch(homePaths[i]);
                     HomeSection section = new HomeSection(homeTitles[i], homePaths[i]);
-                    section.items.addAll(parseHomePosters(Jsoup.parse(html, client.getMirror() + "/")));
-                    sections.add(section);
-                    if (!section.items.isEmpty()) {
+                    if (html != null && !html.isEmpty()) {
                         diskCache.put("home|" + client.getMirror() + "|" + homePaths[i],
                                 html.getBytes(StandardCharsets.UTF_8));
                     }
+                    section.items.addAll(parseHomePosters(Jsoup.parse(html, client.getMirror() + "/")));
+                    sections.add(section);
                 }
                 removeHomeDuplicates(sections);
                 int total = 0;
@@ -213,26 +214,37 @@ public class MainActivity extends Activity {
     }
 
     private boolean loadHomeSectionsFromCache(String[] paths, String[] titles) {
+        long startedAt = android.os.SystemClock.elapsedRealtime();
         List<HomeSection> cached = new ArrayList<>();
+        int cachedFiles = 0;
+        int restoredCards = 0;
         for (int i = 0; i < paths.length; i++) {
             byte[] bytes = diskCache.get("home|" + client.getMirror() + "|" + paths[i],
                     7L * 24L * 60L * 60L * 1000L);
             if (bytes == null || bytes.length == 0) continue;
+            cachedFiles++;
             try {
                 String html = new String(bytes, StandardCharsets.UTF_8);
                 HomeSection section = new HomeSection(titles[i], paths[i]);
                 section.items.addAll(parseHomePosters(Jsoup.parse(html, client.getMirror() + "/")));
-                if (!section.items.isEmpty()) cached.add(section);
+                if (!section.items.isEmpty()) {
+                    restoredCards += section.items.size();
+                    cached.add(section);
+                }
             } catch (Exception ignored) { }
         }
         removeHomeDuplicates(cached);
         int total = 0;
         for (HomeSection section : cached) total += section.items.size();
+        long elapsed = android.os.SystemClock.elapsedRealtime() - startedAt;
+        homeCacheDiagnostic = String.format(java.util.Locale.ROOT,
+                "Главная: файлов прочитано %d из %d; лент восстановлено %d; карточек восстановлено %d; чтение %.1f мс",
+                cachedFiles, paths.length, cached.size(), total, (double) elapsed);
         if (total == 0) return false;
         setCatalogStatus("Постеров в кэше", total);
         renderHome(cached);
         progress.setVisibility(View.GONE);
-        status.setText("Показан сохранённый каталог · обновление…");
+        status.setText("Сохранённые ленты: " + cached.size() + " · обновление…");
         return true;
     }
 
@@ -269,16 +281,21 @@ public class MainActivity extends Activity {
                 return;
             }
 
+            // Store every non-empty HTML response, including pages whose markup
+            // the poster parser does not recognise yet.
+            diskCache.put("home|" + client.getMirror() + "|" + paths[index],
+                    html.getBytes(StandardCharsets.UTF_8));
             HomeSection section = new HomeSection(titles[index], paths[index]);
             section.items.addAll(parseHomePosters(Jsoup.parse(html, client.getMirror() + "/")));
-            if (!section.items.isEmpty()) {
+            int cardCount = section.items.size();
+            if (cardCount > 0) {
                 sections.add(section);
-                diskCache.put("home|" + client.getMirror() + "|" + paths[index],
-                        html.getBytes(StandardCharsets.UTF_8));
                 renderHomeSection(section);
-                setCatalogStatus("Загружено лент", sections.size());
             }
-            status.setText("Загружено разделов: " + (index + 1) + " из " + paths.length);
+            status.setText("Обработано " + (index + 1) + "/" + paths.length
+                    + " · показано лент " + sections.size() + " · карточек " 
+                    + countHomeCards(sections));
+            setCatalogStatus("Лент", sections.size());
             browserHandler.postDelayed(() -> loadHomeSectionsInBrowser(
                     paths, titles, index + 1, sections, 0), 100);
         });
@@ -359,7 +376,8 @@ public class MainActivity extends Activity {
 
     private List<HomePoster> parseHomePosters(Document doc) {
         List<HomePoster> out = new ArrayList<>();
-        Elements anchors = doc.select("a[href*=details.php?id=]");
+        Elements anchors = doc.select("table.t_peer td.nam > a[href*=details.php?id=]");
+        if (anchors.isEmpty()) anchors = doc.select("a[href*=details.php?id=]");
         for (Element a : anchors) {
             String linkPath = a.attr("href").toLowerCase(java.util.Locale.ROOT);
             if (linkPath.contains("userdetails.php") || linkPath.contains("userdetails")) continue;
@@ -417,6 +435,12 @@ public class MainActivity extends Activity {
      * Keep the torrent with the most seeders; leechers break ties. Other sections
      * remain independent so a title can appear in multiple home collections.
      */
+    private int countHomeCards(List<HomeSection> sections) {
+        int count = 0;
+        for (HomeSection section : sections) count += section.items.size();
+        return count;
+    }
+
     private void removeHomeDuplicates(List<HomeSection> sections) {
         for (HomeSection section : sections) {
             java.util.LinkedHashMap<String, HomePoster> bestByTitle = new java.util.LinkedHashMap<>();
@@ -1007,7 +1031,8 @@ public class MainActivity extends Activity {
                 + String.format(java.util.Locale.ROOT, "Занято: %.2f МБ из %.0f МБ (%.1f%%)\\n",
                         usedMb, limitMb, percent)
                 + String.format(java.util.Locale.ROOT, "Файлов в кэше: %d\\n", diskCache.getEntryCount())
-                + "Расположение: cache/kinozal_cache",
+                + "Расположение: cache/kinozal_cache\\n"
+                + homeCacheDiagnostic,
                 15, Color.WHITE, false);
         cacheInfo.setLineSpacing(dp(5), 1f);
         panel.addView(cacheInfo);
@@ -1028,7 +1053,8 @@ public class MainActivity extends Activity {
                     + String.format(java.util.Locale.ROOT, "Занято: %.2f МБ из %.0f МБ (%.1f%%)\\n",
                             current / (1024d * 1024d), limitMb, limit > 0 ? current * 100d / limit : 0d)
                     + String.format(java.util.Locale.ROOT, "Файлов в кэше: %d\\n", diskCache.getEntryCount())
-                    + "Расположение: cache/kinozal_cache");
+                    + "Расположение: cache/kinozal_cache\\n"
+                    + homeCacheDiagnostic);
         });
         dialog.show();
         if (dialog.getWindow() != null) {
