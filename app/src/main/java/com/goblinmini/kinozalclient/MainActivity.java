@@ -66,6 +66,9 @@ public class MainActivity extends Activity {
     private EditText search;
     private final List<Torrent> torrents = new ArrayList<>();
     private int page = 0;
+    private String searchSort = "date";
+    private boolean searchSortDescending = true;
+    private static final String FAVORITES_KEY = "local_favorites";
     private volatile String lastHtml = "";
     private WebView sessionWebView;
     private BrowserPageCallback pendingBrowserCallback;
@@ -914,7 +917,65 @@ public class MainActivity extends Activity {
         return out;
     }
 
+
+
+    private void setSearchSort(String key) {
+        if (key.equals(searchSort)) searchSortDescending = !searchSortDescending;
+        else { searchSort = key; searchSortDescending = true; }
+        list.removeAllViews();
+        renderTorrents(torrents);
+    }
+
+    private double sizeValue(String value) {
+        if (value == null) return 0;
+        String normalized = value.replace(',', '.').replaceAll("[^0-9.]", "");
+        double number;
+        try { number = Double.parseDouble(normalized); } catch (Exception e) { return 0; }
+        String lower = value.toLowerCase(java.util.Locale.ROOT);
+        if (lower.contains("tb") || lower.contains("тб")) return number * 1024d * 1024d;
+        if (lower.contains("gb") || lower.contains("гб")) return number * 1024d;
+        if (lower.contains("mb") || lower.contains("мб")) return number;
+        return number;
+    }
+
+    private String dateValue(String value) {
+        if (value == null) return "";
+        java.util.regex.Matcher m = java.util.regex.Pattern.compile("(\\d{1,2})[.\\-/](\\d{1,2})[.\\-/](\\d{2,4})").matcher(value);
+        if (m.find()) {
+            String y = m.group(3).length() == 2 ? "20" + m.group(3) : m.group(3);
+            return String.format(java.util.Locale.ROOT, "%04d-%02d-%02d",
+                    Integer.parseInt(y), Integer.parseInt(m.group(2)), Integer.parseInt(m.group(1)));
+        }
+        return value;
+    }
+
     private void renderTorrents(List<Torrent> items) {
+        if (list == null) return;
+        List<Torrent> displayItems = new ArrayList<>(items);
+        if (currentPath != null && currentPath.contains("s=")) {
+            java.util.Collections.sort(displayItems, (a, b) -> {
+                int cmp;
+                if ("size".equals(searchSort)) cmp = Double.compare(sizeValue(a.size), sizeValue(b.size));
+                else if ("seeds".equals(searchSort)) cmp = Integer.compare(parseInt(a.seeds), parseInt(b.seeds));
+                else cmp = dateValue(a.uploaded).compareTo(dateValue(b.uploaded));
+                return searchSortDescending ? -cmp : cmp;
+            });
+            LinearLayout sortBar = new LinearLayout(this);
+            sortBar.setGravity(Gravity.CENTER_VERTICAL);
+            sortBar.setPadding(dp(8), dp(4), dp(8), dp(8));
+            Button date = button("Дата");
+            Button size = button("Размер");
+            Button seeds = button("Сиды");
+            for (Button b : new Button[]{date, size, seeds}) {
+                LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(0, dp(38), 1f);
+                p.rightMargin = dp(5);
+                sortBar.addView(b, p);
+            }
+            date.setOnClickListener(v -> setSearchSort("date"));
+            size.setOnClickListener(v -> setSearchSort("size"));
+            seeds.setOnClickListener(v -> setSearchSort("seeds"));
+            list.addView(sortBar);
+        }
         LinearLayout header = new LinearLayout(this);
         header.setGravity(Gravity.CENTER_VERTICAL);
         header.setPadding(dp(14), dp(8), dp(14), dp(8));
@@ -934,7 +995,7 @@ public class MainActivity extends Activity {
         header.addView(leechesHeader, new LinearLayout.LayoutParams(dp(55), -2));
         list.addView(header);
 
-        for (Torrent t : items) {
+        for (Torrent t : displayItems) {
             LinearLayout row = new LinearLayout(this); row.setGravity(Gravity.CENTER_VERTICAL);
             row.setPadding(dp(14), dp(8), dp(14), dp(8)); row.setBackground(shape(PANEL, 0));
             LinearLayout.LayoutParams rp = new LinearLayout.LayoutParams(-1, dp(66)); rp.bottomMargin = dp(5);
@@ -1377,7 +1438,69 @@ public class MainActivity extends Activity {
         }).setNegativeButton("Отмена", null).show();
     }
 
-    private void showFavorites() { addEmpty("Избранное пока пусто. Добавление раздач будет подключено вместе с карточкой раздачи."); }
+
+    private java.util.LinkedHashMap<String, Torrent> readFavorites() {
+        java.util.LinkedHashMap<String, Torrent> result = new java.util.LinkedHashMap<>();
+        String raw = getSharedPreferences(PREFS, MODE_PRIVATE).getString(FAVORITES_KEY, "[]");
+        try {
+            org.json.JSONArray array = new org.json.JSONArray(raw);
+            for (int i = 0; i < array.length(); i++) {
+                org.json.JSONObject o = array.optJSONObject(i);
+                if (o == null) continue;
+                Torrent t = new Torrent();
+                t.title = o.optString("title", "");
+                t.href = o.optString("href", "");
+                t.size = o.optString("size", "—");
+                t.seeds = o.optString("seeds", "—");
+                t.leeches = o.optString("leeches", "—");
+                t.uploaded = o.optString("uploaded", "—");
+                if (!t.href.isEmpty()) result.put(t.href, t);
+            }
+        } catch (Exception ignored) { }
+        return result;
+    }
+
+    private void writeFavorites(java.util.LinkedHashMap<String, Torrent> favorites) {
+        org.json.JSONArray array = new org.json.JSONArray();
+        for (Torrent t : favorites.values()) {
+            org.json.JSONObject o = new org.json.JSONObject();
+            try {
+                o.put("title", t.title); o.put("href", t.href); o.put("size", t.size);
+                o.put("seeds", t.seeds); o.put("leeches", t.leeches); o.put("uploaded", t.uploaded);
+                array.put(o);
+            } catch (Exception ignored) { }
+        }
+        getSharedPreferences(PREFS, MODE_PRIVATE).edit().putString(FAVORITES_KEY, array.toString()).apply();
+    }
+
+    private boolean isFavorite(Torrent torrent) {
+        return torrent != null && readFavorites().containsKey(torrent.href);
+    }
+
+    private void toggleFavorite(Torrent torrent) {
+        if (torrent == null || torrent.href == null || torrent.href.isEmpty()) return;
+        java.util.LinkedHashMap<String, Torrent> favorites = readFavorites();
+        if (favorites.containsKey(torrent.href)) {
+            favorites.remove(torrent.href);
+            showMessage("Удалено из избранного");
+        } else {
+            favorites.put(torrent.href, torrent);
+            showMessage("Добавлено в избранное");
+        }
+        writeFavorites(favorites);
+    }
+
+    private void showFavorites() {
+        currentPath = "local:favorites";
+        currentTitle = "Избранное";
+        heading.setText(currentTitle);
+        java.util.List<Torrent> saved = new java.util.ArrayList<>(readFavorites().values());
+        list.removeAllViews();
+        status.setText("Избранное · " + saved.size());
+        if (saved.isEmpty()) addEmpty("Избранное пока пусто. Добавляйте раздачи из карточки.");
+        else renderTorrents(saved);
+    }
+
 
     private static class TorrentDetails {
         String title = "", poster = "", torrentLink = "", sourcePage = "";
@@ -1511,7 +1634,17 @@ public class MainActivity extends Activity {
                 v.setBackground(shape(focused ? Color.rgb(125, 48, 25) : RED, focused ? GOLD : 0)));
         LinearLayout.LayoutParams watchParams = new LinearLayout.LayoutParams(-1, dp(48));
         watchParams.bottomMargin = dp(10);
+
         posterColumn.addView(watch, watchParams);
+        Button favorite = button(isFavorite(torrent) ? "★ В избранном" : "☆ В избранное");
+        favorite.setTextSize(13);
+        favorite.setOnClickListener(v -> {
+            toggleFavorite(torrent);
+            favorite.setText(isFavorite(torrent) ? "★ В избранном" : "☆ В избранное");
+        });
+        LinearLayout.LayoutParams favoriteParams = new LinearLayout.LayoutParams(-1, dp(42));
+        favoriteParams.bottomMargin = dp(10);
+        posterColumn.addView(favorite, favoriteParams);
 
         ImageView poster = new ImageView(this);
         poster.setScaleType(ImageView.ScaleType.FIT_CENTER);
