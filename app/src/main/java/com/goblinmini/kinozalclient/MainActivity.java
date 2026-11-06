@@ -291,8 +291,8 @@ public class MainActivity extends Activity {
             }
             String script = "(function(){var p=" + requested.toString() + ";"
                     + "return Promise.all(p.map(function(u){return fetch(u,{credentials:'include',"
-                    + "cache:'no-store'}).then(function(r){if(!r.ok)throw new Error('HTTP '+r.status);"
-                    + "return r.text();});})).then(function(a){return JSON.stringify(a);});})()";
+                    + "cache:'no-store'}).then(function(r){if(!r.ok)return '';return r.text();}"
+                    + ").catch(function(){return '';});})).then(function(a){return JSON.stringify(a);});})()";
             final boolean[] completed = {false};
             Runnable timeout = () -> {
                 if (completed[0]) return;
