@@ -1077,6 +1077,7 @@ public class MainActivity extends Activity {
                         Element enclosure = item.selectFirst("enclosure");
                         if (enclosure != null) target = enclosure.attr("url");
                     }
+                    final String resultUrl = target;
                     LinearLayout row = new LinearLayout(this);
                     row.setOrientation(LinearLayout.VERTICAL);
                     row.setPadding(dp(10), dp(8), dp(10), dp(8));
@@ -1087,8 +1088,8 @@ public class MainActivity extends Activity {
                     row.addView(text((tracker.isEmpty() ? "" : tracker + " · ")
                             + "Размер: " + size + " · Сиды: " + seeders + " · Пиры: " + peers,
                             11, TEAL, false));
-                    if (!target.isEmpty()) row.setOnClickListener(v -> {
-                        try { startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(target))); }
+                    if (!resultUrl.isEmpty()) row.setOnClickListener(v -> {
+                        try { startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(resultUrl))); }
                         catch (Exception e) { showMessage("Не удалось открыть ссылку результата."); }
                     });
                     LinearLayout.LayoutParams rowParams = new LinearLayout.LayoutParams(-1, -2);
