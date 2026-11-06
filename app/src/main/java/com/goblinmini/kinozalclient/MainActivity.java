@@ -57,6 +57,7 @@ public class MainActivity extends Activity {
 
     private final ExecutorService io = Executors.newSingleThreadExecutor();
     private KinozalHttpClient client;
+    private DiskCache diskCache;
     private String mirror;
     private String currentPath = "browse.php";
     private String currentTitle = "Все раздачи";
@@ -64,8 +65,15 @@ public class MainActivity extends Activity {
     private TextView heading, status;
     private ProgressBar progress;
     private EditText search;
+    private View focusedTorrentSource;
     private final List<Torrent> torrents = new ArrayList<>();
     private int page = 0;
+    private String searchSort = "date";
+    private boolean searchSortDescending = true;
+    private LinearLayout searchSortBar;
+    private Button sortDateButton, sortSizeButton, sortSeedsButton;
+    private AlertDialog settingsDialog;
+    private static final String FAVORITES_KEY = "local_favorites";
     private volatile String lastHtml = "";
     private WebView sessionWebView;
     private BrowserPageCallback pendingBrowserCallback;
@@ -74,6 +82,10 @@ public class MainActivity extends Activity {
     private boolean startupCatalogReady = false;
     private boolean startupCatalogStarted = false;
     private boolean automaticUpdateCheckScheduled = false;
+    private boolean homeCacheDisplayed = false;
+    private String homeCacheDiagnostic = "Кэш главной ещё не проверялся";
+
+    private volatile String lastBrowserError = "Причина пока не определена";
     private interface BrowserPageCallback { void onPage(String html, String error); }
     private final java.util.LinkedHashMap<String, String> pageCache =
             new java.util.LinkedHashMap<String, String>(12, 0.75f, true) {
@@ -92,6 +104,7 @@ public class MainActivity extends Activity {
         super.onCreate(state);
         mirror = getSharedPreferences(PREFS, MODE_PRIVATE).getString("mirror", MIRRORS[0]);
         client = new KinozalHttpClient(this, mirror);
+        diskCache = new DiskCache(this, 200L * 1024L * 1024L);
         buildShell();
         String savedBrowserCookies = client.getSavedBrowserCookies();
         if (savedBrowserCookies != null) {
@@ -150,51 +163,99 @@ public class MainActivity extends Activity {
         currentTitle = "Главная";
         heading.setText("Главная");
         showPageLoading("Подключение к Kinozal…");
-        if (sessionWebView != null) {
-            loadHomeSectionsInBrowser(new String[]{"novinki.php", "top.php",
-                    "top.php?t=0&d=0&f=0&k=0&j=&s=0&w=1",
-                    "top.php?t=0&d=0&f=0&k=0&j=&s=0&w=2"},
-                    new String[]{"Новинки", "Топ раздач", "Топ недели", "Топ месяца"}, 0,
-                    new ArrayList<>(), 0);
-            return;
-        }
+        String[] homePaths = {"novinki.php", "top.php?c=0&d=0&f=0&j=&k=0&s=0&t=0",
+                "top.php?c=0&d=0&f=0&j=&k=0&s=0&t=0&w=1",
+                "top.php?c=0&d=0&f=0&j=&k=0&s=0&t=0&w=2",
+                "top.php?j=%D0%BB%D1%83%D1%87%D1%88%D0%B8%D0%B9%20%D1%84%D0%B8%D0%BB%D1%8C%D0%BC%20%D0%9E%D1%81%D0%BA%D0%B0%D1%80",
+                "top.php?j=Netflix", "top.php?j=HBO",
+                "top.php?j=Walt%20Disney%20Pictures", "top.php?j=Marvel"};
+        String[] homeTitles = {"Новинки", "Топ раздач", "Топ недели", "Топ месяца",
+                "Топ Оскар", "Топ Netflix", "Топ HBO", "Топ Walt Disney", "Топ Marvel"};
+
+        // Cache I/O and Jsoup parsing can be expensive for large HTML files.
+        // Never do this work on Android's UI thread: it caused startup freezes
+        // and could trigger an ANR or process death on TV devices.
+        io.execute(() -> {
+            List<HomeSection> cached = new ArrayList<>();
+            int cachedFiles = 0;
+            long startedAt = android.os.SystemClock.elapsedRealtime();
+            for (int i = 0; i < homePaths.length; i++) {
+                byte[] bytes = diskCache.get("home|" + client.getMirror() + "|" + homePaths[i],
+                        7L * 24L * 60L * 60L * 1000L);
+                if (bytes == null || bytes.length == 0) continue;
+                cachedFiles++;
+                try {
+                    String html = new String(bytes, StandardCharsets.UTF_8);
+                    HomeSection section = new HomeSection(homeTitles[i], homePaths[i]);
+                    section.items.addAll(parseHomePosters(Jsoup.parse(html, client.getMirror() + "/")));
+                    if (!section.items.isEmpty()) cached.add(section);
+                } catch (Exception ignored) { }
+            }
+            removeHomeDuplicates(cached);
+            int total = countHomeCards(cached);
+            long elapsed = android.os.SystemClock.elapsedRealtime() - startedAt;
+            String diagnostic = String.format(java.util.Locale.ROOT,
+                    "Главная: файлов прочитано %d из %d; лент восстановлено %d; карточек восстановлено %d; чтение %.1f мс",
+                    cachedFiles, homePaths.length, cached.size(), total, (double) elapsed);
+            runOnUiThread(() -> {
+                homeCacheDiagnostic = diagnostic;
+                homeCacheDisplayed = total > 0;
+                if (homeCacheDisplayed) {
+                    setCatalogStatus("Постеров в кэше", total);
+                    renderHome(cached);
+                    progress.setVisibility(View.GONE);
+                    status.setText("Сохранённые ленты: " + cached.size() + " · обновление…");
+                }
+                if (sessionWebView != null) {
+                    loadHomeSectionsInBrowser(homePaths, homeTitles, 0, new ArrayList<>(), startupRetry);
+                } else {
+                    loadInitialCatalogFromHttp(homePaths, homeTitles);
+                }
+            });
+        });
+    }
+
+    private void loadInitialCatalogFromHttp(String[] homePaths, String[] homeTitles) {
         io.execute(() -> {
             try {
-                String[] paths = {
-                        "novinki.php",
-                        "top.php",
-                        "top.php?t=0&d=0&f=0&k=0&j=&s=0&w=1",
-                        "top.php?t=0&d=0&f=0&k=0&j=&s=0&w=2"
-                };
-                String[] titles = {"Новинки", "Топ раздач", "Топ недели", "Топ месяца"};
                 List<HomeSection> sections = new ArrayList<>();
-                for (int i = 0; i < paths.length; i++) {
-                    String html = client.fetch(paths[i]);
-                    HomeSection section = new HomeSection(titles[i], paths[i]);
-                    section.items.addAll(parseHomePosters(Jsoup.parse(html, client.getMirror() + "/")));
-                    sections.add(section);
+                for (int i = 0; i < homePaths.length; i++) {
+                    String html = client.fetch(homePaths[i]);
+                    if (html == null || html.trim().isEmpty()) continue;
+                    HomeSection section = new HomeSection(homeTitles[i], homePaths[i]);
+                    try {
+                        section.items.addAll(parseHomePosters(
+                                Jsoup.parse(html, client.getMirror() + "/")));
+                        if (!section.items.isEmpty()) {
+                            List<HomeSection> oneFeed = new ArrayList<>();
+                            oneFeed.add(section);
+                            removeHomeDuplicates(oneFeed);
+                            if (!section.items.isEmpty()) {
+                                diskCache.put("home|" + client.getMirror() + "|" + homePaths[i],
+                                        html.getBytes(StandardCharsets.UTF_8));
+                                sections.add(section);
+                            }
+                        }
+                    } catch (Exception ignored) {
+                        // A malformed or challenge response must not poison the cache.
+                    }
                 }
                 removeHomeDuplicates(sections);
-                int count = 0;
-                for (HomeSection section : sections) count += section.items.size();
-                final int total = count;
-                if (total == 0 && startupRetry == 0) {
-                    runOnUiThread(() -> {
-                        status.setText("Повторное подключение к Kinozal…");
-                        browserHandler.postDelayed(() -> loadInitialCatalog(1), 1500);
-                    });
-                    return;
-                }
+                int total = countHomeCards(sections);
                 runOnUiThread(() -> {
                     progress.setVisibility(View.GONE);
-                    status.setText("Главная · Постеров: " + total + "\nВерсия: " + getAppVersionName());
-                    renderHome(sections);
+                    if (!homeCacheDisplayed) {
+                        setCatalogStatus("Постеров", total);
+                        renderHome(sections);
+                    }
                 });
             } catch (Exception e) {
                 runOnUiThread(() -> {
                     progress.setVisibility(View.GONE);
-                    status.setText("Нет соединения");
-                    addEmpty("Не удалось загрузить главную страницу. " + safe(e.getMessage()));
+                    if (!homeCacheDisplayed) {
+                        status.setText("Нет соединения");
+                        addEmpty("Не удалось загрузить главную страницу. " + safe(e.getMessage()));
+                    }
                 });
             }
         });
@@ -204,39 +265,150 @@ public class MainActivity extends Activity {
             List<HomeSection> sections, int retry) {
         if (index >= paths.length) {
             removeHomeDuplicates(sections);
-            int total = 0;
-            for (HomeSection section : sections) total += section.items.size();
-            // The first WebView pass can receive a Cloudflare/session warm-up page
-            // instead of the catalogue. Retry the complete home sequence once
-            // automatically so the user does not need to press Главная twice.
-            if (total == 0 && retry == 0) {
-                status.setText("Повторное подключение к Kinozal…");
-                browserHandler.postDelayed(() -> loadHomeSectionsInBrowser(
-                        paths, titles, 0, new ArrayList<>(), 1), 1500);
-                return;
-            }
+            // Re-render the final de-duplicated model. This replaces each row
+            // in place, so cards discarded by final normalization disappear too.
+            for (HomeSection section : sections) renderHomeSection(section);
+            int total = countHomeCards(sections);
             progress.setVisibility(View.GONE);
-            status.setText("Главная · Постеров: " + total + "\nВерсия: " + getAppVersionName());
-            renderHome(sections);
+            if (total == 0) {
+                status.setText("Нет соединения");
+                addEmpty("Не удалось получить постеры Kinozal. Проверьте авторизацию и выбранное зеркало.");
+            } else {
+                setCatalogStatus("Постеров", total);
+                status.setText("Главная · Лент показано: " + sections.size() + "/" + paths.length
+                        + "\nЗапросов обработано: " + paths.length + "/" + paths.length
+                        + (homeCacheDisplayed ? "\nКэш обновлён" : ""));
+            }
             return;
         }
+
         fetchBrowserPage(paths[index], null, html -> {
             if (html == null || html.isEmpty()) {
-                progress.setVisibility(View.GONE);
-                status.setText("Нет соединения");
-                addEmpty("Не удалось загрузить каталог через сохранённую браузерную сессию.");
+                if (index == 0 && retry == 0) {
+                    status.setText("Повторное подключение к Kinozal…");
+                    browserHandler.postDelayed(() -> loadHomeSectionsInBrowser(
+                            paths, titles, 0, new ArrayList<>(), 1), 1200);
+                    return;
+                }
+                browserHandler.postDelayed(() -> loadHomeSectionsInBrowser(
+                        paths, titles, index + 1, sections, 0), 150);
                 return;
             }
-            HomeSection section = new HomeSection(titles[index], paths[index]);
-            section.items.addAll(parseHomePosters(Jsoup.parse(html, client.getMirror() + "/")));
-            sections.add(section);
-            loadHomeSectionsInBrowser(paths, titles, index + 1, sections, retry);
+
+            // Disk writes and Jsoup parsing are deliberately kept off the UI
+            // thread. Each completed page is processed independently, then
+            // only its small parsed model is handed back for rendering.
+            io.execute(() -> {
+                HomeSection section = new HomeSection(titles[index], paths[index]);
+                try {
+                    // Parse and validate first. Never replace a known-good cache
+                    // entry with a Cloudflare challenge, login page or empty response.
+                    section.items.addAll(parseHomePosters(
+                            Jsoup.parse(html, client.getMirror() + "/")));
+                    if (!section.items.isEmpty()) {
+                        List<HomeSection> oneFeed = new ArrayList<>();
+                        oneFeed.add(section);
+                        removeHomeDuplicates(oneFeed);
+                        if (!section.items.isEmpty()) {
+                            diskCache.put("home|" + client.getMirror() + "|" + paths[index],
+                                    html.getBytes(StandardCharsets.UTF_8));
+                        }
+                    }
+                } catch (Exception ignored) { }
+
+                runOnUiThread(() -> {
+                    if (!section.items.isEmpty()) {
+                        sections.add(section);
+                        renderHomeSection(section);
+                    }
+                    status.setText("Обработано " + (index + 1) + "/" + paths.length
+                            + " · показано лент " + sections.size() + " · карточек "
+                            + countHomeCards(sections));
+                    setHomeProgress(index + 1, paths.length, sections.size());
+                    browserHandler.postDelayed(() -> loadHomeSectionsInBrowser(
+                            paths, titles, index + 1, sections, 0), 100);
+                });
+            });
+        });
+    }
+
+    /**
+     * Load the first page as a normal WebView navigation to establish the
+     * authenticated origin, then fetch all remaining home sections concurrently.
+     */
+    private void fetchBrowserPages(String[] paths, java.util.function.Consumer<List<String>> callback) {
+        fetchBrowserPage(paths[0], null, firstHtml -> {
+            if (firstHtml == null || firstHtml.isEmpty()) {
+                if (lastBrowserError == null || lastBrowserError.isEmpty())
+                    lastBrowserError = "Первый запрос novinki.php не вернул HTML";
+                callback.accept(null);
+                return;
+            }
+            if (paths.length == 1) {
+                List<String> only = new ArrayList<>();
+                only.add(firstHtml);
+                callback.accept(only);
+                return;
+            }
+            WebView web = sessionWebView;
+            if (web == null) {
+                callback.accept(null);
+                return;
+            }
+
+            org.json.JSONArray requested = new org.json.JSONArray();
+            for (int i = 1; i < paths.length; i++) requested.put(paths[i]);
+
+            final boolean[] completed = {false};
+            final Runnable[] timeoutHolder = {null};
+            web.addJavascriptInterface(new Object() {
+                @JavascriptInterface
+                public void onHomePagesResult(String json) {
+                    runOnUiThread(() -> {
+                        if (completed[0]) return;
+                        completed[0] = true;
+                        if (timeoutHolder[0] != null) browserHandler.removeCallbacks(timeoutHolder[0]);
+                        web.removeJavascriptInterface("KinozalHomeBridge");
+                        try {
+                            org.json.JSONArray array = new org.json.JSONArray(json);
+                            List<String> result = new ArrayList<>();
+                            result.add(firstHtml);
+                            for (int i = 0; i < array.length(); i++) {
+                                String html = array.optString(i, "");
+                                result.add(html);
+                            }
+                            callback.accept(result);
+                        } catch (Exception e) {
+                            lastBrowserError = "Ошибка разбора ответа JS-моста: " + e.getMessage();
+                            callback.accept(null);
+                        }
+                    });
+                }
+            }, "KinozalHomeBridge");
+
+            timeoutHolder[0] = () -> {
+                if (completed[0]) return;
+                completed[0] = true;
+                web.removeJavascriptInterface("KinozalHomeBridge");
+                lastBrowserError = "Тайм-аут параллельных запросов (35 секунд)";
+                callback.accept(null);
+            };
+            browserHandler.postDelayed(timeoutHolder[0], 35000);
+
+            String script = "(function(){var p=" + requested.toString() + ";"
+                    + "Promise.all(p.map(function(u){return fetch(u,{credentials:'include',"
+                    + "cache:'no-store'}).then(function(r){if(!r.ok)return '';return r.text();}"
+                    + ").catch(function(){return '';});})).then(function(a){"
+                    + "window.KinozalHomeBridge.onHomePagesResult(JSON.stringify(a));"
+                    + "}).catch(function(e){window.KinozalHomeBridge.onHomePagesResult('[]');});})()";
+            web.evaluateJavascript(script, null);
         });
     }
 
     private List<HomePoster> parseHomePosters(Document doc) {
         List<HomePoster> out = new ArrayList<>();
-        Elements anchors = doc.select("a[href*=details.php?id=]");
+        Elements anchors = doc.select("table.t_peer td.nam > a[href*=details.php?id=]");
+        if (anchors.isEmpty()) anchors = doc.select("a[href*=details.php?id=]");
         for (Element a : anchors) {
             String linkPath = a.attr("href").toLowerCase(java.util.Locale.ROOT);
             if (linkPath.contains("userdetails.php") || linkPath.contains("userdetails")) continue;
@@ -294,6 +466,12 @@ public class MainActivity extends Activity {
      * Keep the torrent with the most seeders; leechers break ties. Other sections
      * remain independent so a title can appear in multiple home collections.
      */
+    private int countHomeCards(List<HomeSection> sections) {
+        int count = 0;
+        for (HomeSection section : sections) count += section.items.size();
+        return count;
+    }
+
     private void removeHomeDuplicates(List<HomeSection> sections) {
         for (HomeSection section : sections) {
             java.util.LinkedHashMap<String, HomePoster> bestByTitle = new java.util.LinkedHashMap<>();
@@ -353,6 +531,17 @@ public class MainActivity extends Activity {
         }
     }
 
+    private void setHomeProgress(int processed, int total, int displayed) {
+        status.setText("Главная · Запросов: " + processed + "/" + total
+                + " · Лент отображено: " + displayed + "/" + total
+                + "\nВерсия: " + getAppVersionName());
+    }
+
+    private void setCatalogStatus(String itemType, int count) {
+        status.setText(currentTitle + " · Загружено: " + count + " " + itemType
+                + "\nВерсия: " + getAppVersionName());
+    }
+
     private String getAppVersionName() {
         try {
             android.content.pm.PackageInfo info = getPackageManager().getPackageInfo(getPackageName(), 0);
@@ -368,8 +557,15 @@ public class MainActivity extends Activity {
 
     private String normalizeHomeTitle(String title) {
         if (title == null) return "";
-        String value = title.toLowerCase(java.util.Locale.ROOT);
-        value = value.replaceAll("\\b(2160p|1080p|720p|480p|4k|uhd|hdr10?|web[- .]?dl|webrip|blu[- .]?ray|bdrip|brrip|dvdrip|hdtv|h265|h264|x265|x264|hevc|avc|aac|dts|ac3|proper|repack|remux)\\b", " ");
+        String value = title.toLowerCase(java.util.Locale.ROOT).trim();
+        // The same movie often appears as "Русское название / Original title /
+        // year / release". Use the leading title as the primary identity so
+        // alternate encodes don't fill a feed with copies of one film.
+        int slash = value.indexOf(" / ");
+        if (slash > 0) value = value.substring(0, slash);
+        value = value.replaceAll("\\([^)]*\\)", " ");
+        value = value.replaceAll("\\b(19|20)\\d{2}\\b", " ");
+        value = value.replaceAll("\\b(2160p|1080p|720p|480p|4k|uhd|hdr10?|web[- .]?dl|webrip|blu[- .]?ray|bdrip|brrip|dvdrip|hdtv|h265|h264|x265|x264|hevc|avc|aac|dts|ac3|proper|repack|remux|extended|directors cut|theatrical|dubbed|subbed)\\b", " ");
         return value.replaceAll("[^\\p{L}\\p{N}]+", " ")
                 .replaceAll("\\s+", " ").trim();
     }
@@ -435,6 +631,11 @@ public class MainActivity extends Activity {
 
     private void loadImageIntoView(String imageUrl, ImageView target, String referer) {
         if (imageUrl == null || imageUrl.isEmpty()) return;
+        byte[] cachedImage = diskCache.get("image|" + imageUrl, 0L);
+        if (cachedImage != null) {
+            Bitmap cachedBitmap = BitmapFactory.decodeByteArray(cachedImage, 0, cachedImage.length);
+            if (cachedBitmap != null) { target.setImageBitmap(cachedBitmap); return; }
+        }
         WebView web = sessionWebView;
         if (web == null) {
             loadImageWithHttp(imageUrl, target, referer);
@@ -458,6 +659,7 @@ public class MainActivity extends Activity {
             io.execute(() -> {
                 try {
                     byte[] bytes = android.util.Base64.decode(base64, android.util.Base64.DEFAULT);
+                    diskCache.put("image|" + imageUrl, bytes);
                     Bitmap bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.length);
                     if (bitmap != null) runOnUiThread(() -> {
                         if (target.getParent() != null) target.setImageBitmap(bitmap);
@@ -475,7 +677,11 @@ public class MainActivity extends Activity {
     private void loadImageWithHttp(String imageUrl, ImageView target, String referer) {
         io.execute(() -> {
             try {
-                byte[] bytes = client.fetchBytes(imageUrl, "image/*", referer);
+                byte[] bytes = diskCache.get("image|" + imageUrl, 0L);
+                if (bytes == null) {
+                    bytes = client.fetchBytes(imageUrl, "image/*", referer);
+                    diskCache.put("image|" + imageUrl, bytes);
+                }
                 Bitmap bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.length);
                 if (bitmap != null) runOnUiThread(() -> {
                     if (target.getParent() != null) target.setImageBitmap(bitmap);
@@ -510,49 +716,88 @@ public class MainActivity extends Activity {
 
     private void renderHome(List<HomeSection> sections) {
         list.removeAllViews();
-        for (HomeSection section : sections) {
-            TextView sectionTitle = text(section.title, 20, GOLD, true);
-            LinearLayout.LayoutParams titleParams = new LinearLayout.LayoutParams(-1, dp(38));
-            titleParams.topMargin = dp(10);
-            list.addView(sectionTitle, titleParams);
-            android.widget.HorizontalScrollView horizontal = new android.widget.HorizontalScrollView(this);
-            horizontal.setHorizontalScrollBarEnabled(false);
-            horizontal.setFillViewport(false);
-            LinearLayout strip = new LinearLayout(this);
-            strip.setOrientation(LinearLayout.HORIZONTAL);
-            for (HomePoster item : section.items) {
-                LinearLayout card = new LinearLayout(this);
-                card.setOrientation(LinearLayout.VERTICAL);
-                card.setPadding(dp(5), dp(5), dp(5), dp(5));
-                card.setBackground(shape(PANEL, 0));
-                card.setFocusable(true);
-                card.setClickable(true);
-                card.setOnFocusChangeListener((v, focused) ->
-                        v.setBackground(shape(focused ? Color.rgb(57, 68, 70) : PANEL, focused ? GOLD : 0)));
-                ImageView poster = new ImageView(this);
-                poster.setScaleType(ImageView.ScaleType.CENTER_CROP);
-                poster.setBackground(shape(Color.rgb(40, 45, 49), 0));
-                card.addView(poster, new LinearLayout.LayoutParams(dp(126), dp(178)));
-                TextView name = text(item.torrent.title, 12, Color.WHITE, true);
-                name.setMaxLines(2);
-                name.setEllipsize(android.text.TextUtils.TruncateAt.END);
-                name.setPadding(dp(2), dp(6), dp(2), dp(2));
-                card.addView(name, new LinearLayout.LayoutParams(dp(126), dp(42)));
-                LinearLayout.LayoutParams cardParams = new LinearLayout.LayoutParams(dp(138), -2);
-                cardParams.rightMargin = dp(8);
-                strip.addView(card, cardParams);
-                card.setOnClickListener(v -> showTorrent(item.torrent));
-                if (!item.imageUrl.isEmpty()) {
-                    loadImageIntoView(item.imageUrl, poster, client.getMirror() + "/" + section.path);
-                } else {
-                    loadHomePosterFromDetails(item, poster);
-                }
-            }
-            horizontal.addView(strip);
-            LinearLayout.LayoutParams rowParams = new LinearLayout.LayoutParams(-1, dp(238));
-            list.addView(horizontal, rowParams);
-        }
+        for (HomeSection section : sections) renderHomeSection(section);
         if (sections.isEmpty()) addEmpty("На главной пока нет подборок.");
+        animateContentTransition(list);
+    }
+
+    /** Append one completed home feed without rebuilding rows already on screen. */
+    private void renderHomeSection(HomeSection section) {
+        if (section == null || section.items.isEmpty()) return;
+
+        TextView sectionTitle = text(section.title, 20, GOLD, true);
+        sectionTitle.setTag("home-title:" + section.path);
+        LinearLayout.LayoutParams titleParams = new LinearLayout.LayoutParams(-1, dp(38));
+        titleParams.topMargin = dp(10);
+
+        android.widget.HorizontalScrollView horizontal = new android.widget.HorizontalScrollView(this);
+        horizontal.setHorizontalScrollBarEnabled(false);
+        horizontal.setFillViewport(false);
+        horizontal.setTag("home-row:" + section.path);
+        LinearLayout strip = new LinearLayout(this);
+        strip.setOrientation(LinearLayout.HORIZONTAL);
+
+        for (HomePoster item : section.items) {
+            LinearLayout card = new LinearLayout(this);
+            card.setOrientation(LinearLayout.VERTICAL);
+            card.setPadding(dp(5), dp(5), dp(5), dp(5));
+            card.setBackground(shape(PANEL, 0));
+            card.setFocusable(true);
+            card.setClickable(true);
+            card.setOnFocusChangeListener((v, focused) ->
+                    v.setBackground(shape(focused ? Color.rgb(57, 68, 70) : PANEL, focused ? GOLD : 0)));
+            ImageView poster = new ImageView(this);
+            poster.setScaleType(ImageView.ScaleType.CENTER_CROP);
+            poster.setBackground(shape(Color.rgb(40, 45, 49), 0));
+            card.addView(poster, new LinearLayout.LayoutParams(dp(126), dp(178)));
+            TextView name = text(item.torrent.title, 12, Color.WHITE, true);
+            name.setMaxLines(2);
+            name.setEllipsize(android.text.TextUtils.TruncateAt.END);
+            name.setPadding(dp(2), dp(6), dp(2), dp(2));
+            card.addView(name, new LinearLayout.LayoutParams(dp(126), dp(42)));
+            LinearLayout.LayoutParams cardParams = new LinearLayout.LayoutParams(dp(138), -2);
+            cardParams.rightMargin = dp(8);
+            strip.addView(card, cardParams);
+            card.setOnClickListener(v -> showTorrent(item.torrent));
+            if (!item.imageUrl.isEmpty()) {
+                loadImageIntoView(item.imageUrl, poster, client.getMirror() + "/" + section.path);
+            } else {
+                loadHomePosterFromDetails(item, poster);
+            }
+        }
+        horizontal.addView(strip);
+        LinearLayout.LayoutParams rowParams = new LinearLayout.LayoutParams(-1, dp(238));
+
+        // If this feed was already shown from cache, replace only its own pair
+        // of views in place. Other feeds and DPAD focus remain untouched.
+        String titleTag = "home-title:" + section.path;
+        for (int i = 0; i + 1 < list.getChildCount(); i++) {
+            Object tag = list.getChildAt(i).getTag();
+            if (titleTag.equals(tag)) {
+                list.removeViewAt(i + 1);
+                list.removeViewAt(i);
+                list.addView(sectionTitle, i, titleParams);
+                list.addView(horizontal, i + 1, rowParams);
+                animateContentTransition(horizontal);
+                return;
+            }
+        }
+        list.addView(sectionTitle, titleParams);
+        list.addView(horizontal, rowParams);
+        animateContentTransition(horizontal);
+    }
+
+    /** Subtle content entrance used after a catalogue or home section is rendered. */
+    private void animateContentTransition(View target) {
+        if (target == null) return;
+        target.animate().cancel();
+        target.setAlpha(0f);
+        target.setTranslationY(dp(7));
+        target.animate()
+                .alpha(1f)
+                .translationY(0f)
+                .setDuration(190)
+                .start();
     }
 
     private int dp(float n) { return (int)(n * getResources().getDisplayMetrics().density + .5f); }
@@ -604,46 +849,71 @@ public class MainActivity extends Activity {
         LinearLayout main = new LinearLayout(this); main.setOrientation(LinearLayout.VERTICAL);
         main.setPadding(dp(16), dp(8), dp(8), dp(8));
         root.addView(main, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1));
-        LinearLayout brand = new LinearLayout(this); brand.setGravity(Gravity.CENTER_VERTICAL);
+        LinearLayout brand = new LinearLayout(this); brand.setGravity(Gravity.CENTER);
         TextView logo = text("KINOZAL", 23, GOLD, true); brand.addView(logo);
-        TextView sub = text("  NATIVE TV", 11, TEAL, true); brand.addView(sub);
         sidebar.addView(brand, new LinearLayout.LayoutParams(-1, dp(58)));
         ScrollView menuScroll = new ScrollView(this);
         menuScroll.setFillViewport(false);
-        menuScroll.setVerticalScrollBarEnabled(true);
-        menuScroll.setScrollbarFadingEnabled(false);
-        // Reserve a narrow gutter for the scrollbar instead of drawing it
-        // over the right edge of focused menu buttons.
-        menuScroll.setScrollBarStyle(View.SCROLLBARS_INSIDE_INSET);
-        menuScroll.setPadding(0, 0, dp(22), 0);
+        menuScroll.setVerticalScrollBarEnabled(false);
+        menuScroll.setScrollbarFadingEnabled(true);
+        menuScroll.setPadding(0, 0, 0, 0);
         menuItems = new LinearLayout(this);
         menuItems.setOrientation(LinearLayout.VERTICAL);
         menuScroll.addView(menuItems, new ScrollView.LayoutParams(-1, -2));
         sidebar.addView(menuScroll, new LinearLayout.LayoutParams(-1, 0, 1));
-        addMenu("Главная", () -> loadInitialCatalog());
-        addMenu("Все раздачи", () -> load("browse.php", "Все раздачи"));
-        addMenu("Все сериалы", () -> load("browse.php?c=1001", "Все сериалы"));
-        addMenu("Зарубежные сериалы", () -> load("browse.php?c=46", "Зарубежные сериалы"));
-        addMenu("Российские сериалы", () -> load("browse.php?c=45", "Российские сериалы"));
-        addMenu("Все фильмы", () -> load("browse.php?c=1002", "Все фильмы"));
-        addMenu("Советские фильмы", () -> load("browse.php?c=10", "Советские фильмы"));
-        addMenu("Мультфильмы", () -> load("browse.php?c=1003", "Мультфильмы"));
-        addMenu("Российские мульты", () -> load("browse.php?c=22", "Российские мульты"));
-        addMenu("Зарубежные мульты", () -> load("browse.php?c=21", "Зарубежные мульты"));
-        addMenu("Аниме", () -> load("browse.php?c=20", "Аниме"));
-        addMenu("Спортивные передачи", () -> load("browse.php?c=37", "Спортивные передачи"));
-        addMenu("Российское ТВ", () -> load("browse.php?c=49", "Российское ТВ"));
-        addMenu("Зарубежное ТВ", () -> load("browse.php?c=50", "Зарубежное ТВ"));
-        addMenu("Концерты", () -> load("browse.php?c=48", "Концерты"));
-        addMenu("Видеоклипы", () -> load("browse.php?c=1", "Видеоклипы"));
-        addMenu("Избранное", () -> showFavorites());
-        addMenu("Авторизация", () -> showLogin());
-        addMenu("Зеркало", () -> chooseMirror());
-        addMenu("Проверить обновления", () -> new UpdateManager(this).check());
+        addMenu("⌂", "Главная", () -> loadInitialCatalog());
+        addMenu("⇩", "Все раздачи", () -> load("browse.php", "Все раздачи"));
+
+        Button categoriesButton = button("▦   Категории  ▾");
+        categoriesButton.setGravity(Gravity.CENTER_VERTICAL | Gravity.LEFT);
+        categoriesButton.setTextSize(14);
+        categoriesButton.setPadding(dp(14), 0, dp(8), 0);
+        LinearLayout.LayoutParams categoryButtonParams = new LinearLayout.LayoutParams(-1, dp(47));
+        categoryButtonParams.rightMargin = dp(5);
+        categoryButtonParams.bottomMargin = dp(3);
+        menuItems.addView(categoriesButton, categoryButtonParams);
+
+        LinearLayout categoryGroup = new LinearLayout(this);
+        categoryGroup.setOrientation(LinearLayout.VERTICAL);
+        categoryGroup.setVisibility(View.GONE);
+        menuItems.addView(categoryGroup);
+
+        addSubMenu(categoryGroup, "▣  Все сериалы", "browse.php?c=1001");
+        addSubMenu(categoryGroup, "▣  Зарубежные сериалы", "browse.php?c=46");
+        addSubMenu(categoryGroup, "▣  Российские сериалы", "browse.php?c=45");
+
+        addSubMenu(categoryGroup, "▤  Все фильмы", "browse.php?c=1002");
+        addSubMenu(categoryGroup, "▤  Советские фильмы", "browse.php?c=10");
+        addSubMenu(categoryGroup, "▧  Мультфильмы", "browse.php?c=1003");
+        addSubMenu(categoryGroup, "▧  Российские мульты", "browse.php?c=22");
+        addSubMenu(categoryGroup, "▧  Зарубежные мульты", "browse.php?c=21");
+        addSubMenu(categoryGroup, "✧  Аниме", "browse.php?c=20");
+        addSubMenu(categoryGroup, "⚑  Спортивные передачи", "browse.php?c=37");
+        addSubMenu(categoryGroup, "▣  Российское ТВ", "browse.php?c=49");
+        addSubMenu(categoryGroup, "▣  Зарубежное ТВ", "browse.php?c=50");
+        addSubMenu(categoryGroup, "♫  Концерты", "browse.php?c=48");
+        addSubMenu(categoryGroup, "▸  Видеоклипы", "browse.php?c=1");
+        categoriesButton.setOnClickListener(v -> {
+            boolean expand = categoryGroup.getVisibility() != View.VISIBLE;
+            categoryGroup.setVisibility(expand ? View.VISIBLE : View.GONE);
+            categoriesButton.setText(expand ? "Категории  ▾" : "Категории  ▸");
+            if (expand) categoryGroup.getChildAt(0).requestFocus();
+        });
+
+        addMenu("★", "Избранное", () -> showFavorites());
+        addMenu("◷", "Недавно смотрели", () -> showRecentlyViewed());
+        addMenu("⚙", "Настройки", () -> showSettings());
         status = text("Подключение…", 11, TEAL, false);
-        LinearLayout.LayoutParams statusParams = new LinearLayout.LayoutParams(-1, dp(28));
-        statusParams.topMargin = dp(4);
+        status.setGravity(Gravity.CENTER);
+        status.setLineSpacing(dp(2), 1f);
+        LinearLayout.LayoutParams statusParams = new LinearLayout.LayoutParams(-1, dp(44));
+        statusParams.topMargin = dp(6);
         sidebar.addView(status, statusParams);
+
+        heading = text("Главная", 25, GOLD, true);
+        LinearLayout.LayoutParams headingParams = new LinearLayout.LayoutParams(-1, dp(42));
+        headingParams.bottomMargin = dp(4);
+        main.addView(heading, headingParams);
 
         LinearLayout searchBar = new LinearLayout(this); searchBar.setGravity(Gravity.CENTER_VERTICAL);
         search = new EditText(this);
@@ -655,12 +925,66 @@ public class MainActivity extends Activity {
         search.setHint("Название фильма или раздачи");
         search.setTextSize(16);
         search.setImeOptions(EditorInfo.IME_ACTION_SEARCH);
-        search.setBackground(shape(PANEL, TEAL));
-        search.setPadding(dp(14), 0, dp(14), 0);
+        LinearLayout searchField = new LinearLayout(this);
+        searchField.setGravity(Gravity.CENTER_VERTICAL);
+        searchField.setOrientation(LinearLayout.HORIZONTAL);
+        searchField.setBackground(shape(PANEL, TEAL));
+        searchField.setPadding(dp(10), 0, dp(5), 0);
         LinearLayout.LayoutParams searchParams = new LinearLayout.LayoutParams(0, dp(48), 1f);
         searchParams.rightMargin = dp(8);
-        searchBar.addView(search, searchParams);
+        search.setBackgroundColor(Color.TRANSPARENT);
+        search.setPadding(dp(4), 0, dp(4), 0);
+        View voiceSearch = new View(this) {
+            private final android.graphics.Paint iconPaint = new android.graphics.Paint(
+                    android.graphics.Paint.ANTI_ALIAS_FLAG);
+            @Override protected void onDraw(android.graphics.Canvas canvas) {
+                super.onDraw(canvas);
+                iconPaint.setColor(GOLD);
+                iconPaint.setStyle(android.graphics.Paint.Style.STROKE);
+                iconPaint.setStrokeWidth(dp(2.1f));
+                iconPaint.setStrokeCap(android.graphics.Paint.Cap.ROUND);
+                float cx = getWidth() / 2f - dp(2);
+                float cy = getHeight() / 2f - dp(2);
+                float radius = dp(6);
+                canvas.drawCircle(cx, cy, radius, iconPaint);
+                canvas.drawLine(cx + radius * 0.72f, cy + radius * 0.72f,
+                        cx + dp(10), cy + dp(10), iconPaint);
+            }
+        };
+        voiceSearch.setContentDescription("Голосовой поиск");
+        voiceSearch.setFocusable(true);
+        voiceSearch.setFocusableInTouchMode(false);
+        voiceSearch.setBackground(shape(PANEL, 0));
+        voiceSearch.setOnFocusChangeListener((v, focused) ->
+                v.setBackground(shape(focused ? Color.rgb(65, 72, 73) : PANEL, focused ? GOLD : 0)));
+        voiceSearch.setNextFocusRightId(View.NO_ID);
+        LinearLayout.LayoutParams voiceParams = new LinearLayout.LayoutParams(dp(40), dp(40));
+        voiceParams.rightMargin = dp(3);
+        searchField.addView(voiceSearch, voiceParams);
+        voiceSearch.setOnClickListener(v -> startVoiceSearch());
+        searchField.addView(search, new LinearLayout.LayoutParams(0, -1, 1f));
+        Button clearSearch = button("×");
+        clearSearch.setTextSize(23);
+        clearSearch.setContentDescription("Очистить поиск");
+        clearSearch.setVisibility(View.GONE);
+        searchField.addView(clearSearch, new LinearLayout.LayoutParams(dp(38), dp(40)));
+        clearSearch.setOnClickListener(v -> search.setText(""));
+        search.addTextChangedListener(new android.text.TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) { }
+            @Override public void onTextChanged(CharSequence s, int start, int before, int count) {
+                clearSearch.setVisibility(s.length() > 0 ? View.VISIBLE : View.GONE);
+            }
+            @Override public void afterTextChanged(android.text.Editable s) { }
+        });
+        searchBar.addView(searchField, searchParams);
+        Button history = button("История");
+        history.setTextSize(12);
+        LinearLayout.LayoutParams historyParams = new LinearLayout.LayoutParams(dp(82), dp(48));
+        historyParams.rightMargin = dp(6);
+        searchBar.addView(history, historyParams);
+        history.setOnClickListener(v -> showSearchHistory());
         Button find = button("Найти");
+        find.setTextSize(12);
         find.setMinWidth(0);
         LinearLayout.LayoutParams findParams = new LinearLayout.LayoutParams(dp(104), dp(48));
         searchBar.addView(find, findParams);
@@ -671,11 +995,13 @@ public class MainActivity extends Activity {
         });
         LinearLayout.LayoutParams sbp = new LinearLayout.LayoutParams(-1, dp(52)); sbp.bottomMargin = dp(8);
         main.addView(searchBar, sbp);
-        heading = text("Главная", 25, GOLD, true);
-        main.addView(heading, new LinearLayout.LayoutParams(-1, dp(42)));
         progress = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
         progress.setIndeterminate(true);
+        progress.setIndeterminateTintList(android.content.res.ColorStateList.valueOf(GOLD));
         progress.setVisibility(View.GONE);
+        LinearLayout.LayoutParams progressParams = new LinearLayout.LayoutParams(-1, dp(3));
+        progressParams.bottomMargin = dp(5);
+        main.addView(progress, progressParams);
         ScrollView scroll = new ScrollView(this); scroll.setFillViewport(true);
         list = new LinearLayout(this); list.setOrientation(LinearLayout.VERTICAL);
         scroll.addView(list);
@@ -684,8 +1010,479 @@ public class MainActivity extends Activity {
         if (menuItems.getChildCount() > 0) menuItems.getChildAt(0).requestFocus();
     }
 
-    private void addMenu(String label, Runnable action) {
+    private void addSubMenu(LinearLayout parent, String label, String path) {
         Button b = button(label);
+        b.setGravity(Gravity.CENTER_VERTICAL | Gravity.LEFT);
+        b.setTextSize(12);
+        b.setPadding(dp(34), 0, dp(8), 0);
+        LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(-1, dp(39));
+        p.rightMargin = dp(5);
+        p.bottomMargin = dp(2);
+        parent.addView(b, p);
+        b.setOnClickListener(v -> load(path, label));
+    }
+
+    private void showSettings() {
+        LinearLayout panel = new LinearLayout(this);
+        panel.setOrientation(LinearLayout.VERTICAL);
+        panel.setPadding(dp(18), dp(14), dp(18), dp(12));
+        panel.setBackgroundColor(BG);
+        Button login = button("◎   Авторизация / проверка Kinozal");
+        Button mirrorButton = button("◇   Выбрать зеркало");
+        Button updates = button("↻   Проверить обновления");
+        Button diagnostics = button("▤   Диагностика / кэш");
+        Button jackett = button("⌕   Поиск Jackett");
+        Button about = button("ⓘ   О приложении");
+        Button close = button("Закрыть");
+        for (Button action : new Button[]{login, mirrorButton, updates, diagnostics, jackett, about, close}) {
+            action.setTextSize(15);
+            action.setGravity(Gravity.CENTER);
+            LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-1, dp(48));
+            params.bottomMargin = dp(8);
+            panel.addView(action, params);
+        }
+        login.setOnClickListener(v -> { settingsDialog.dismiss(); showLogin(); });
+        mirrorButton.setOnClickListener(v -> { settingsDialog.dismiss(); chooseMirror(); });
+        updates.setOnClickListener(v -> { settingsDialog.dismiss(); new UpdateManager(this).check(); });
+        diagnostics.setOnClickListener(v -> { settingsDialog.dismiss(); showDiagnostics(); });
+        jackett.setOnClickListener(v -> showJackettSettings());
+        about.setOnClickListener(v -> showAbout());
+        close.setOnClickListener(v -> settingsDialog.dismiss());
+        settingsDialog = new AlertDialog.Builder(this).setView(panel).create();
+        settingsDialog.show();
+        if (settingsDialog.getWindow() != null) {
+            settingsDialog.getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(BG));
+            settingsDialog.getWindow().setLayout(Math.min(dp(520), getResources().getDisplayMetrics().widthPixels - dp(48)),
+                    ViewGroup.LayoutParams.WRAP_CONTENT);
+        }
+        login.requestFocus();
+    }
+
+    private void showDiagnostics() {
+        long used = diskCache.getSizeBytes();
+        long limit = diskCache.getMaxBytes();
+        double usedMb = used / (1024d * 1024d);
+        double limitMb = limit / (1024d * 1024d);
+        double percent = limit > 0 ? used * 100d / limit : 0d;
+
+        LinearLayout panel = new LinearLayout(this);
+        panel.setOrientation(LinearLayout.VERTICAL);
+        panel.setPadding(dp(20), dp(14), dp(20), dp(12));
+        panel.setBackgroundColor(BG);
+
+        TextView cacheInfo = text(
+                "Дисковый кэш Kinozal\n"
+                + String.format(java.util.Locale.ROOT, "Занято: %.2f МБ из %.0f МБ (%.1f%%)\n",
+                        usedMb, limitMb, percent)
+                + String.format(java.util.Locale.ROOT, "Файлов в кэше: %d\n", diskCache.getEntryCount())
+                + "Расположение: cache/kinozal_cache\n"
+                + homeCacheDiagnostic,
+                15, Color.WHITE, false);
+        cacheInfo.setLineSpacing(dp(5), 1f);
+        panel.addView(cacheInfo);
+
+        Button refresh = button("Обновить данные");
+        refresh.setGravity(Gravity.CENTER);
+        LinearLayout.LayoutParams refreshParams = new LinearLayout.LayoutParams(-1, dp(44));
+        refreshParams.topMargin = dp(14);
+        panel.addView(refresh, refreshParams);
+        AlertDialog dialog = new AlertDialog.Builder(this)
+                .setTitle("Диагностика")
+                .setView(panel)
+                .setPositiveButton("Закрыть", null)
+                .create();
+        refresh.setOnClickListener(v -> {
+            long current = diskCache.getSizeBytes();
+            cacheInfo.setText("Дисковый кэш Kinozal\n"
+                    + String.format(java.util.Locale.ROOT, "Занято: %.2f МБ из %.0f МБ (%.1f%%)\n",
+                            current / (1024d * 1024d), limitMb, limit > 0 ? current * 100d / limit : 0d)
+                    + String.format(java.util.Locale.ROOT, "Файлов в кэше: %d\n", diskCache.getEntryCount())
+                    + "Расположение: cache/kinozal_cache\n"
+                    + homeCacheDiagnostic);
+        });
+        dialog.show();
+        if (dialog.getWindow() != null) {
+            dialog.getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(BG));
+            dialog.getWindow().setLayout(Math.min(dp(520),
+                    getResources().getDisplayMetrics().widthPixels - dp(48)),
+                    ViewGroup.LayoutParams.WRAP_CONTENT);
+        }
+        dialog.getButton(AlertDialog.BUTTON_POSITIVE).setTextColor(GOLD);
+        refresh.requestFocus();
+    }
+
+    private void showAbout() {
+        LinearLayout panel = new LinearLayout(this);
+        panel.setOrientation(LinearLayout.VERTICAL);
+        panel.setPadding(dp(20), dp(12), dp(20), dp(8));
+        panel.setBackgroundColor(BG);
+
+        TextView description = text(
+                "Kinozal Client — приложение для удобного просмотра каталога Kinozal на Android и Android TV.",
+                15, Color.WHITE, false);
+        description.setLineSpacing(dp(3), 1f);
+        panel.addView(description);
+
+        TextView github = text("GitHub: github.com/Goblin-Mini/KinozalClient",
+                14, TEAL, false);
+        github.setPadding(0, dp(14), 0, dp(14));
+        github.setFocusable(true);
+        github.setOnClickListener(v -> {
+            try {
+                startActivity(new Intent(Intent.ACTION_VIEW,
+                        Uri.parse("https://github.com/Goblin-Mini/KinozalClient")));
+            } catch (Exception e) {
+                showMessage("Не удалось открыть GitHub.");
+            }
+        });
+        panel.addView(github);
+
+        TextView authors = text("Авторство: GoblinMini и ChatGPT", 14, GOLD, true);
+        panel.addView(authors);
+
+        AlertDialog aboutDialog = new AlertDialog.Builder(this)
+                .setTitle("О приложении")
+                .setView(panel)
+                .setPositiveButton("Закрыть", null)
+                .create();
+        aboutDialog.show();
+        if (aboutDialog.getWindow() != null) {
+            aboutDialog.getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(BG));
+            aboutDialog.getWindow().setLayout(Math.min(dp(520),
+                    getResources().getDisplayMetrics().widthPixels - dp(48)),
+                    ViewGroup.LayoutParams.WRAP_CONTENT);
+        }
+        aboutDialog.getButton(AlertDialog.BUTTON_POSITIVE).setTextColor(GOLD);
+        github.setOnFocusChangeListener((v, focused) ->
+                github.setTextColor(focused ? GOLD : TEAL));
+        github.requestFocus();
+    }
+
+    private static final String JACKETT_PREFS = "jackett_settings";
+
+    private String jackettPrimary() {
+        return getSharedPreferences(JACKETT_PREFS, MODE_PRIVATE)
+                .getString("primary", "https://jac.red").trim();
+    }
+
+    private String jackettBackup() {
+        return getSharedPreferences(JACKETT_PREFS, MODE_PRIVATE)
+                .getString("backup", "https://jr.maxvol.pro").trim();
+    }
+
+    private String jackettCustom() {
+        return getSharedPreferences(JACKETT_PREFS, MODE_PRIVATE)
+                .getString("custom", "").trim();
+    }
+
+    private String jackettApiKey() {
+        return getSharedPreferences(JACKETT_PREFS, MODE_PRIVATE)
+                .getString("apikey", "").trim();
+    }
+
+    private void showJackettSettings() {
+        LinearLayout panel = new LinearLayout(this);
+        panel.setOrientation(LinearLayout.VERTICAL);
+        panel.setPadding(dp(18), dp(10), dp(18), dp(8));
+        panel.setBackgroundColor(BG);
+        EditText primary = new EditText(this);
+        EditText backup = new EditText(this);
+        EditText custom = new EditText(this);
+        EditText key = new EditText(this);
+        EditText[] fields = {primary, backup, custom, key};
+        String[] labels = {"Основной сервер", "Резервный сервер", "Свой сервер (необязательно)", "API Key"};
+        String[] values = {jackettPrimary(), jackettBackup(), jackettCustom(), jackettApiKey()};
+        for (int i = 0; i < fields.length; i++) {
+            TextView label = text(labels[i], 13, TEAL, true);
+            label.setPadding(0, dp(5), 0, dp(2));
+            panel.addView(label);
+            EditText field = fields[i];
+            field.setSingleLine(true);
+            field.setText(values[i]);
+            field.setTextColor(Color.WHITE);
+            field.setHintTextColor(TEAL);
+            field.setTextSize(14);
+            field.setPadding(dp(10), dp(7), dp(10), dp(7));
+            field.setBackground(shape(PANEL, TEAL));
+            if (i == 3) field.setInputType(android.text.InputType.TYPE_CLASS_TEXT
+                    | android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD);
+            panel.addView(field, new LinearLayout.LayoutParams(-1, dp(44)));
+        }
+        TextView note = text("Используется Torznab API. Для указанных публичных серверов API Key не требуется. Для своего сервера ключ можно оставить пустым или указать при необходимости.",
+                12, Color.LTGRAY, false);
+        note.setPadding(0, dp(8), 0, 0);
+        panel.addView(note);
+        AlertDialog dialog = new AlertDialog.Builder(this)
+                .setTitle("Поиск Jackett")
+                .setView(panel)
+                .setPositiveButton("Сохранить", null)
+                .setNegativeButton("Отмена", null)
+                .create();
+        dialog.setOnShowListener(v -> {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setTextColor(GOLD);
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(button -> {
+                String p = primary.getText().toString().trim();
+                String b = backup.getText().toString().trim();
+                String c = custom.getText().toString().trim();
+                if (!validJackettBase(p) || !validJackettBase(b)
+                        || (!c.isEmpty() && !validJackettBase(c))) {
+                    showMessage("Укажите корректные адреса серверов с http:// или https://");
+                    return;
+                }
+                getSharedPreferences(JACKETT_PREFS, MODE_PRIVATE).edit()
+                        .putString("primary", p.replaceAll("/+$", ""))
+                        .putString("backup", b.replaceAll("/+$", ""))
+                        .putString("custom", c.replaceAll("/+$", ""))
+                        .putString("apikey", key.getText().toString().trim()).apply();
+                dialog.dismiss();
+                showMessage("Настройки Jackett сохранены");
+            });
+        });
+        dialog.show();
+        if (dialog.getWindow() != null) {
+            dialog.getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(BG));
+            dialog.getWindow().setLayout(Math.min(dp(560),
+                    getResources().getDisplayMetrics().widthPixels - dp(48)),
+                    ViewGroup.LayoutParams.WRAP_CONTENT);
+        }
+    }
+
+    private boolean validJackettBase(String value) {
+        try {
+            Uri uri = Uri.parse(value);
+            return ("https".equalsIgnoreCase(uri.getScheme())
+                    || "http".equalsIgnoreCase(uri.getScheme()))
+                    && uri.getHost() != null;
+        } catch (Exception ignored) { return false; }
+    }
+
+    private void searchJackett(String query, String posterUrl) {
+        String searchTitle = extractJackettSearchTitle(query);
+        LinearLayout panel = new LinearLayout(this);
+        panel.setOrientation(LinearLayout.VERTICAL);
+        panel.setPadding(dp(12), dp(8), dp(12), dp(8));
+        panel.setBackgroundColor(BG);
+        TextView mainRelease = text(query == null ? "" : query.trim(), 16, Color.WHITE, true);
+        mainRelease.setMaxLines(2);
+        mainRelease.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        mainRelease.setPadding(dp(4), dp(2), dp(4), dp(5));
+        panel.addView(mainRelease);
+        TextView status = text("Поиск по: " + searchTitle + "\nПодключение к Jackett…", 13, TEAL, false);
+        status.setPadding(dp(4), 0, dp(4), dp(8));
+        panel.addView(status);
+        ScrollView scroll = new ScrollView(this);
+        scroll.setFocusable(false);
+        scroll.setDescendantFocusability(ViewGroup.FOCUS_AFTER_DESCENDANTS);
+        LinearLayout results = new LinearLayout(this);
+        results.setOrientation(LinearLayout.VERTICAL);
+        scroll.addView(results);
+        panel.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1));
+        AlertDialog dialog = new AlertDialog.Builder(this).setTitle("Другие раздачи")
+                .setView(panel).setNegativeButton("Закрыть", null).create();
+        dialog.show();
+        if (dialog.getWindow() != null) {
+            dialog.getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(BG));
+            dialog.getWindow().setLayout(ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.MATCH_PARENT);
+        }
+        io.execute(() -> {
+            String[] servers = !jackettCustom().isEmpty()
+                    ? new String[]{jackettCustom()}
+                    : new String[]{jackettPrimary(), jackettBackup()};
+            List<Element> found = new ArrayList<>();
+            String used = null;
+            String error = "Серверы не ответили";
+            for (String server : servers) {
+                try {
+                    String encoded = URLEncoder.encode(searchTitle, "UTF-8");
+                    String apiKey = jackettApiKey();
+                    String endpoint = server.replaceAll("/+$", "")
+                            + "/api/v2.0/indexers/all/results/torznab/api?"
+                            + (apiKey.isEmpty() ? "" : "apikey=" + URLEncoder.encode(apiKey, "UTF-8") + "&")
+                            + "t=search&q=" + encoded;
+                    java.net.HttpURLConnection connection =
+                            (java.net.HttpURLConnection) new java.net.URL(endpoint).openConnection();
+                    connection.setConnectTimeout(9000);
+                    connection.setReadTimeout(18000);
+                    connection.setRequestMethod("GET");
+                    connection.setRequestProperty("Accept", "application/xml, text/xml");
+                    int code = connection.getResponseCode();
+                    if (code < 200 || code >= 300) {
+                        error = "HTTP " + code + " от " + server;
+                        connection.disconnect();
+                        continue;
+                    }
+                    java.io.InputStream input = connection.getInputStream();
+                    StringBuilder xml = new StringBuilder();
+                    byte[] buffer = new byte[8192];
+                    int count;
+                    while ((count = input.read(buffer)) != -1) xml.append(new String(buffer, 0, count, StandardCharsets.UTF_8));
+                    input.close();
+                    connection.disconnect();
+                    Document rss = Jsoup.parse(xml.toString(), "", org.jsoup.parser.Parser.xmlParser());
+                    found = new ArrayList<>(rss.select("item"));
+                    used = server;
+                    break;
+                } catch (Exception e) {
+                    error = safe(e.getMessage());
+                }
+            }
+            final List<Element> items = found;
+            final String serverUsed = used;
+            final String failure = error;
+            runOnUiThread(() -> {
+                results.removeAllViews();
+                if (serverUsed == null) {
+                    status.setText("Не удалось выполнить поиск. " + failure
+                            + "\nПроверьте доступность сервера и адрес API.");
+                    return;
+                }
+                status.setText("Найдено: " + items.size() + " · " + serverUsed);
+                if (items.isEmpty()) {
+                    results.addView(text("По этому названию ничего не найдено.", 14, Color.LTGRAY, false));
+                    return;
+                }
+                View firstResult = null;
+                for (Element item : items) {
+                    String name = item.selectFirst("title") == null ? "Без названия" : item.selectFirst("title").text();
+                    String size = jackettAttribute(item, "size");
+                    if ("—".equals(size)) {
+                        Element enclosure = item.selectFirst("enclosure");
+                        if (enclosure != null) size = enclosure.attr("length");
+                    }
+                    size = formatJackettSize(size);
+                    String seeders = jackettAttribute(item, "seeders");
+                    String peers = jackettAttribute(item, "peers");
+                    String tracker = jackettAttribute(item, "jackettindexer");
+                    if ("—".equals(tracker)) tracker = "";
+                    Element link = item.selectFirst("link");
+                    String target = link == null ? "" : link.text().trim();
+                    if (target.isEmpty() && link != null) target = link.attr("href");
+                    if (target.isEmpty()) {
+                        Element enclosure = item.selectFirst("enclosure");
+                        if (enclosure != null) target = enclosure.attr("url");
+                    }
+                    final String resultUrl = target;
+                    LinearLayout row = new LinearLayout(this);
+                    row.setOrientation(LinearLayout.VERTICAL);
+                    row.setPadding(dp(14), dp(10), dp(14), dp(10));
+                    row.setBackground(shape(PANEL, 0));
+                    row.setFocusable(true);
+                    row.setFocusableInTouchMode(true);
+                    row.setClickable(true);
+                    row.setOnFocusChangeListener((view, focused) ->
+                            view.setBackground(shape(focused ? Color.rgb(65, 72, 73) : PANEL, focused ? GOLD : 0)));
+                    TextView titleView = text(name, 15, Color.WHITE, true);
+                    row.addView(titleView);
+                    TextView meta = text((tracker.isEmpty() ? "" : tracker + "  ·  ")
+                            + "Размер: " + size + "  ·  Сиды: " + seeders + "  ·  Пиры: " + peers,
+                            12, TEAL, false);
+                    meta.setPadding(0, dp(4), 0, 0);
+                    row.addView(meta);
+                    if (!resultUrl.isEmpty()) row.setOnClickListener(v -> {
+                        try {
+                            Intent open = new Intent(Intent.ACTION_VIEW, Uri.parse(resultUrl));
+                            open.putExtra("poster", posterUrl == null ? "" : posterUrl);
+                            open.putExtra("title", name);
+                            startActivity(open);
+                        } catch (Exception e) { showMessage("Не удалось открыть ссылку результата."); }
+                    });
+                    LinearLayout.LayoutParams rowParams = new LinearLayout.LayoutParams(-1, -2);
+                    rowParams.bottomMargin = dp(6);
+                    results.addView(row, rowParams);
+                    if (firstResult == null && !resultUrl.isEmpty()) firstResult = row;
+                }
+                if (firstResult != null) {
+                    View focusTarget = firstResult;
+                    focusTarget.post(focusTarget::requestFocus);
+                }
+            });
+        });
+    }
+
+    private String extractJackettSearchTitle(String fullTitle) {
+        if (fullTitle == null) return "";
+        String value = fullTitle.trim();
+        if (value.isEmpty()) return "";
+
+        java.util.regex.Matcher yearMatcher =
+                java.util.regex.Pattern.compile("(?<!\\d)(?:19|20)\\d{2}(?!\\d)").matcher(value);
+        String year = yearMatcher.find() ? yearMatcher.group() : "";
+
+        // Kinozal titles often use slash-separated fields:
+        // Russian title / original title / year / audio / source / codec.
+        // Only the first two title fields are candidates. Never turn release
+        // metadata (WEB-DLRip, HEVC, 1080p, etc.) into the search query.
+        String[] parts = value.split("/");
+        String primaryTitle = parts.length > 0 ? parts[0].trim() : value;
+        String title = primaryTitle;
+
+        for (int i = 1; i < Math.min(parts.length, 3); i++) {
+            String candidate = parts[i].trim().replaceAll("\\s+", " ");
+            if (candidate.isEmpty()) continue;
+            if (!candidate.matches("(?s).*[A-Za-zА-Яа-яЁё]{2,}.*")) continue;
+            if (isJackettReleaseMetadata(candidate)) continue;
+            title = candidate;
+            break;
+        }
+
+        if (title.isEmpty()) title = primaryTitle.isEmpty() ? value : primaryTitle;
+        if (!year.isEmpty() && !title.matches("(?s).*\\b" + year + "\\b.*")) {
+            title = title + " " + year;
+        }
+        return title.replaceAll("\\s+", " ").trim();
+    }
+
+    private boolean isJackettReleaseMetadata(String value) {
+        String normalized = value.toLowerCase(java.util.Locale.ROOT)
+                .replaceAll("[^a-z0-9]+", " ").trim();
+        if (normalized.isEmpty()) return true;
+        return normalized.matches(".*\\b(hevc|h264|h265|x264|x265|av1|avc|"
+                + "web dl|webdl|web rip|webrip|web d lrip|webdlrip|"
+                + "bdrip|brrip|bd rip|hdrip|dvdrip|remux|"
+                + "1080p|2160p|720p|480p|4k|8k|"
+                + "hdr|sdr|imax|proper|repack|"
+                + "aac|ac3|dts|ddp|truehd|atmos|"
+                + "dub|sub|rus|eng|multi|"
+                + "webrip|hdtv|pdtv|dsr|"
+                + "ts|telesync|cam|telecine)\\b.*")
+                || normalized.matches("^(ru|rus|eng|ukr|multi|dub|sub|db|ct)$");
+    }
+
+    private String jackettAttribute(Element item, String name) {
+        if (item == null) return "—";
+        Element direct = item.selectFirst(name);
+        if (direct != null && !direct.text().trim().isEmpty()) return direct.text().trim();
+        for (Element element : item.getAllElements()) {
+            String tag = element.tagName().toLowerCase(java.util.Locale.ROOT);
+            if (("attr".equals(tag) || tag.endsWith(":attr"))
+                    && name.equalsIgnoreCase(element.attr("name"))) {
+                String value = element.attr("value").trim();
+                if (!value.isEmpty()) return value;
+            }
+        }
+        return "—";
+    }
+
+    private String formatJackettSize(String raw) {
+        if (raw == null || raw.trim().isEmpty() || "—".equals(raw)) return "—";
+        try {
+            long bytes = Long.parseLong(raw.replaceAll("[^0-9]", ""));
+            if (bytes <= 0) return "—";
+            double gib = bytes / (1024d * 1024d * 1024d);
+            return String.format(java.util.Locale.US, "%.2f ГБ", gib);
+        } catch (Exception ignored) { return raw; }
+    }
+
+    private void addMenu(String icon, String label, Runnable action) {
+        Button b = button(icon + "   " + label);
+        if ("Недавно смотрели".equals(label)) {
+            android.text.SpannableString menuText =
+                    new android.text.SpannableString(icon + "   " + label);
+            menuText.setSpan(new android.text.style.RelativeSizeSpan(1.2f),
+                    0, icon.length(), android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+            b.setText(menuText);
+        }
         b.setGravity(Gravity.CENTER_VERTICAL | Gravity.LEFT);
         b.setTextSize(14);
         b.setPadding(dp(14), 0, dp(8), 0);
@@ -703,8 +1500,8 @@ public class MainActivity extends Activity {
     private void showMessage(String message) { Toast.makeText(this, message, Toast.LENGTH_LONG).show(); }
 
     private void showPageLoading(String message) {
-        // No in-page spinner: keep the content area clean while the request runs.
-        progress.setVisibility(View.GONE);
+        // A thin activity indicator sits directly below the search field.
+        progress.setVisibility(View.VISIBLE);
         list.removeAllViews();
         status.setText(message);
     }
@@ -714,14 +1511,23 @@ public class MainActivity extends Activity {
     private void load(String path, String title, String postBody) {
         currentPath = path; currentTitle = title; heading.setText(title);
         String cacheKey = (postBody == null ? "GET|" + path : "POST|" + path + "|" + postBody);
+        String scopedCacheKey = client.getMirror() + "|" + cacheKey;
         String cachedPage;
         synchronized (pageCache) { cachedPage = pageCache.get(cacheKey); }
+        if (cachedPage == null && postBody == null) {
+            byte[] saved = diskCache.get("page|" + scopedCacheKey, 3L * 60L * 1000L);
+            if (saved != null) {
+                cachedPage = new String(saved, StandardCharsets.UTF_8);
+                synchronized (pageCache) { pageCache.put(cacheKey, cachedPage); }
+            }
+        }
         if (cachedPage != null) { showLoadedPage(cachedPage); return; }
         showPageLoading("Загрузка каталога…");
         if (sessionWebView != null) {
             fetchBrowserPage(path, postBody, html -> {
                 if (html != null && !html.isEmpty()) {
                     synchronized (pageCache) { pageCache.put(cacheKey, html); }
+                    if (postBody == null) diskCache.put("page|" + scopedCacheKey, html.getBytes(StandardCharsets.UTF_8));
                     showLoadedPage(html);
                 } else {
                     progress.setVisibility(View.GONE);
@@ -734,6 +1540,7 @@ public class MainActivity extends Activity {
                 try {
                     String html = postBody == null ? client.fetch(path) : client.fetchPost(path, postBody);
                     synchronized (pageCache) { pageCache.put(cacheKey, html); }
+                    if (postBody == null) diskCache.put("page|" + scopedCacheKey, html.getBytes(StandardCharsets.UTF_8));
                     runOnUiThread(() -> showLoadedPage(html));
                 } catch (Exception e) {
                     runOnUiThread(() -> { progress.setVisibility(View.GONE); status.setText("Нет соединения");
@@ -783,6 +1590,38 @@ public class MainActivity extends Activity {
             @Override public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
                 return request.isForMainFrame() && !isMirror(request.getUrl());
             }
+            @Override public void onReceivedError(WebView view, WebResourceRequest request,
+                    android.webkit.WebResourceError error) {
+                super.onReceivedError(view, request, error);
+                if (request.isForMainFrame() && pendingBrowserCallback != null) {
+                    lastBrowserError = "Ошибка WebView: " + error.getErrorCode() + " "
+                            + error.getDescription() + "; URL: " + request.getUrl();
+                    BrowserPageCallback cb = pendingBrowserCallback;
+                    pendingBrowserCallback = null;
+                    cb.onPage(null, lastBrowserError);
+                }
+            }
+            @Override public void onReceivedHttpError(WebView view, WebResourceRequest request,
+                    android.webkit.WebResourceResponse response) {
+                super.onReceivedHttpError(view, request, response);
+                if (request.isForMainFrame() && pendingBrowserCallback != null) {
+                    lastBrowserError = "HTTP " + response.getStatusCode() + " "
+                            + response.getReasonPhrase() + "; URL: " + request.getUrl();
+                    BrowserPageCallback cb = pendingBrowserCallback;
+                    pendingBrowserCallback = null;
+                    cb.onPage(null, lastBrowserError);
+                }
+            }
+            @Override public void onReceivedSslError(WebView view,
+                    android.webkit.SslErrorHandler handler, android.net.http.SslError error) {
+                handler.cancel();
+                if (pendingBrowserCallback != null) {
+                    lastBrowserError = "Ошибка SSL: " + error.toString();
+                    BrowserPageCallback cb = pendingBrowserCallback;
+                    pendingBrowserCallback = null;
+                    cb.onPage(null, lastBrowserError);
+                }
+            }
             @Override public void onPageFinished(WebView view, String url) {
                 super.onPageFinished(view, url);
                 if (pendingBrowserCallback != null) {
@@ -793,16 +1632,19 @@ public class MainActivity extends Activity {
                         try { html = new org.json.JSONArray("[" + value + "]").getString(0); }
                         catch (Exception ignored) { }
                         if (html.isEmpty()) {
-                            cb.onPage(null, "Пустая страница браузера");
+                            lastBrowserError = "WebView завершил загрузку, но DOM пустой. URL: " + url;
+                            cb.onPage(null, lastBrowserError);
                             return;
                         }
                         Document loaded = Jsoup.parse(html);
                         boolean loginForm = !loaded.select("form:has(input[type=password])").isEmpty();
                         String pageUrl = view.getUrl() == null ? "" : view.getUrl().toLowerCase(java.util.Locale.ROOT);
                         if (loginForm || pageUrl.contains("login.php") || pageUrl.contains("takelogin.php")) {
-                            cb.onPage(null, "Сессия Kinozal не активна: сайт снова показывает форму входа. Откройте «Авторизация» и войдите.");
+                            lastBrowserError = "Сайт перенаправил на авторизацию. URL: " + view.getUrl();
+                            cb.onPage(null, lastBrowserError);
                             return;
                         }
+                        lastBrowserError = "Первичная страница загружена: " + url + ", HTML=" + html.length() + " символов";
                         cb.onPage(html, null);
                     });
                 }
@@ -861,7 +1703,7 @@ public class MainActivity extends Activity {
         List<Torrent> parsed = parseTorrents(Jsoup.parse(html, client.getMirror()));
         progress.setVisibility(View.GONE);
         torrents.clear(); torrents.addAll(parsed);
-        status.setText("Загружено: " + parsed.size());
+        setCatalogStatus("Раздач", parsed.size());
         renderTorrents(parsed);
         if (parsed.isEmpty()) addEmpty("Страница загружена, но раздачи не найдены. Возможно, фильтр не применился.");
     }
@@ -911,7 +1753,81 @@ public class MainActivity extends Activity {
         return out;
     }
 
+
+
+    private void setSearchSort(String key) {
+        if (key.equals(searchSort)) searchSortDescending = !searchSortDescending;
+        else { searchSort = key; searchSortDescending = true; }
+        // Keep the sort controls attached: rebuilding the whole list steals DPAD
+        // focus for a frame on Android TV. Only the result rows are refreshed.
+        renderTorrents(torrents);
+    }
+
+    private double sizeValue(String value) {
+        if (value == null) return 0;
+        String normalized = value.replace(',', '.').replaceAll("[^0-9.]", "");
+        double number;
+        try { number = Double.parseDouble(normalized); } catch (Exception e) { return 0; }
+        String lower = value.toLowerCase(java.util.Locale.ROOT);
+        if (lower.contains("tb") || lower.contains("тб")) return number * 1024d * 1024d;
+        if (lower.contains("gb") || lower.contains("гб")) return number * 1024d;
+        if (lower.contains("mb") || lower.contains("мб")) return number;
+        return number;
+    }
+
+    private String dateValue(String value) {
+        if (value == null) return "";
+        java.util.regex.Matcher m = java.util.regex.Pattern.compile("(\\d{1,2})[.\\-/](\\d{1,2})[.\\-/](\\d{2,4})").matcher(value);
+        if (m.find()) {
+            String y = m.group(3).length() == 2 ? "20" + m.group(3) : m.group(3);
+            return String.format(java.util.Locale.ROOT, "%04d-%02d-%02d",
+                    Integer.parseInt(y), Integer.parseInt(m.group(2)), Integer.parseInt(m.group(1)));
+        }
+        return value;
+    }
+
     private void renderTorrents(List<Torrent> items) {
+        if (list == null) return;
+        List<Torrent> displayItems = new ArrayList<>(items);
+        boolean isSearch = currentPath != null && currentPath.contains("s=");
+        if (isSearch) {
+            if (searchSortBar == null || searchSortBar.getParent() != list) {
+                searchSortBar = new LinearLayout(this);
+                searchSortBar.setGravity(Gravity.CENTER_VERTICAL);
+                searchSortBar.setPadding(dp(8), dp(4), dp(8), dp(8));
+                sortDateButton = button("");
+                sortSizeButton = button("");
+                sortSeedsButton = button("");
+                for (Button b : new Button[]{sortDateButton, sortSizeButton, sortSeedsButton}) {
+                    LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(0, dp(38), 1f);
+                    p.rightMargin = dp(5);
+                    searchSortBar.addView(b, p);
+                }
+                sortDateButton.setOnClickListener(v -> setSearchSort("date"));
+                sortSizeButton.setOnClickListener(v -> setSearchSort("size"));
+                sortSeedsButton.setOnClickListener(v -> setSearchSort("seeds"));
+                list.addView(searchSortBar);
+            } else {
+                // Preserve the attached sort bar and its focused child.
+                for (int i = list.getChildCount() - 1; i >= 0; i--) {
+                    if (list.getChildAt(i) != searchSortBar) list.removeViewAt(i);
+                }
+            }
+            sortDateButton.setText("Дата" + ("date".equals(searchSort) ? (searchSortDescending ? " ↓" : " ↑") : ""));
+            sortSizeButton.setText("Размер" + ("size".equals(searchSort) ? (searchSortDescending ? " ↓" : " ↑") : ""));
+            sortSeedsButton.setText("Сиды" + ("seeds".equals(searchSort) ? (searchSortDescending ? " ↓" : " ↑") : ""));
+            java.util.Collections.sort(displayItems, (a, b) -> {
+                int cmp;
+                if ("size".equals(searchSort)) cmp = Double.compare(sizeValue(a.size), sizeValue(b.size));
+                else if ("seeds".equals(searchSort)) cmp = Integer.compare(parseInt(a.seeds), parseInt(b.seeds));
+                else cmp = dateValue(a.uploaded).compareTo(dateValue(b.uploaded));
+                return searchSortDescending ? -cmp : cmp;
+            });
+        } else {
+            list.removeAllViews();
+            searchSortBar = null;
+            sortDateButton = sortSizeButton = sortSeedsButton = null;
+        }
         LinearLayout header = new LinearLayout(this);
         header.setGravity(Gravity.CENTER_VERTICAL);
         header.setPadding(dp(14), dp(8), dp(14), dp(8));
@@ -931,7 +1847,7 @@ public class MainActivity extends Activity {
         header.addView(leechesHeader, new LinearLayout.LayoutParams(dp(55), -2));
         list.addView(header);
 
-        for (Torrent t : items) {
+        for (Torrent t : displayItems) {
             LinearLayout row = new LinearLayout(this); row.setGravity(Gravity.CENTER_VERTICAL);
             row.setPadding(dp(14), dp(8), dp(14), dp(8)); row.setBackground(shape(PANEL, 0));
             LinearLayout.LayoutParams rp = new LinearLayout.LayoutParams(-1, dp(66)); rp.bottomMargin = dp(5);
@@ -958,6 +1874,7 @@ public class MainActivity extends Activity {
         pages.addView(prev); pages.addView(next);
         LinearLayout.LayoutParams pp = new LinearLayout.LayoutParams(-1, dp(52)); pp.topMargin = dp(10); list.addView(pages, pp);
         prev.setOnClickListener(v -> changePage(-1)); next.setOnClickListener(v -> changePage(1));
+        animateContentTransition(list);
     }
 
     private void changePage(int delta) {
@@ -966,8 +1883,93 @@ public class MainActivity extends Activity {
         load(path, currentTitle);
     }
 
+    private static final String SEARCH_HISTORY_KEY = "search_history";
+
+    private java.util.ArrayList<String> readSearchHistory() {
+        java.util.ArrayList<String> history = new java.util.ArrayList<>();
+        String raw = getSharedPreferences(PREFS, MODE_PRIVATE).getString(SEARCH_HISTORY_KEY, "[]");
+        try {
+            org.json.JSONArray array = new org.json.JSONArray(raw);
+            for (int i = 0; i < array.length(); i++) {
+                String value = array.optString(i, "").trim();
+                if (!value.isEmpty() && !history.contains(value)) history.add(value);
+            }
+        } catch (Exception ignored) { }
+        return history;
+    }
+
+    private void saveSearchHistory(String query) {
+        java.util.ArrayList<String> history = readSearchHistory();
+        history.remove(query);
+        history.add(0, query);
+        while (history.size() > 30) history.remove(history.size() - 1);
+        org.json.JSONArray array = new org.json.JSONArray();
+        for (String value : history) array.put(value);
+        getSharedPreferences(PREFS, MODE_PRIVATE).edit()
+                .putString(SEARCH_HISTORY_KEY, array.toString()).apply();
+    }
+
+    private void showSearchHistory() {
+        java.util.ArrayList<String> history = readSearchHistory();
+        if (history.isEmpty()) {
+            showMessage("История поиска пока пуста");
+            return;
+        }
+        String[] items = history.toArray(new String[0]);
+        new AlertDialog.Builder(this)
+                .setTitle("История поиска")
+                .setItems(items, (dialog, which) -> {
+                    search.setText(items[which]);
+                    search.setSelection(search.length());
+                    submitSearch();
+                })
+                .setNeutralButton("Очистить", (dialog, which) -> {
+                    getSharedPreferences(PREFS, MODE_PRIVATE).edit()
+                            .remove(SEARCH_HISTORY_KEY).apply();
+                    showMessage("История поиска очищена");
+                })
+                .setNegativeButton("Закрыть", null)
+                .show();
+    }
+
+    private static final int REQUEST_VOICE_SEARCH = 7401;
+
+    private void startVoiceSearch() {
+        android.content.Intent intent = new android.content.Intent(
+                android.speech.RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
+        intent.putExtra(android.speech.RecognizerIntent.EXTRA_LANGUAGE_MODEL,
+                android.speech.RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
+        intent.putExtra(android.speech.RecognizerIntent.EXTRA_LANGUAGE, "ru-RU");
+        intent.putExtra(android.speech.RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, "ru-RU");
+        intent.putExtra(android.speech.RecognizerIntent.EXTRA_PROMPT, "Скажите название фильма или раздачи");
+        intent.putExtra(android.speech.RecognizerIntent.EXTRA_MAX_RESULTS, 1);
+        try {
+            startActivityForResult(intent, REQUEST_VOICE_SEARCH);
+        } catch (android.content.ActivityNotFoundException e) {
+            showMessage("На устройстве не найдено приложение для голосового ввода.");
+        } catch (Exception e) {
+            showMessage("Не удалось запустить голосовой ввод: " + safe(e.getMessage()));
+        }
+    }
+
+    @Override protected void onActivityResult(int requestCode, int resultCode, android.content.Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode != REQUEST_VOICE_SEARCH || resultCode != RESULT_OK || data == null) return;
+        java.util.ArrayList<String> results = data.getStringArrayListExtra(
+                android.speech.RecognizerIntent.EXTRA_RESULTS);
+        if (results != null && !results.isEmpty()) {
+            String recognized = results.get(0);
+            if (recognized != null && !recognized.trim().isEmpty()) {
+                search.setText(recognized.trim());
+                search.setSelection(search.length());
+                submitSearch();
+            }
+        }
+    }
+
     private void submitSearch() {
         String q = search.getText().toString().trim(); if (q.isEmpty()) return;
+        saveSearchHistory(q);
         try { load("browse.php?s=" + URLEncoder.encode(q, "UTF-8"), "Поиск: " + q); }
         catch (Exception e) { showMessage("Ошибка поиска"); }
     }
@@ -1123,8 +2125,8 @@ public class MainActivity extends Activity {
         panel.setOrientation(LinearLayout.VERTICAL);
         panel.setBackgroundColor(BG);
         panel.setMinimumHeight((int)(getResources().getDisplayMetrics().heightPixels * 0.72f));
-        panel.setLayoutParams(new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        panel.setPadding(dp(8), dp(4), dp(8), dp(4));
+
         WebView existingWeb = sessionWebView;
         if (existingWeb == null) {
             existingWeb = new WebView(this);
@@ -1135,11 +2137,11 @@ public class MainActivity extends Activity {
         final WebView web = existingWeb;
         web.setBackgroundColor(Color.WHITE);
         web.setVisibility(View.VISIBLE);
-        web.setMinimumHeight(dp(360));
+        web.setMinimumHeight(dp(300));
         web.setFocusable(true);
         web.setFocusableInTouchMode(true);
         web.setDescendantFocusability(ViewGroup.FOCUS_AFTER_DESCENDANTS);
-        // Let WebView handle DPAD/ENTER itself so focused HTML inputs can open Android TV IME.
+
         WebSettings settings = web.getSettings();
         settings.setJavaScriptEnabled(true);
         settings.setDomStorageEnabled(true);
@@ -1147,6 +2149,7 @@ public class MainActivity extends Activity {
         settings.setSupportMultipleWindows(false);
         settings.setLoadsImagesAutomatically(true);
         settings.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
+
         CookieManager browserCookies = CookieManager.getInstance();
         browserCookies.setAcceptCookie(true);
         CookieManager.setAcceptFileSchemeCookies(false);
@@ -1154,6 +2157,19 @@ public class MainActivity extends Activity {
         final boolean[] textEntryOpen = {false};
         final String[] submittedLogin = {null};
         final String[] submittedPassword = {null};
+
+        String[] saved = client.getSavedCredentials();
+        EditText loginField = new EditText(this);
+        EditText passwordField = new EditText(this);
+        styleCompactCredentialField(loginField, "Логин");
+        styleCompactCredentialField(passwordField, "Пароль");
+        passwordField.setInputType(android.text.InputType.TYPE_CLASS_TEXT
+                | android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD);
+        if (saved != null) {
+            loginField.setText(saved[0]);
+            passwordField.setText(saved[1]);
+        }
+
         web.addJavascriptInterface(new Object() {
             @JavascriptInterface
             public void onTextFieldFocused(String fieldType) {
@@ -1169,29 +2185,24 @@ public class MainActivity extends Activity {
                 submittedPassword[0] = password;
             }
         }, "AndroidTV");
+
         web.setWebChromeClient(new WebChromeClient() {
             @Override public boolean onCreateWindow(WebView view, boolean isDialog,
-                    boolean isUserGesture, android.os.Message resultMsg) {
-                return false;
-            }
+                    boolean isUserGesture, android.os.Message resultMsg) { return false; }
         });
         web.setWebViewClient(new WebViewClient() {
             private boolean allowed(Uri uri) {
                 String host = uri == null ? null : uri.getHost();
-                if (host == null) return false;
-                host = host.toLowerCase(java.util.Locale.ROOT);
-                return host.equals(allowedHost);
+                return host != null && host.equalsIgnoreCase(allowedHost);
             }
             @Override public boolean shouldOverrideUrlLoading(WebView view, String url) {
-                Uri uri = Uri.parse(url);
-                if (allowed(uri)) return false;
+                if (allowed(Uri.parse(url))) return false;
                 showMessage("Переход на посторонний сайт заблокирован.");
                 return true;
             }
             @Override public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
                 if (!request.isForMainFrame()) return false;
-                Uri uri = request.getUrl();
-                if (allowed(uri)) return false;
+                if (allowed(request.getUrl())) return false;
                 showMessage("Рекламный переход заблокирован.");
                 return true;
             }
@@ -1207,7 +2218,8 @@ public class MainActivity extends Activity {
                         callback.onPage(html, html.isEmpty() ? "Пустая страница браузера" : null);
                     });
                 }
-                view.evaluateJavascript("(function(){if(window.__kinozalInputHook)return;window.__kinozalInputHook=true;"
+                view.evaluateJavascript("(function(){"
+                        + "if(!window.__kinozalInputHook){window.__kinozalInputHook=true;"
                         + "document.addEventListener('focusin',function(ev){var e=ev.target;if(!e)return;"
                         + "var tag=(e.tagName||'').toLowerCase(),type=(e.type||'text').toLowerCase();"
                         + "if((tag==='input'&&['text','password','email','search','tel','url','number'].indexOf(type)>=0)"
@@ -1215,8 +2227,14 @@ public class MainActivity extends Activity {
                         + "if(window.AndroidTV&&window.AndroidTV.onTextFieldFocused)"
                         + "window.AndroidTV.onTextFieldFocused(type==='password'?'password':'text');}},true);"
                         + "document.addEventListener('submit',function(ev){var f=ev.target,p=f.querySelector('input[type=password]');"
-                        + "if(!p||!window.AndroidTV)return;var u=f.querySelector('input[type=text],input[type=email],input:not([type])');"
-                        + "window.AndroidTV.onLoginSubmit(u?u.value:'',p.value);},true);})();", null);
+                        + "if(!p||!window.AndroidTV)return;var u=[].slice.call(f.querySelectorAll('input')).find(function(e){"
+                        + "var t=(e.type||'text').toLowerCase(),n=((e.name||'')+' '+(e.id||'')+' '+(e.placeholder||'')).toLowerCase();"
+                        + "return e!==p&&!e.disabled&&t!=='search'&&['text','email'].indexOf(t)>=0&&(/login|user|name|nick|email/.test(n)||!n);});"
+                        + "window.AndroidTV.onLoginSubmit(u?u.value:'',p.value);},true);},true);}"
+                        + "var c=document.querySelector('input[type=checkbox]');if(c){c.focus();}"
+                        + "var f=document.querySelector('iframe[title*=Widget],iframe[title*=challenge],#challenge-form iframe');"
+                        + "if(f){f.setAttribute('tabindex','0');f.focus();}"
+                        + "})();", null);
                 String cookie = browserCookies.getCookie(base);
                 if (cookie != null && !cookie.isEmpty()) {
                     try {
@@ -1227,33 +2245,120 @@ public class MainActivity extends Activity {
             }
         });
 
+        // Username and password are visible together at the top for quick TV input.
+        LinearLayout credentials = new LinearLayout(this);
+        credentials.setGravity(Gravity.CENTER_VERTICAL);
+        credentials.setOrientation(LinearLayout.HORIZONTAL);
+        LinearLayout.LayoutParams fieldParams = new LinearLayout.LayoutParams(0, dp(44), 1f);
+        credentials.addView(loginField, fieldParams);
+        LinearLayout.LayoutParams passParams = new LinearLayout.LayoutParams(0, dp(44), 1f);
+        passParams.leftMargin = dp(6);
+        credentials.addView(passwordField, passParams);
+
+        Button insert = button("Вставить");
+        Button signIn = button("Вход");
+        Button done = button("Готово");
+        LinearLayout.LayoutParams smallAction = new LinearLayout.LayoutParams(dp(112), dp(44));
+        smallAction.leftMargin = dp(6);
+        credentials.addView(insert, smallAction);
+        LinearLayout.LayoutParams signParams = new LinearLayout.LayoutParams(dp(100), dp(44));
+        signParams.leftMargin = dp(6);
+        credentials.addView(signIn, signParams);
+        LinearLayout.LayoutParams doneTopParams = new LinearLayout.LayoutParams(dp(112), dp(44));
+        doneTopParams.leftMargin = dp(6);
+        credentials.addView(done, doneTopParams);
+        panel.addView(credentials, new LinearLayout.LayoutParams(-1, -2));
+
         LinearLayout actions = new LinearLayout(this);
         actions.setGravity(Gravity.CENTER_VERTICAL);
-        actions.setPadding(dp(8), dp(6), dp(8), dp(6));
+        actions.setPadding(0, dp(6), 0, dp(6));
+        Button refresh = button("Обновить");
         Button close = button("Закрыть");
-        Button done = button("Готово");
-        actions.addView(close, new LinearLayout.LayoutParams(0, dp(46), 1f));
-        LinearLayout.LayoutParams doneParams = new LinearLayout.LayoutParams(0, dp(46), 1f);
-        doneParams.leftMargin = dp(8);
-        actions.addView(done, doneParams);
-        TextView hint = text("Пройдите проверку на сайте. Посторонние рекламные переходы и всплывающие окна блокируются.", 13, TEAL, false);
-        hint.setPadding(dp(12), dp(8), dp(12), dp(8));
-        panel.addView(hint, new LinearLayout.LayoutParams(-1, -2));
-        // Match the supplied screenshot: hint, then action buttons, then the site page.
+        LinearLayout.LayoutParams actionParams = new LinearLayout.LayoutParams(0, dp(46), 1f);
+        actions.addView(refresh, actionParams);
+        LinearLayout.LayoutParams closeParams = new LinearLayout.LayoutParams(0, dp(46), 1f);
+        closeParams.leftMargin = dp(6);
+        actions.addView(close, closeParams);
         panel.addView(actions, new LinearLayout.LayoutParams(-1, -2));
-        LinearLayout.LayoutParams webParams = new LinearLayout.LayoutParams(-1, 0, 1f);
-        panel.addView(web, webParams);
+        panel.addView(web, new LinearLayout.LayoutParams(-1, 0, 1f));
 
         AlertDialog dialog = new AlertDialog.Builder(this)
-                .setTitle("Проверка Kinozal")
                 .setView(panel)
                 .create();
-        close.setOnClickListener(v -> {
+
+        Runnable detachWeb = () -> {
             web.stopLoading();
             if (web.getParent() instanceof ViewGroup) ((ViewGroup) web.getParent()).removeView(web);
             web.setVisibility(View.INVISIBLE);
-            root.addView(web, new LinearLayout.LayoutParams(1, 1));
-            dialog.dismiss();
+            if (web.getParent() == null) root.addView(web, new LinearLayout.LayoutParams(1, 1));
+        };
+        close.setOnClickListener(v -> { detachWeb.run(); dialog.dismiss(); });
+        refresh.setOnClickListener(v -> {
+            web.stopLoading();
+            web.reload();
+            status.setText("Обновление проверки Kinozal…");
+        });
+        insert.setOnClickListener(v -> {
+            String username = loginField.getText().toString();
+            String password = passwordField.getText().toString();
+            if (username.trim().isEmpty() || password.isEmpty()) {
+                showMessage("Заполните логин и пароль.");
+                return;
+            }
+            String u = org.json.JSONObject.quote(username);
+            String p = org.json.JSONObject.quote(password);
+            web.evaluateJavascript("(function(){"
+                    + "var p=document.querySelector('input[type=password]');if(!p)return 'NO_FIELDS';"
+                    + "var f=p.closest('form');var scope=f||p.parentElement&&p.parentElement.parentElement||document;"
+                    + "var all=[].slice.call(scope.querySelectorAll('input'));"
+                    + "var u=all.find(function(e){var t=(e.type||'text').toLowerCase();"
+                    + "var n=((e.name||'')+' '+(e.id||'')+' '+(e.placeholder||'')+' '+(e.getAttribute('autocomplete')||'')).toLowerCase();"
+                    + "return e!==p&&!e.disabled&&t!=='search'&&['text','email'].indexOf(t)>=0&&(/login|user|name|nick|email/.test(n)||!n);});"
+                    + "if(!u)return 'NO_FIELDS';"
+                    + "function put(e,v){var setter=Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set;"
+                    + "setter.call(e,v);e.dispatchEvent(new Event('input',{bubbles:true}));"
+                    + "e.dispatchEvent(new Event('change',{bubbles:true}));}"
+                    + "put(u," + u + ");put(p," + p + ");return 'OK';})()", result -> {
+                if (result == null || result.contains("NO_FIELDS")) showMessage("Не найдены поля логина и пароля на странице.");
+                else {
+                    submittedLogin[0] = username;
+                    submittedPassword[0] = password;
+                    try { client.saveCredentials(username, password); }
+                    catch (Exception e) { showMessage("Не удалось сохранить данные входа: " + safe(e.getMessage())); }
+                }
+            });
+        });
+        signIn.setOnClickListener(v -> {
+            String username = loginField.getText().toString();
+            String password = passwordField.getText().toString();
+            if (username.trim().isEmpty() || password.isEmpty()) {
+                showMessage("Заполните логин и пароль.");
+                return;
+            }
+            String u = org.json.JSONObject.quote(username);
+            String p = org.json.JSONObject.quote(password);
+            web.evaluateJavascript("(function(){var p=document.querySelector('input[type=password]');"
+                    + "if(!p)return 'NO_FIELDS';var f=p.closest('form');"
+                    + "var scope=f||p.parentElement&&p.parentElement.parentElement||document;"
+                    + "var all=[].slice.call(scope.querySelectorAll('input'));"
+                    + "var u=all.find(function(e){var t=(e.type||'text').toLowerCase();"
+                    + "var n=((e.name||'')+' '+(e.id||'')+' '+(e.placeholder||'')+' '+(e.getAttribute('autocomplete')||'')).toLowerCase();"
+                    + "return e!==p&&!e.disabled&&t!=='search'&&['text','email'].indexOf(t)>=0&&(/login|user|name|nick|email/.test(n)||!n);});"
+                    + "if(!u)return 'NO_FIELDS';"
+                    + "function put(e,v){var setter=Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set;"
+                    + "setter.call(e,v);e.dispatchEvent(new Event('input',{bubbles:true}));"
+                    + "e.dispatchEvent(new Event('change',{bubbles:true}));}"
+                    + "put(u," + u + ");put(p," + p + ");"
+                    + "if(f){if(f.requestSubmit)f.requestSubmit();else f.submit();return 'SUBMITTED';}"
+                    + "var submit=scope.querySelector('input[type=submit],button[type=submit],input[value*=Войти],button');"
+                    + "if(submit){submit.click();return 'CLICKED';}return 'NO_SUBMIT';})()", result -> {
+                if (result == null || result.contains("NO_FIELDS") || result.contains("NO_SUBMIT")) {
+                    showMessage("Не удалось определить поля или кнопку входа на странице.");
+                    return;
+                }
+                try { client.saveCredentials(username, password); }
+                catch (Exception e) { showMessage("Не удалось сохранить данные входа: " + safe(e.getMessage())); }
+            });
         });
         done.setOnClickListener(v -> {
             browserCookies.flush();
@@ -1271,10 +2376,7 @@ public class MainActivity extends Activity {
                     return;
                 }
             }
-            web.stopLoading();
-            if (web.getParent() instanceof ViewGroup) ((ViewGroup) web.getParent()).removeView(web);
-            web.setVisibility(View.INVISIBLE);
-            root.addView(web, new LinearLayout.LayoutParams(1, 1));
+            detachWeb.run();
             dialog.dismiss();
             showMessage("Браузерная сессия сохранена. Загружаю каталог через WebView.");
             status.setText("Браузерная сессия активна");
@@ -1289,13 +2391,26 @@ public class MainActivity extends Activity {
         });
         dialog.show();
         dialog.getWindow().setLayout(
-                (int)(getResources().getDisplayMetrics().widthPixels * 0.88f),
-                (int)(getResources().getDisplayMetrics().heightPixels * 0.88f));
+                (int)(getResources().getDisplayMetrics().widthPixels * 0.90f),
+                (int)(getResources().getDisplayMetrics().heightPixels * 0.90f));
         web.post(() -> {
             web.requestLayout();
             web.requestFocus();
             web.loadUrl(base + "/login.php?m=5");
         });
+    }
+
+    private void styleCompactCredentialField(EditText field, String hint) {
+        field.setSingleLine(true);
+        field.setTextColor(Color.WHITE);
+        field.setHintTextColor(TEAL);
+        field.setHint(hint);
+        field.setTextSize(14);
+        field.setSelectAllOnFocus(true);
+        field.setFocusable(true);
+        field.setFocusableInTouchMode(true);
+        field.setPadding(dp(10), dp(5), dp(10), dp(5));
+        field.setBackground(shape(PANEL, TEAL));
     }
 
     /**
@@ -1374,14 +2489,136 @@ public class MainActivity extends Activity {
         }).setNegativeButton("Отмена", null).show();
     }
 
-    private void showFavorites() { addEmpty("Избранное пока пусто. Добавление раздач будет подключено вместе с карточкой раздачи."); }
+
+    private java.util.LinkedHashMap<String, Torrent> readFavorites() {
+        java.util.LinkedHashMap<String, Torrent> result = new java.util.LinkedHashMap<>();
+        String raw = getSharedPreferences(PREFS, MODE_PRIVATE).getString(FAVORITES_KEY, "[]");
+        try {
+            org.json.JSONArray array = new org.json.JSONArray(raw);
+            for (int i = 0; i < array.length(); i++) {
+                org.json.JSONObject o = array.optJSONObject(i);
+                if (o == null) continue;
+                Torrent t = new Torrent();
+                t.title = o.optString("title", "");
+                t.href = o.optString("href", "");
+                t.size = o.optString("size", "—");
+                t.seeds = o.optString("seeds", "—");
+                t.leeches = o.optString("leeches", "—");
+                t.uploaded = o.optString("uploaded", "—");
+                if (!t.href.isEmpty()) result.put(t.href, t);
+            }
+        } catch (Exception ignored) { }
+        return result;
+    }
+
+    private void writeFavorites(java.util.LinkedHashMap<String, Torrent> favorites) {
+        org.json.JSONArray array = new org.json.JSONArray();
+        for (Torrent t : favorites.values()) {
+            org.json.JSONObject o = new org.json.JSONObject();
+            try {
+                o.put("title", t.title); o.put("href", t.href); o.put("size", t.size);
+                o.put("seeds", t.seeds); o.put("leeches", t.leeches); o.put("uploaded", t.uploaded);
+                array.put(o);
+            } catch (Exception ignored) { }
+        }
+        getSharedPreferences(PREFS, MODE_PRIVATE).edit().putString(FAVORITES_KEY, array.toString()).apply();
+    }
+
+    private boolean isFavorite(Torrent torrent) {
+        return torrent != null && readFavorites().containsKey(torrent.href);
+    }
+
+    private void toggleFavorite(Torrent torrent) {
+        if (torrent == null || torrent.href == null || torrent.href.isEmpty()) return;
+        java.util.LinkedHashMap<String, Torrent> favorites = readFavorites();
+        if (favorites.containsKey(torrent.href)) {
+            favorites.remove(torrent.href);
+            showMessage("Удалено из избранного");
+        } else {
+            favorites.put(torrent.href, torrent);
+            showMessage("Добавлено в избранное");
+        }
+        writeFavorites(favorites);
+    }
+
+    private void showFavorites() {
+        currentPath = "local:favorites";
+        currentTitle = "Избранное";
+        heading.setText(currentTitle);
+        java.util.List<Torrent> saved = new java.util.ArrayList<>(readFavorites().values());
+        list.removeAllViews();
+        setCatalogStatus("Раздач в избранном", saved.size());
+        if (saved.isEmpty()) addEmpty("Избранное пока пусто. Добавляйте раздачи из карточки.");
+        else renderTorrents(saved);
+    }
+
+
+    private static final String RECENTLY_VIEWED_KEY = "recently_viewed";
+
+    private java.util.LinkedHashMap<String, Torrent> readRecentlyViewed() {
+        java.util.LinkedHashMap<String, Torrent> result = new java.util.LinkedHashMap<>();
+        String raw = getSharedPreferences(PREFS, MODE_PRIVATE).getString(RECENTLY_VIEWED_KEY, "[]");
+        try {
+            org.json.JSONArray array = new org.json.JSONArray(raw);
+            for (int i = 0; i < array.length(); i++) {
+                org.json.JSONObject o = array.optJSONObject(i);
+                if (o == null) continue;
+                Torrent t = new Torrent();
+                t.title = o.optString("title", "");
+                t.href = o.optString("href", "");
+                t.size = o.optString("size", "—");
+                t.seeds = o.optString("seeds", "—");
+                t.leeches = o.optString("leeches", "—");
+                t.uploaded = o.optString("uploaded", "—");
+                if (!t.href.isEmpty()) result.put(t.href, t);
+            }
+        } catch (Exception ignored) { }
+        return result;
+    }
+
+    private void saveRecentlyViewed(Torrent torrent) {
+        if (torrent == null || torrent.href == null || torrent.href.isEmpty()) return;
+        java.util.LinkedHashMap<String, Torrent> recent = readRecentlyViewed();
+        recent.remove(torrent.href);
+        recent.put(torrent.href, torrent);
+        while (recent.size() > 30) {
+            String oldest = recent.keySet().iterator().next();
+            recent.remove(oldest);
+        }
+        org.json.JSONArray array = new org.json.JSONArray();
+        java.util.List<Torrent> values = new java.util.ArrayList<>(recent.values());
+        for (int i = values.size() - 1; i >= 0; i--) {
+            Torrent t = values.get(i);
+            org.json.JSONObject o = new org.json.JSONObject();
+            try {
+                o.put("title", t.title); o.put("href", t.href); o.put("size", t.size);
+                o.put("seeds", t.seeds); o.put("leeches", t.leeches); o.put("uploaded", t.uploaded);
+                array.put(o);
+            } catch (Exception ignored) { }
+        }
+        getSharedPreferences(PREFS, MODE_PRIVATE).edit()
+                .putString(RECENTLY_VIEWED_KEY, array.toString()).apply();
+    }
+
+    private void showRecentlyViewed() {
+        currentPath = "local:recently-viewed";
+        currentTitle = "Недавно смотрели";
+        heading.setText(currentTitle);
+        java.util.List<Torrent> saved = new java.util.ArrayList<>(readRecentlyViewed().values());
+        list.removeAllViews();
+        setCatalogStatus("Недавно смотрели", saved.size());
+        if (saved.isEmpty()) addEmpty("Здесь появятся открытые вами раздачи.");
+        else renderTorrents(saved);
+    }
 
     private static class TorrentDetails {
         String title = "", poster = "", torrentLink = "", sourcePage = "";
+        String imdbRating = "—", kinopoiskRating = "—", kinozalRating = "—", kinozalStars = "☆☆☆☆☆☆☆☆☆☆", kinozalVotes = "";
         final java.util.LinkedHashMap<String, String> fields = new java.util.LinkedHashMap<>();
     }
 
     private void showTorrent(Torrent t) {
+        focusedTorrentSource = getCurrentFocus();
         progress.setVisibility(View.VISIBLE);
         if (sessionWebView != null) {
             fetchBrowserPage(t.href, null, html -> {
@@ -1393,6 +2630,7 @@ public class MainActivity extends Activity {
                 try {
                     Document doc = Jsoup.parse(html, t.href);
                     TorrentDetails details = parseTorrentDetails(doc, t);
+                    saveRecentlyViewed(t);
                     showTorrentDetails(t, details);
                 } catch (Exception e) {
                     showMessage("Не удалось разобрать карточку: " + safe(e.getMessage()));
@@ -1407,6 +2645,7 @@ public class MainActivity extends Activity {
                 TorrentDetails details = parseTorrentDetails(doc, t);
                 runOnUiThread(() -> {
                     progress.setVisibility(View.GONE);
+                    saveRecentlyViewed(t);
                     showTorrentDetails(t, details);
                 });
             } catch (Exception e) {
@@ -1422,6 +2661,38 @@ public class MainActivity extends Activity {
         TorrentDetails data = new TorrentDetails();
         data.title = torrent.title;
         data.sourcePage = torrent.href;
+
+        // All ratings are read from the current Kinozal details HTML.
+        Element imdbLink = doc.selectFirst("a[href*=imdb.com]");
+        if (imdbLink != null) {
+            Element score = imdbLink.selectFirst(".floatright");
+            if (score != null && !score.text().trim().isEmpty()) data.imdbRating = score.text().trim();
+        }
+        Element kpLink = doc.selectFirst("a[href*=kinopoisk.ru]");
+        if (kpLink != null) {
+            Element score = kpLink.selectFirst(".floatright");
+            if (score != null && !score.text().trim().isEmpty()) data.kinopoiskRating = score.text().trim();
+        }
+        Element kzValue = doc.selectFirst("[itemprop=ratingValue]");
+        if (kzValue != null && !kzValue.text().trim().isEmpty()) data.kinozalRating = kzValue.text().trim();
+        Element votes = doc.selectFirst("[itemprop=ratingCount], [itemprop=votes]");
+        if (votes != null) {
+            String count = votes.hasAttr("content") ? votes.attr("content") : votes.text();
+            if (!count.trim().isEmpty()) data.kinozalVotes = count.trim();
+        }
+        Element starbar = doc.selectFirst("#starbar");
+        if (starbar != null) {
+            java.util.regex.Matcher width = java.util.regex.Pattern.compile("([0-9]+(?:\\.[0-9]+)?)px")
+                    .matcher(starbar.attr("style"));
+            if (width.find()) {
+                try {
+                    int filled = Math.max(0, Math.min(10, (int)Math.round(Double.parseDouble(width.group(1)) / 10.0)));
+                    StringBuilder stars = new StringBuilder();
+                    for (int i = 0; i < 10; i++) stars.append(i < filled ? "★" : "☆");
+                    data.kinozalStars = stars.toString();
+                } catch (Exception ignored) { }
+            }
+        }
         Element info = doc.selectFirst(".bx1.justify h2");
         if (info != null) extractBoldFields(info, data.fields);
 
@@ -1500,20 +2771,76 @@ public class MainActivity extends Activity {
         LinearLayout posterColumn = new LinearLayout(this);
         posterColumn.setOrientation(LinearLayout.VERTICAL);
         posterColumn.setGravity(Gravity.TOP | Gravity.CENTER_HORIZONTAL);
+        LinearLayout actionRow = new LinearLayout(this);
+        actionRow.setOrientation(LinearLayout.HORIZONTAL);
+        actionRow.setGravity(Gravity.CENTER_VERTICAL);
+
         Button watch = button("Просмотр");
         watch.setTextSize(15);
         watch.setTextColor(Color.WHITE);
         watch.setBackground(shape(RED, 0));
         watch.setOnFocusChangeListener((v, focused) ->
                 v.setBackground(shape(focused ? Color.rgb(125, 48, 25) : RED, focused ? GOLD : 0)));
-        LinearLayout.LayoutParams watchParams = new LinearLayout.LayoutParams(-1, dp(48));
-        watchParams.bottomMargin = dp(10);
-        posterColumn.addView(watch, watchParams);
+        LinearLayout.LayoutParams watchParams = new LinearLayout.LayoutParams(0, dp(48), 1);
+        watchParams.rightMargin = dp(8);
+        actionRow.addView(watch, watchParams);
+
+        Button favorite = button(isFavorite(torrent) ? "★" : "☆");
+        favorite.setTextSize(25);
+        favorite.setTextColor(GOLD);
+        favorite.setGravity(Gravity.CENTER);
+        favorite.setContentDescription(isFavorite(torrent) ? "Убрать из избранного" : "Добавить в избранное");
+        favorite.setBackground(shape(PANEL, 0));
+        favorite.setOnFocusChangeListener((v, focused) ->
+                v.setBackground(shape(focused ? Color.rgb(65, 72, 73) : PANEL, focused ? GOLD : 0)));
+        favorite.setOnClickListener(v -> {
+            toggleFavorite(torrent);
+            boolean saved = isFavorite(torrent);
+            favorite.setText(saved ? "★" : "☆");
+            favorite.setContentDescription(saved ? "Убрать из избранного" : "Добавить в избранное");
+        });
+        actionRow.addView(favorite, new LinearLayout.LayoutParams(dp(48), dp(48)));
+        posterColumn.addView(actionRow);
+
+        Button downloadTorrent = button("↓  Скачать торрент");
+        downloadTorrent.setTextSize(14);
+        downloadTorrent.setTextColor(GOLD);
+        downloadTorrent.setBackground(shape(PANEL, 0));
+        downloadTorrent.setOnFocusChangeListener((v, focused) ->
+                v.setBackground(shape(focused ? Color.rgb(65, 72, 73) : PANEL, focused ? GOLD : 0)));
+        LinearLayout.LayoutParams downloadParams = new LinearLayout.LayoutParams(-1, dp(42));
+        downloadParams.topMargin = dp(8);
+        downloadParams.bottomMargin = dp(10);
+        posterColumn.addView(downloadTorrent, downloadParams);
 
         ImageView poster = new ImageView(this);
         poster.setScaleType(ImageView.ScaleType.FIT_CENTER);
         poster.setBackground(shape(PANEL, 0));
         posterColumn.addView(poster, new LinearLayout.LayoutParams(-1, dp(260)));
+        LinearLayout ratings = new LinearLayout(this);
+        ratings.setOrientation(LinearLayout.VERTICAL);
+        ratings.setGravity(Gravity.CENTER_HORIZONTAL);
+        ratings.setPadding(dp(2), dp(8), dp(2), dp(2));
+
+        TextView externalRatings = text(
+                "IMDb  " + data.imdbRating + "     Кинопоиск  " + data.kinopoiskRating,
+                10, Color.LTGRAY, false);
+        externalRatings.setGravity(Gravity.CENTER);
+        externalRatings.setSingleLine(true);
+        externalRatings.setIncludeFontPadding(false);
+        ratings.addView(externalRatings, new LinearLayout.LayoutParams(-1, -2));
+
+        TextView kinozalRating = text("Kinozal  " + data.kinozalRating, 12, TEAL, true);
+        kinozalRating.setGravity(Gravity.CENTER);
+        kinozalRating.setPadding(0, dp(3), 0, 0);
+        ratings.addView(kinozalRating, new LinearLayout.LayoutParams(-1, -2));
+
+        TextView stars = text(data.kinozalStars, 13, GOLD, true);
+        stars.setGravity(Gravity.CENTER);
+        stars.setPadding(0, dp(3), 0, 0);
+        ratings.addView(stars, new LinearLayout.LayoutParams(-1, -2));
+
+        posterColumn.addView(ratings, new LinearLayout.LayoutParams(-1, -2));
         LinearLayout.LayoutParams posterParams = new LinearLayout.LayoutParams(dp(190), -1);
         posterParams.rightMargin = dp(12);
         mainArea.addView(posterColumn, posterParams);
@@ -1524,10 +2851,14 @@ public class MainActivity extends Activity {
         tabs.setOrientation(LinearLayout.HORIZONTAL);
         Button descriptionTab = button("Описание");
         Button technicalTab = button("Техданные");
+        Button jackettTab = button("Другие раздачи");
         tabs.addView(descriptionTab, new LinearLayout.LayoutParams(0, dp(44), 1));
         LinearLayout.LayoutParams technicalParams = new LinearLayout.LayoutParams(0, dp(44), 1);
         technicalParams.leftMargin = dp(6);
         tabs.addView(technicalTab, technicalParams);
+        LinearLayout.LayoutParams jackettParams = new LinearLayout.LayoutParams(0, dp(44), 1);
+        jackettParams.leftMargin = dp(6);
+        tabs.addView(jackettTab, jackettParams);
         detailsColumn.addView(tabs);
 
         ScrollView detailsScroll = new ScrollView(this);
@@ -1596,15 +2927,30 @@ public class MainActivity extends Activity {
                 v.setBackground(shape(focused ? Color.rgb(65, 72, 73) : PANEL, focused ? GOLD : 0)));
         descriptionTab.setOnClickListener(v -> { active[0] = 0; render.run(); });
         technicalTab.setOnClickListener(v -> { active[0] = 1; render.run(); });
+        jackettTab.setOnClickListener(v -> searchJackett(torrent.title, data.poster));
         render.run();
 
         watch.setOnClickListener(v -> playTorrent(data));
+        downloadTorrent.setOnClickListener(v -> downloadTorrentFile(data));
         root.setLayoutParams(new ViewGroup.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         AlertDialog dialog = new AlertDialog.Builder(this)
                 .setView(root)
                 .create();
         dialog.show();
+        dialog.setOnDismissListener(ignored -> {
+            View returnFocus = focusedTorrentSource;
+            focusedTorrentSource = null;
+            if (returnFocus != null) {
+                returnFocus.post(() -> {
+                    if (returnFocus.isAttachedToWindow()
+                            && returnFocus.getVisibility() == View.VISIBLE
+                            && returnFocus.isFocusable()) {
+                        returnFocus.requestFocus();
+                    }
+                });
+            }
+        });
         if (dialog.getWindow() != null) {
             android.view.Window window = dialog.getWindow();
             window.setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(BG));
@@ -1696,6 +3042,90 @@ public class MainActivity extends Activity {
         } else {
             downloadTorrentNative(data);
         }
+    }
+
+    private void downloadTorrentFile(TorrentDetails data) {
+        if (data.torrentLink == null || data.torrentLink.isEmpty()) {
+            showMessage("Не удалось найти download.php на странице раздачи.");
+            return;
+        }
+        if (data.torrentLink.startsWith("magnet:")) {
+            showMessage("На странице пока доступна только magnet-ссылка. Обработку magnet продолжим отдельно.");
+            return;
+        }
+
+        WebView web = sessionWebView;
+        if (web == null) {
+            downloadTorrentNative(data);
+            return;
+        }
+
+        // The hidden WebView may still be on the home/catalogue page on the
+        // first visit to a details card. Load the actual details page first:
+        // this establishes the correct same-origin context and Referer before
+        // requesting download.php. fetchBrowserPage waits for onPageFinished.
+        String detailsPage = data.sourcePage;
+        if (detailsPage == null || detailsPage.trim().isEmpty()) {
+            detailsPage = data.torrentLink;
+        }
+        fetchBrowserPage(detailsPage, null, html -> {
+            if (html == null || html.isEmpty()) {
+                downloadTorrentNative(data);
+                return;
+            }
+            startTorrentWebViewFetch(data, web, 0);
+        });
+    }
+
+    private void startTorrentWebViewFetch(TorrentDetails data, WebView web, int retry) {
+        final boolean[] completed = {false};
+        final Runnable fallback = () -> {
+            if (completed[0]) return;
+            completed[0] = true;
+            downloadTorrentNative(data);
+        };
+        final Runnable timeout = () -> fallback.run();
+        browserHandler.postDelayed(timeout, 20000);
+
+        web.addJavascriptInterface(new Object() {
+            @JavascriptInterface
+            public void onTorrentDownloadResult(int statusCode, String base64, String error) {
+                runOnUiThread(() -> {
+                    if (completed[0]) return;
+                    if (statusCode >= 200 && statusCode < 300 && base64 != null && !base64.isEmpty()) {
+                        try {
+                            byte[] bytes = android.util.Base64.decode(base64, android.util.Base64.DEFAULT);
+                            if (bytes.length >= 20 && bytes[0] == 'd') {
+                                completed[0] = true;
+                                browserHandler.removeCallbacks(timeout);
+                                deliverTorrentBytes(data, bytes);
+                                return;
+                            }
+                        } catch (Exception ignored) { }
+                    }
+                    browserHandler.removeCallbacks(timeout);
+                    if (retry == 0) {
+                        // One fresh request handles transient first-load/session races.
+                        startTorrentWebViewFetch(data, web, 1);
+                    } else {
+                        fallback.run();
+                    }
+                });
+            }
+        }, "KinozalDownloadBridge");
+
+        String url = org.json.JSONObject.quote(data.torrentLink);
+        String script = "(function(){try{"
+                + "fetch(" + url + ",{credentials:'include',redirect:'follow',cache:'no-store'})"
+                + ".then(function(r){if(!r.ok){window.KinozalDownloadBridge.onTorrentDownloadResult(r.status,'','HTTP '+r.status);return;}"
+                + "return r.blob().then(function(blob){var reader=new FileReader();"
+                + "reader.onloadend=function(){var value=String(reader.result||'');"
+                + "window.KinozalDownloadBridge.onTorrentDownloadResult(r.status,value.substring(value.indexOf(',')+1),'');};"
+                + "reader.onerror=function(){window.KinozalDownloadBridge.onTorrentDownloadResult(0,'','FileReader error');};"
+                + "reader.readAsDataURL(blob);});})"
+                + ".catch(function(e){window.KinozalDownloadBridge.onTorrentDownloadResult(0,'',String(e));});"
+                + "}catch(e){window.KinozalDownloadBridge.onTorrentDownloadResult(0,'',String(e));}})()";
+        web.evaluateJavascript(script, null);
     }
 
     private void downloadTorrentNative(TorrentDetails data) {
