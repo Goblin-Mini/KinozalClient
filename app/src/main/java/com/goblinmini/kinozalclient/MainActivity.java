@@ -70,6 +70,7 @@ public class MainActivity extends Activity {
     private boolean searchSortDescending = true;
     private LinearLayout searchSortBar;
     private Button sortDateButton, sortSizeButton, sortSeedsButton;
+    private AlertDialog settingsDialog;
     private static final String FAVORITES_KEY = "local_favorites";
     private volatile String lastHtml = "";
     private WebView sessionWebView;
@@ -688,11 +689,30 @@ public class MainActivity extends Activity {
         search.setHint("Название фильма или раздачи");
         search.setTextSize(16);
         search.setImeOptions(EditorInfo.IME_ACTION_SEARCH);
-        search.setBackground(shape(PANEL, TEAL));
-        search.setPadding(dp(14), 0, dp(14), 0);
+        LinearLayout searchField = new LinearLayout(this);
+        searchField.setGravity(Gravity.CENTER_VERTICAL);
+        searchField.setOrientation(LinearLayout.HORIZONTAL);
+        searchField.setBackground(shape(PANEL, TEAL));
+        searchField.setPadding(dp(10), 0, dp(5), 0);
         LinearLayout.LayoutParams searchParams = new LinearLayout.LayoutParams(0, dp(48), 1f);
         searchParams.rightMargin = dp(8);
-        searchBar.addView(search, searchParams);
+        search.setBackgroundColor(Color.TRANSPARENT);
+        search.setPadding(dp(4), 0, dp(4), 0);
+        searchField.addView(search, new LinearLayout.LayoutParams(0, -1, 1f));
+        Button clearSearch = button("×");
+        clearSearch.setTextSize(23);
+        clearSearch.setContentDescription("Очистить поиск");
+        clearSearch.setVisibility(View.GONE);
+        searchField.addView(clearSearch, new LinearLayout.LayoutParams(dp(38), dp(40)));
+        clearSearch.setOnClickListener(v -> search.setText(""));
+        search.addTextChangedListener(new android.text.TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) { }
+            @Override public void onTextChanged(CharSequence s, int start, int before, int count) {
+                clearSearch.setVisibility(s.length() > 0 ? View.VISIBLE : View.GONE);
+            }
+            @Override public void afterTextChanged(android.text.Editable s) { }
+        });
+        searchBar.addView(searchField, searchParams);
         Button history = button("История");
         history.setTextSize(12);
         LinearLayout.LayoutParams historyParams = new LinearLayout.LayoutParams(dp(82), dp(48));
@@ -712,7 +732,11 @@ public class MainActivity extends Activity {
         main.addView(searchBar, sbp);
         progress = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
         progress.setIndeterminate(true);
+        progress.setIndeterminateTintList(android.content.res.ColorStateList.valueOf(TEAL));
         progress.setVisibility(View.GONE);
+        LinearLayout.LayoutParams progressParams = new LinearLayout.LayoutParams(-1, dp(3));
+        progressParams.bottomMargin = dp(5);
+        main.addView(progress, progressParams);
         ScrollView scroll = new ScrollView(this); scroll.setFillViewport(true);
         list = new LinearLayout(this); list.setOrientation(LinearLayout.VERTICAL);
         scroll.addView(list);
@@ -734,16 +758,36 @@ public class MainActivity extends Activity {
     }
 
     private void showSettings() {
-        String[] options = {"Авторизация / проверка Kinozal", "Выбрать зеркало", "Проверить обновления"};
-        new AlertDialog.Builder(this)
-                .setTitle("Настройки")
-                .setItems(options, (dialog, which) -> {
-                    if (which == 0) showLogin();
-                    else if (which == 1) chooseMirror();
-                    else new UpdateManager(this).check();
-                })
-                .setNegativeButton("Закрыть", null)
-                .show();
+        LinearLayout panel = new LinearLayout(this);
+        panel.setOrientation(LinearLayout.VERTICAL);
+        panel.setPadding(dp(18), dp(10), dp(18), dp(12));
+        panel.setBackgroundColor(BG);
+        TextView caption = text("Управление приложением и подключением", 13, TEAL, false);
+        caption.setPadding(dp(4), 0, dp(4), dp(12));
+        panel.addView(caption);
+        Button login = button("◎   Авторизация / проверка Kinozal");
+        Button mirrorButton = button("◇   Выбрать зеркало");
+        Button updates = button("↻   Проверить обновления");
+        Button close = button("Закрыть");
+        for (Button action : new Button[]{login, mirrorButton, updates, close}) {
+            action.setTextSize(15);
+            action.setGravity(Gravity.CENTER);
+            LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-1, dp(48));
+            params.bottomMargin = dp(8);
+            panel.addView(action, params);
+        }
+        login.setOnClickListener(v -> { settingsDialog.dismiss(); showLogin(); });
+        mirrorButton.setOnClickListener(v -> { settingsDialog.dismiss(); chooseMirror(); });
+        updates.setOnClickListener(v -> { settingsDialog.dismiss(); new UpdateManager(this).check(); });
+        close.setOnClickListener(v -> settingsDialog.dismiss());
+        settingsDialog = new AlertDialog.Builder(this).setTitle("Настройки").setView(panel).create();
+        settingsDialog.show();
+        if (settingsDialog.getWindow() != null) {
+            settingsDialog.getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(BG));
+            settingsDialog.getWindow().setLayout(Math.min(dp(520), getResources().getDisplayMetrics().widthPixels - dp(48)),
+                    ViewGroup.LayoutParams.WRAP_CONTENT);
+        }
+        login.requestFocus();
     }
 
     private void addMenu(String label, Runnable action) {
@@ -765,8 +809,8 @@ public class MainActivity extends Activity {
     private void showMessage(String message) { Toast.makeText(this, message, Toast.LENGTH_LONG).show(); }
 
     private void showPageLoading(String message) {
-        // No in-page spinner: keep the content area clean while the request runs.
-        progress.setVisibility(View.GONE);
+        // A thin activity indicator sits directly below the search field.
+        progress.setVisibility(View.VISIBLE);
         list.removeAllViews();
         status.setText(message);
     }
