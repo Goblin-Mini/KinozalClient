@@ -158,9 +158,9 @@ public class MainActivity extends Activity {
         heading.setText("Главная");
         showPageLoading("Подключение к Kinozal…");
         if (sessionWebView != null) {
-            loadHomeSectionsInBrowser(new String[]{"novinki.php", "top.php",
-                    "top.php?t=0&d=0&f=0&k=0&j=&s=0&w=1",
-                    "top.php?t=0&d=0&f=0&k=0&j=&s=0&w=2"},
+            loadHomeSectionsInBrowser(new String[]{"novinki.php", "top.php?c=0&d=0&f=0&j=&k=0&s=0&t=0",
+                    "top.php?c=0&d=0&f=0&j=&k=0&s=0&t=0&w=1",
+                    "top.php?c=0&d=0&f=0&j=&k=0&s=0&t=0&w=2"},
                     new String[]{"Новинки", "Топ раздач", "Топ недели", "Топ месяца"}, 0,
                     new ArrayList<>(), 0);
             return;
@@ -169,9 +169,9 @@ public class MainActivity extends Activity {
             try {
                 String[] paths = {
                         "novinki.php",
-                        "top.php",
-                        "top.php?t=0&d=0&f=0&k=0&j=&s=0&w=1",
-                        "top.php?t=0&d=0&f=0&k=0&j=&s=0&w=2"
+                        "top.php?c=0&d=0&f=0&j=&k=0&s=0&t=0",
+                        "top.php?c=0&d=0&f=0&j=&k=0&s=0&t=0&w=1",
+                        "top.php?c=0&d=0&f=0&j=&k=0&s=0&t=0&w=2"
                 };
                 String[] titles = {"Новинки", "Топ раздач", "Топ недели", "Топ месяца"};
                 List<HomeSection> sections = new ArrayList<>();
