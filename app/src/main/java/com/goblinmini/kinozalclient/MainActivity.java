@@ -747,6 +747,13 @@ public class MainActivity extends Activity {
     }
 
     private void restoreBrowserSession(String cookieHeader) {
+        // Restore the same authenticated browser session into the native HTTP
+        // cookie jar as well. The WebView and HttpURLConnection keep separate jars.
+        try {
+            client.importBrowserCookies(cookieHeader);
+        } catch (Exception e) {
+            showMessage("Не удалось восстановить HTTP-сессию Kinozal: " + safe(e.getMessage()));
+        }
         WebView web = new WebView(this);
         sessionWebView = web;
         web.setVisibility(View.INVISIBLE);
@@ -1819,13 +1826,27 @@ public class MainActivity extends Activity {
             return;
         }
 
-        // Download through the same WebView session that opened the details page.
-        // This preserves Cloudflare/session cookies and the real details-page Referer.
         WebView web = sessionWebView;
-        if (web != null) {
-            // evaluateJavascript does not await a returned Promise. Use a JS bridge
-            // so the response is delivered only after the authenticated fetch finishes.
-            web.addJavascriptInterface(new Object() {
+        if (web == null || data.sourcePage == null || data.sourcePage.isEmpty()) {
+            downloadTorrentNative(data);
+            return;
+        }
+
+        // Details are now parsed by the native client, so the shared WebView is
+        // not necessarily displaying this torrent. Navigate it to the exact
+        // details page first: Kinozal may validate the download Referer as well
+        // as the authenticated cookies.
+        fetchBrowserPage(data.sourcePage, null, pageHtml -> {
+            if (pageHtml == null || pageHtml.isEmpty()) {
+                downloadTorrentNative(data);
+                return;
+            }
+            WebView activeWeb = sessionWebView;
+            if (activeWeb == null) {
+                downloadTorrentNative(data);
+                return;
+            }
+            activeWeb.addJavascriptInterface(new Object() {
                 @JavascriptInterface
                 public void onTorrentResult(int statusCode, String base64, String error) {
                     runOnUiThread(() -> {
@@ -1837,8 +1858,6 @@ public class MainActivity extends Activity {
                                 showMessage("Не удалось прочитать торрент: " + safe(e.getMessage()));
                             }
                         } else {
-                            // Keep the native retry as a fallback, but do not silently
-                            // treat the unresolved JS Promise as a successful response.
                             downloadTorrentNative(data);
                         }
                     });
@@ -1854,10 +1873,8 @@ public class MainActivity extends Activity {
                     + "reader.onerror=function(){window.KinozalTorrentBridge.onTorrentResult(0,'','FileReader error');};"
                     + "reader.readAsDataURL(blob);});})"
                     + ".catch(function(e){window.KinozalTorrentBridge.onTorrentResult(0,'',String(e));});})()";
-            web.evaluateJavascript(script, null);
-        } else {
-            downloadTorrentNative(data);
-        }
+            activeWeb.evaluateJavascript(script, null);
+        });
     }
 
     private void downloadTorrentNative(TorrentDetails data) {
