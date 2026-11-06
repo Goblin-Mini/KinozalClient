@@ -86,15 +86,51 @@ public class MainActivity extends Activity {
         new AlertDialog.Builder(this)
                 .setTitle("Диагностика получения magnet")
                 .setMessage(log)
-                .setPositiveButton("Копировать", (d, w) -> {
-                    android.content.ClipboardManager clipboard = (android.content.ClipboardManager)
-                            getSystemService(CLIPBOARD_SERVICE);
-                    if (clipboard != null) clipboard.setPrimaryClip(
-                            android.content.ClipData.newPlainText("Kinozal magnet diagnostics", log));
-                    showMessage("Журнал скопирован");
+                .setPositiveButton("Отправить", (d, w) -> {
+                    try {
+                        Intent share = new Intent(Intent.ACTION_SEND);
+                        share.setType("text/plain");
+                        share.putExtra(Intent.EXTRA_SUBJECT, "KinozalClient — диагностика magnet");
+                        share.putExtra(Intent.EXTRA_TEXT, log);
+                        startActivity(Intent.createChooser(share, "Отправить журнал"));
+                    } catch (Exception e) {
+                        showMessage("Не удалось открыть отправку: " + safeDiag(e.getMessage()));
+                    }
                 })
+                .setNeutralButton("Сохранить файл", (d, w) -> saveMagnetDiagnostics(log))
                 .setNegativeButton("Закрыть", null)
                 .show();
+    }
+
+    private void saveMagnetDiagnostics(String log) {
+        try {
+            if (android.os.Build.VERSION.SDK_INT >= 29) {
+                android.content.ContentValues values = new android.content.ContentValues();
+                values.put(android.provider.MediaStore.Downloads.DISPLAY_NAME,
+                        "kinozal-magnet-diagnostics.txt");
+                values.put(android.provider.MediaStore.Downloads.MIME_TYPE, "text/plain");
+                values.put(android.provider.MediaStore.Downloads.RELATIVE_PATH,
+                        android.os.Environment.DIRECTORY_DOWNLOADS + "/KinozalClient");
+                android.net.Uri uri = getContentResolver().insert(
+                        android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI, values);
+                if (uri == null) throw new java.io.IOException("Не удалось создать файл в Downloads");
+                try (java.io.OutputStream out = getContentResolver().openOutputStream(uri)) {
+                    if (out == null) throw new java.io.IOException("Не удалось открыть файл");
+                    out.write(log.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                }
+                showMessage("Журнал сохранён: Downloads/KinozalClient/kinozal-magnet-diagnostics.txt");
+            } else {
+                java.io.File dir = getExternalFilesDir(android.os.Environment.DIRECTORY_DOCUMENTS);
+                if (dir == null) throw new java.io.IOException("Папка документов недоступна");
+                java.io.File file = new java.io.File(dir, "kinozal-magnet-diagnostics.txt");
+                try (java.io.FileOutputStream out = new java.io.FileOutputStream(file)) {
+                    out.write(log.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                }
+                showMessage("Журнал сохранён: " + file.getAbsolutePath());
+            }
+        } catch (Exception e) {
+            showMessage("Ошибка сохранения журнала: " + safeDiag(e.getMessage()));
+        }
     }
 
     private final ExecutorService io = Executors.newSingleThreadExecutor();
