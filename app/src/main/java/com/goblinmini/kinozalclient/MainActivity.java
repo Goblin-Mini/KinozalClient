@@ -1854,14 +1854,21 @@ public class MainActivity extends Activity {
         LinearLayout ratings = new LinearLayout(this);
         ratings.setOrientation(LinearLayout.VERTICAL);
         ratings.setGravity(Gravity.CENTER_HORIZONTAL);
-        ratings.setPadding(dp(3), dp(8), dp(3), dp(2));
-        ratings.addView(text("IMDb   " + data.imdbRating, 12, Color.LTGRAY, false));
-        ratings.addView(text("Кинопоиск   " + data.kinopoiskRating, 12, Color.LTGRAY, false));
-        ratings.addView(text("Kinozal   " + data.kinozalRating, 12, TEAL, true));
-        TextView stars = text(data.kinozalStars, 13, GOLD, true);
-        ratings.addView(stars);
-        if (!data.kinozalVotes.isEmpty())
-            ratings.addView(text("Голосов: " + data.kinozalVotes, 10, Color.LTGRAY, false));
+        ratings.setPadding(dp(2), dp(8), dp(2), dp(2));
+
+        TextView externalRatings = text(
+                "IMDb  " + data.imdbRating + "     Кинопоиск  " + data.kinopoiskRating,
+                10, Color.LTGRAY, false);
+        externalRatings.setGravity(Gravity.CENTER);
+        externalRatings.setSingleLine(true);
+        externalRatings.setIncludeFontPadding(false);
+        ratings.addView(externalRatings, new LinearLayout.LayoutParams(-1, -2));
+
+        TextView kinozalRating = text("Kinozal  " + data.kinozalRating, 12, TEAL, true);
+        kinozalRating.setGravity(Gravity.CENTER);
+        kinozalRating.setPadding(0, dp(3), 0, 0);
+        ratings.addView(kinozalRating, new LinearLayout.LayoutParams(-1, -2));
+
         posterColumn.addView(ratings, new LinearLayout.LayoutParams(-1, -2));
         LinearLayout.LayoutParams posterParams = new LinearLayout.LayoutParams(dp(190), -1);
         posterParams.rightMargin = dp(12);
