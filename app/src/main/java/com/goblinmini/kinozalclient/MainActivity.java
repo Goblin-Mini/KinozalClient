@@ -789,7 +789,20 @@ public class MainActivity extends Activity {
                 if (pendingBrowserCallback != null) {
                     BrowserPageCallback cb = pendingBrowserCallback;
                     pendingBrowserCallback = null;
-                    view.evaluateJavascript("(function(){var d=document.documentElement;if(!d)return '';var m=document.querySelector('a.TSA_magnet[href],a[href^=\"magnet:\"]');if(m){var b=document.createElement('a');b.id='__kinozal_magnet_bridge';b.setAttribute('href',m.getAttribute('href'));d.appendChild(b);}return d.outerHTML;})()", value -> {
+                    // Kinozal may append the magnet control after the main document's
+                    // onPageFinished event. Wait briefly for the live DOM element.
+                    String captureScript = "(function(){return new Promise(function(resolve){"
+                            + "var started=Date.now();"
+                            + "function capture(){"
+                            + "var d=document.documentElement;if(!d){resolve('');return;}"
+                            + "var m=d.querySelector('a.TSA_magnet[href],a[href^=\\\"magnet:\\"]');"
+                            + "if(m){var b=d.querySelector('#__kinozal_magnet_bridge');"
+                            + "if(!b){b=document.createElement('a');b.id='__kinozal_magnet_bridge';d.appendChild(b);}"
+                            + "b.setAttribute('href',m.getAttribute('href'));}"
+                            + "if(m||Date.now()-started>=10000){resolve(d.outerHTML);return;}"
+                            + "setTimeout(capture,250);}"
+                            + "capture();});})()";
+                    view.evaluateJavascript(captureScript, value -> {
                         String html = "";
                         try { html = new org.json.JSONArray("[" + value + "]").getString(0); }
                         catch (Exception ignored) { }
