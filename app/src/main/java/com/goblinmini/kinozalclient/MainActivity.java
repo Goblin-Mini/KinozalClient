@@ -797,9 +797,17 @@ public class MainActivity extends Activity {
                             cb.onPage(null, "Пустая страница браузера");
                             return;
                         }
-                        Document loaded = Jsoup.parse(html);
+                        String pageUrlRaw = view.getUrl() == null ? "" : view.getUrl();
+                        Document loaded = Jsoup.parse(html, pageUrlRaw);
                         boolean loginForm = !loaded.select("form:has(input[type=password])").isEmpty();
-                        String pageUrl = view.getUrl() == null ? "" : view.getUrl().toLowerCase(java.util.Locale.ROOT);
+                        String pageUrl = pageUrlRaw.toLowerCase(java.util.Locale.ROOT);
+                        playbackLog("BROWSER_HTML_CAPTURE url=" + safe(pageUrlRaw)
+                                + " length=" + html.length()
+                                + " tsaMagnet=" + html.contains("TSA_magnet")
+                                + " magnetUri=" + html.toLowerCase(java.util.Locale.ROOT).contains("magnet:?")
+                                + " hrefCount=" + loaded.select("a[href]").size()
+                                + " title=" + safe(loaded.title())
+                                + " loginForm=" + loginForm);
                         if (loginForm || pageUrl.contains("login.php") || pageUrl.contains("takelogin.php")) {
                             cb.onPage(null, "Сессия Kinozal не активна: сайт снова показывает форму входа. Откройте «Авторизация» и войдите.");
                             return;
@@ -1387,12 +1395,20 @@ public class MainActivity extends Activity {
         if (sessionWebView != null) {
             fetchBrowserPage(t.href, null, html -> {
                 progress.setVisibility(View.GONE);
+                playbackLog("DETAIL_BROWSER_CALLBACK htmlPresent=" + (html != null)
+                        + " length=" + (html == null ? -1 : html.length())
+                        + " requestedUrl=" + safe(t.href));
                 if (html == null || html.isEmpty()) {
                     showMessage("Не удалось загрузить карточку через браузерную сессию.");
                     return;
                 }
                 try {
                     Document doc = Jsoup.parse(html, t.href);
+                    playbackLog("DETAIL_HTML_PARSE base=" + safe(doc.baseUri())
+                            + " title=" + safe(doc.title())
+                            + " tsaMagnet=" + !doc.select("a.TSA_magnet[href]").isEmpty()
+                            + " magnetUri=" + !doc.select("a[href^=magnet:]").isEmpty()
+                            + " hrefCount=" + doc.select("a[href]").size());
                     TorrentDetails details = parseTorrentDetails(doc, t);
                     showTorrentDetails(t, details);
                 } catch (Exception e) {
