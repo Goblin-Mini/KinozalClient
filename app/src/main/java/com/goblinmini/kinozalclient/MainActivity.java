@@ -1608,12 +1608,21 @@ public class MainActivity extends Activity {
         technicalTab.setOnClickListener(v -> { active[0] = 1; render.run(); });
         render.run();
 
-        watch.setOnClickListener(v -> playTorrent(data));
         root.setLayoutParams(new ViewGroup.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         AlertDialog dialog = new AlertDialog.Builder(this)
                 .setView(root)
                 .create();
+        // Close the modal details window before handing the URI/file to another app.
+        // Posting the launch after dismissal avoids a first-launch race while the
+        // dialog still owns window focus, especially on Android TV devices.
+        watch.setOnClickListener(v -> {
+            if (!v.isEnabled()) return;
+            v.setEnabled(false);
+            v.setAlpha(0.65f);
+            dialog.dismiss();
+            browserHandler.postDelayed(() -> playTorrent(data), 250);
+        });
         dialog.show();
         if (dialog.getWindow() != null) {
             android.view.Window window = dialog.getWindow();
