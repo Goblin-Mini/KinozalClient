@@ -68,7 +68,8 @@ public class MainActivity extends Activity {
     private int page = 0;
     private String searchSort = "date";
     private boolean searchSortDescending = true;
-    private String pendingSortFocus = null;
+    private LinearLayout searchSortBar;
+    private Button sortDateButton, sortSizeButton, sortSeedsButton;
     private static final String FAVORITES_KEY = "local_favorites";
     private volatile String lastHtml = "";
     private WebView sessionWebView;
@@ -977,8 +978,8 @@ public class MainActivity extends Activity {
     private void setSearchSort(String key) {
         if (key.equals(searchSort)) searchSortDescending = !searchSortDescending;
         else { searchSort = key; searchSortDescending = true; }
-        pendingSortFocus = key;
-        list.removeAllViews();
+        // Keep the sort controls attached: rebuilding the whole list steals DPAD
+        // focus for a frame on Android TV. Only the result rows are refreshed.
         renderTorrents(torrents);
     }
 
@@ -1007,8 +1008,33 @@ public class MainActivity extends Activity {
 
     private void renderTorrents(List<Torrent> items) {
         if (list == null) return;
-        List<Torrent> displayItems = new ArrayList<>(items);
-        if (currentPath != null && currentPath.contains("s=")) {
+        boolean isSearch = currentPath != null && currentPath.contains("s=");
+        if (isSearch) {
+            if (searchSortBar == null || searchSortBar.getParent() != list) {
+                searchSortBar = new LinearLayout(this);
+                searchSortBar.setGravity(Gravity.CENTER_VERTICAL);
+                searchSortBar.setPadding(dp(8), dp(4), dp(8), dp(8));
+                sortDateButton = button("");
+                sortSizeButton = button("");
+                sortSeedsButton = button("");
+                for (Button b : new Button[]{sortDateButton, sortSizeButton, sortSeedsButton}) {
+                    LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(0, dp(38), 1f);
+                    p.rightMargin = dp(5);
+                    searchSortBar.addView(b, p);
+                }
+                sortDateButton.setOnClickListener(v -> setSearchSort("date"));
+                sortSizeButton.setOnClickListener(v -> setSearchSort("size"));
+                sortSeedsButton.setOnClickListener(v -> setSearchSort("seeds"));
+                list.addView(searchSortBar);
+            } else {
+                // Preserve the attached sort bar and its focused child.
+                for (int i = list.getChildCount() - 1; i >= 0; i--) {
+                    if (list.getChildAt(i) != searchSortBar) list.removeViewAt(i);
+                }
+            }
+            sortDateButton.setText("Дата" + ("date".equals(searchSort) ? (searchSortDescending ? " ↓" : " ↑") : ""));
+            sortSizeButton.setText("Размер" + ("size".equals(searchSort) ? (searchSortDescending ? " ↓" : " ↑") : ""));
+            sortSeedsButton.setText("Сиды" + ("seeds".equals(searchSort) ? (searchSortDescending ? " ↓" : " ↑") : ""));
             java.util.Collections.sort(displayItems, (a, b) -> {
                 int cmp;
                 if ("size".equals(searchSort)) cmp = Double.compare(sizeValue(a.size), sizeValue(b.size));
@@ -1016,27 +1042,10 @@ public class MainActivity extends Activity {
                 else cmp = dateValue(a.uploaded).compareTo(dateValue(b.uploaded));
                 return searchSortDescending ? -cmp : cmp;
             });
-            LinearLayout sortBar = new LinearLayout(this);
-            sortBar.setGravity(Gravity.CENTER_VERTICAL);
-            sortBar.setPadding(dp(8), dp(4), dp(8), dp(8));
-            Button date = button("Дата" + ("date".equals(searchSort) ? (searchSortDescending ? " ↓" : " ↑") : ""));
-            Button size = button("Размер" + ("size".equals(searchSort) ? (searchSortDescending ? " ↓" : " ↑") : ""));
-            Button seeds = button("Сиды" + ("seeds".equals(searchSort) ? (searchSortDescending ? " ↓" : " ↑") : ""));
-            for (Button b : new Button[]{date, size, seeds}) {
-                LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(0, dp(38), 1f);
-                p.rightMargin = dp(5);
-                sortBar.addView(b, p);
-            }
-            date.setOnClickListener(v -> setSearchSort("date"));
-            size.setOnClickListener(v -> setSearchSort("size"));
-            seeds.setOnClickListener(v -> setSearchSort("seeds"));
-            list.addView(sortBar);
-            if (pendingSortFocus != null) {
-                Button target = "size".equals(pendingSortFocus) ? size
-                        : "seeds".equals(pendingSortFocus) ? seeds : date;
-                pendingSortFocus = null;
-                target.post(target::requestFocus);
-            }
+        } else {
+            list.removeAllViews();
+            searchSortBar = null;
+            sortDateButton = sortSizeButton = sortSeedsButton = null;
         }
         LinearLayout header = new LinearLayout(this);
         header.setGravity(Gravity.CENTER_VERTICAL);
