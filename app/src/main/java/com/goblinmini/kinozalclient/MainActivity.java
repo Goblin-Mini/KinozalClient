@@ -962,10 +962,11 @@ public class MainActivity extends Activity {
         Button login = button("◎   Авторизация / проверка Kinozal");
         Button mirrorButton = button("◇   Выбрать зеркало");
         Button updates = button("↻   Проверить обновления");
+        Button diagnostics = button("▤   Диагностика / кэш");
         Button jackett = button("⌕   Поиск Jackett");
         Button about = button("ⓘ   О приложении");
         Button close = button("Закрыть");
-        for (Button action : new Button[]{login, mirrorButton, updates, jackett, about, close}) {
+        for (Button action : new Button[]{login, mirrorButton, updates, diagnostics, jackett, about, close}) {
             action.setTextSize(15);
             action.setGravity(Gravity.CENTER);
             LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-1, dp(48));
@@ -975,6 +976,7 @@ public class MainActivity extends Activity {
         login.setOnClickListener(v -> { settingsDialog.dismiss(); showLogin(); });
         mirrorButton.setOnClickListener(v -> { settingsDialog.dismiss(); chooseMirror(); });
         updates.setOnClickListener(v -> { settingsDialog.dismiss(); new UpdateManager(this).check(); });
+        diagnostics.setOnClickListener(v -> { settingsDialog.dismiss(); showDiagnostics(); });
         jackett.setOnClickListener(v -> showJackettSettings());
         about.setOnClickListener(v -> showAbout());
         close.setOnClickListener(v -> settingsDialog.dismiss());
@@ -986,6 +988,57 @@ public class MainActivity extends Activity {
                     ViewGroup.LayoutParams.WRAP_CONTENT);
         }
         login.requestFocus();
+    }
+
+    private void showDiagnostics() {
+        long used = diskCache.getSizeBytes();
+        long limit = diskCache.getMaxBytes();
+        double usedMb = used / (1024d * 1024d);
+        double limitMb = limit / (1024d * 1024d);
+        double percent = limit > 0 ? used * 100d / limit : 0d;
+
+        LinearLayout panel = new LinearLayout(this);
+        panel.setOrientation(LinearLayout.VERTICAL);
+        panel.setPadding(dp(20), dp(14), dp(20), dp(12));
+        panel.setBackgroundColor(BG);
+
+        TextView cacheInfo = text(
+                "Дисковый кэш Kinozal\\n"
+                + String.format(java.util.Locale.ROOT, "Занято: %.2f МБ из %.0f МБ (%.1f%%)\\n",
+                        usedMb, limitMb, percent)
+                + String.format(java.util.Locale.ROOT, "Файлов в кэше: %d\\n", diskCache.getEntryCount())
+                + "Расположение: cache/kinozal_cache",
+                15, Color.WHITE, false);
+        cacheInfo.setLineSpacing(dp(5), 1f);
+        panel.addView(cacheInfo);
+
+        Button refresh = button("Обновить данные");
+        refresh.setGravity(Gravity.CENTER);
+        LinearLayout.LayoutParams refreshParams = new LinearLayout.LayoutParams(-1, dp(44));
+        refreshParams.topMargin = dp(14);
+        panel.addView(refresh, refreshParams);
+        AlertDialog dialog = new AlertDialog.Builder(this)
+                .setTitle("Диагностика")
+                .setView(panel)
+                .setPositiveButton("Закрыть", null)
+                .create();
+        refresh.setOnClickListener(v -> {
+            long current = diskCache.getSizeBytes();
+            cacheInfo.setText("Дисковый кэш Kinozal\\n"
+                    + String.format(java.util.Locale.ROOT, "Занято: %.2f МБ из %.0f МБ (%.1f%%)\\n",
+                            current / (1024d * 1024d), limitMb, limit > 0 ? current * 100d / limit : 0d)
+                    + String.format(java.util.Locale.ROOT, "Файлов в кэше: %d\\n", diskCache.getEntryCount())
+                    + "Расположение: cache/kinozal_cache");
+        });
+        dialog.show();
+        if (dialog.getWindow() != null) {
+            dialog.getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(BG));
+            dialog.getWindow().setLayout(Math.min(dp(520),
+                    getResources().getDisplayMetrics().widthPixels - dp(48)),
+                    ViewGroup.LayoutParams.WRAP_CONTENT);
+        }
+        dialog.getButton(AlertDialog.BUTTON_POSITIVE).setTextColor(GOLD);
+        refresh.requestFocus();
     }
 
     private void showAbout() {
