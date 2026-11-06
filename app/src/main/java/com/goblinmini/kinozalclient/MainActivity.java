@@ -278,6 +278,8 @@ public class MainActivity extends Activity {
                 sections.add(section);
                 diskCache.put("home|" + client.getMirror() + "|" + paths[index],
                         html.getBytes(StandardCharsets.UTF_8));
+                renderHomeSection(section);
+                setCatalogStatus("Загружено лент", sections.size());
             }
             status.setText("Загружено разделов: " + (index + 1) + " из " + paths.length);
             browserHandler.postDelayed(() -> loadHomeSectionsInBrowser(
@@ -649,51 +651,75 @@ public class MainActivity extends Activity {
 
     private void renderHome(List<HomeSection> sections) {
         list.removeAllViews();
-        for (HomeSection section : sections) {
-            TextView sectionTitle = text(section.title, 20, GOLD, true);
-            LinearLayout.LayoutParams titleParams = new LinearLayout.LayoutParams(-1, dp(38));
-            titleParams.topMargin = dp(10);
-            list.addView(sectionTitle, titleParams);
-            android.widget.HorizontalScrollView horizontal = new android.widget.HorizontalScrollView(this);
-            horizontal.setHorizontalScrollBarEnabled(false);
-            horizontal.setFillViewport(false);
-            LinearLayout strip = new LinearLayout(this);
-            strip.setOrientation(LinearLayout.HORIZONTAL);
-            for (HomePoster item : section.items) {
-                LinearLayout card = new LinearLayout(this);
-                card.setOrientation(LinearLayout.VERTICAL);
-                card.setPadding(dp(5), dp(5), dp(5), dp(5));
-                card.setBackground(shape(PANEL, 0));
-                card.setFocusable(true);
-                card.setClickable(true);
-                card.setOnFocusChangeListener((v, focused) ->
-                        v.setBackground(shape(focused ? Color.rgb(57, 68, 70) : PANEL, focused ? GOLD : 0)));
-                ImageView poster = new ImageView(this);
-                poster.setScaleType(ImageView.ScaleType.CENTER_CROP);
-                poster.setBackground(shape(Color.rgb(40, 45, 49), 0));
-                card.addView(poster, new LinearLayout.LayoutParams(dp(126), dp(178)));
-                TextView name = text(item.torrent.title, 12, Color.WHITE, true);
-                name.setMaxLines(2);
-                name.setEllipsize(android.text.TextUtils.TruncateAt.END);
-                name.setPadding(dp(2), dp(6), dp(2), dp(2));
-                card.addView(name, new LinearLayout.LayoutParams(dp(126), dp(42)));
-                LinearLayout.LayoutParams cardParams = new LinearLayout.LayoutParams(dp(138), -2);
-                cardParams.rightMargin = dp(8);
-                strip.addView(card, cardParams);
-                card.setOnClickListener(v -> showTorrent(item.torrent));
-                if (!item.imageUrl.isEmpty()) {
-                    loadImageIntoView(item.imageUrl, poster, client.getMirror() + "/" + section.path);
-                } else {
-                    loadHomePosterFromDetails(item, poster);
-                }
-            }
-            horizontal.addView(strip);
-            // Poster + title only; ratings belong to the details screen.
-            LinearLayout.LayoutParams rowParams = new LinearLayout.LayoutParams(-1, dp(238));
-            list.addView(horizontal, rowParams);
-        }
+        for (HomeSection section : sections) renderHomeSection(section);
         if (sections.isEmpty()) addEmpty("На главной пока нет подборок.");
         animateContentTransition(list);
+    }
+
+    /** Append one completed home feed without rebuilding rows already on screen. */
+    private void renderHomeSection(HomeSection section) {
+        if (section == null || section.items.isEmpty()) return;
+
+        TextView sectionTitle = text(section.title, 20, GOLD, true);
+        sectionTitle.setTag("home-title:" + section.path);
+        LinearLayout.LayoutParams titleParams = new LinearLayout.LayoutParams(-1, dp(38));
+        titleParams.topMargin = dp(10);
+
+        android.widget.HorizontalScrollView horizontal = new android.widget.HorizontalScrollView(this);
+        horizontal.setHorizontalScrollBarEnabled(false);
+        horizontal.setFillViewport(false);
+        horizontal.setTag("home-row:" + section.path);
+        LinearLayout strip = new LinearLayout(this);
+        strip.setOrientation(LinearLayout.HORIZONTAL);
+
+        for (HomePoster item : section.items) {
+            LinearLayout card = new LinearLayout(this);
+            card.setOrientation(LinearLayout.VERTICAL);
+            card.setPadding(dp(5), dp(5), dp(5), dp(5));
+            card.setBackground(shape(PANEL, 0));
+            card.setFocusable(true);
+            card.setClickable(true);
+            card.setOnFocusChangeListener((v, focused) ->
+                    v.setBackground(shape(focused ? Color.rgb(57, 68, 70) : PANEL, focused ? GOLD : 0)));
+            ImageView poster = new ImageView(this);
+            poster.setScaleType(ImageView.ScaleType.CENTER_CROP);
+            poster.setBackground(shape(Color.rgb(40, 45, 49), 0));
+            card.addView(poster, new LinearLayout.LayoutParams(dp(126), dp(178)));
+            TextView name = text(item.torrent.title, 12, Color.WHITE, true);
+            name.setMaxLines(2);
+            name.setEllipsize(android.text.TextUtils.TruncateAt.END);
+            name.setPadding(dp(2), dp(6), dp(2), dp(2));
+            card.addView(name, new LinearLayout.LayoutParams(dp(126), dp(42)));
+            LinearLayout.LayoutParams cardParams = new LinearLayout.LayoutParams(dp(138), -2);
+            cardParams.rightMargin = dp(8);
+            strip.addView(card, cardParams);
+            card.setOnClickListener(v -> showTorrent(item.torrent));
+            if (!item.imageUrl.isEmpty()) {
+                loadImageIntoView(item.imageUrl, poster, client.getMirror() + "/" + section.path);
+            } else {
+                loadHomePosterFromDetails(item, poster);
+            }
+        }
+        horizontal.addView(strip);
+        LinearLayout.LayoutParams rowParams = new LinearLayout.LayoutParams(-1, dp(238));
+
+        // If this feed was already shown from cache, replace only its own pair
+        // of views in place. Other feeds and DPAD focus remain untouched.
+        String titleTag = "home-title:" + section.path;
+        for (int i = 0; i + 1 < list.getChildCount(); i++) {
+            Object tag = list.getChildAt(i).getTag();
+            if (titleTag.equals(tag)) {
+                list.removeViewAt(i + 1);
+                list.removeViewAt(i);
+                list.addView(sectionTitle, i, titleParams);
+                list.addView(horizontal, i + 1, rowParams);
+                animateContentTransition(horizontal);
+                return;
+            }
+        }
+        list.addView(sectionTitle, titleParams);
+        list.addView(horizontal, rowParams);
+        animateContentTransition(horizontal);
     }
 
     /** Subtle content entrance used after a catalogue or home section is rendered. */
