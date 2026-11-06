@@ -1207,16 +1207,21 @@ public class MainActivity extends Activity {
         panel.setPadding(dp(20), dp(14), dp(20), dp(12));
         panel.setBackgroundColor(BG);
 
+        TextView networkInfo = text("Внешний IP и страна: проверка…", 14, GOLD, false);
+        networkInfo.setLineSpacing(dp(4), 1f);
+        panel.addView(networkInfo);
         TextView cacheInfo = text(
-                "Дисковый кэш Kinozal\n"
-                + String.format(java.util.Locale.ROOT, "Занято: %.2f МБ из %.0f МБ (%.1f%%)\n",
+                "Дисковый кэш Kinozal\\n"
+                + String.format(java.util.Locale.ROOT, "Занято: %.2f МБ из %.0f МБ (%.1f%%)\\n",
                         usedMb, limitMb, percent)
-                + String.format(java.util.Locale.ROOT, "Файлов в кэше: %d\n", diskCache.getEntryCount())
-                + "Расположение: cache/kinozal_cache\n"
+                + String.format(java.util.Locale.ROOT, "Файлов в кэше: %d\\n", diskCache.getEntryCount())
+                + "Расположение: cache/kinozal_cache\\n"
                 + homeCacheDiagnostic,
                 15, Color.WHITE, false);
         cacheInfo.setLineSpacing(dp(5), 1f);
-        panel.addView(cacheInfo);
+        LinearLayout.LayoutParams cacheParams = new LinearLayout.LayoutParams(-1, -2);
+        cacheParams.topMargin = dp(12);
+        panel.addView(cacheInfo, cacheParams);
 
         Button refresh = button("Обновить данные");
         refresh.setGravity(Gravity.CENTER);
@@ -1230,13 +1235,14 @@ public class MainActivity extends Activity {
                 .create();
         refresh.setOnClickListener(v -> {
             long current = diskCache.getSizeBytes();
-            cacheInfo.setText("Дисковый кэш Kinozal\n"
-                    + String.format(java.util.Locale.ROOT, "Занято: %.2f МБ из %.0f МБ (%.1f%%)\n",
+            cacheInfo.setText("Дисковый кэш Kinozal\\n"
+                    + String.format(java.util.Locale.ROOT, "Занято: %.2f МБ из %.0f МБ (%.1f%%)\\n",
                             current / (1024d * 1024d), limitMb, limit > 0 ? current * 100d / limit : 0d)
-                    + String.format(java.util.Locale.ROOT, "Файлов в кэше: %d\n", diskCache.getEntryCount())
-                    + "Расположение: cache/kinozal_cache\n"
+                    + String.format(java.util.Locale.ROOT, "Файлов в кэше: %d\\n", diskCache.getEntryCount())
+                    + "Расположение: cache/kinozal_cache\\n"
                     + homeCacheDiagnostic);
-        });
+            loadExternalIpInfo(networkInfo);
+        });;
         dialog.show();
         if (dialog.getWindow() != null) {
             dialog.getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(BG));
@@ -1245,7 +1251,55 @@ public class MainActivity extends Activity {
                     ViewGroup.LayoutParams.WRAP_CONTENT);
         }
         dialog.getButton(AlertDialog.BUTTON_POSITIVE).setTextColor(GOLD);
+        loadExternalIpInfo(networkInfo);
         refresh.requestFocus();
+    }
+
+    private void loadExternalIpInfo(TextView target) {
+        target.setText("Внешний IP и страна: проверка…");
+        io.execute(() -> {
+            HttpURLConnection connection = null;
+            try {
+                Socks5ProxyBridge.Settings cfg = socks5Bridge.getSettings();
+                Proxy route;
+                if (cfg.enabled) {
+                    if (!socks5Bridge.isRunning()) throw new IllegalStateException("SOCKS5 включён, но туннель не запущен");
+                    route = socks5Bridge.localHttpProxy();
+                } else route = Proxy.NO_PROXY;
+                connection = (HttpURLConnection) new URL("https://ipwho.is/").openConnection(route);
+                connection.setConnectTimeout(10000);
+                connection.setReadTimeout(10000);
+                connection.setRequestProperty("Accept", "application/json");
+                connection.setRequestProperty("User-Agent", "KinozalClient/0.5.13");
+                int code = connection.getResponseCode();
+                if (code < 200 || code >= 300) throw new java.io.IOException("HTTP " + code);
+                StringBuilder body = new StringBuilder();
+                try (java.io.InputStream in = connection.getInputStream();
+                     java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream()) {
+                    byte[] buffer = new byte[4096];
+                    int n;
+                    while ((n = in.read(buffer)) != -1) out.write(buffer, 0, n);
+                    body.append(new String(out.toByteArray(), StandardCharsets.UTF_8));
+                }
+                org.json.JSONObject json = new org.json.JSONObject(body.toString());
+                if (!json.optBoolean("success", false)) throw new java.io.IOException(json.optString("message", "Не удалось определить страну"));
+                String ip = json.optString("ip", "—");
+                String country = json.optString("country", "не определена");
+                String codeCountry = json.optString("country_code", "");
+                org.json.JSONObject connectionInfo = json.optJSONObject("connection");
+                String isp = connectionInfo == null ? "" : connectionInfo.optString("isp", "");
+                String result = "Маршрут: " + (cfg.enabled ? "SOCKS5" : "напрямую")
+                        + "\\nВнешний IP: " + ip
+                        + "\\nСтрана: " + country + (codeCountry.isEmpty() ? "" : " (" + codeCountry + ")")
+                        + (isp.isEmpty() ? "" : "\\nПровайдер: " + isp);
+                runOnUiThread(() -> target.setText(result));
+            } catch (Exception e) {
+                String message = "Не удалось определить внешний IP/страну: " + safe(e.getMessage());
+                runOnUiThread(() -> target.setText(message));
+            } finally {
+                if (connection != null) connection.disconnect();
+            }
+        });
     }
 
     private void showAbout() {
