@@ -983,7 +983,7 @@ public class MainActivity extends Activity {
         } catch (Exception ignored) { return false; }
     }
 
-    private void searchJackett(String query) {
+    private void searchJackett(String query, String posterUrl) {
         LinearLayout panel = new LinearLayout(this);
         panel.setOrientation(LinearLayout.VERTICAL);
         panel.setPadding(dp(12), dp(8), dp(12), dp(8));
@@ -991,6 +991,8 @@ public class MainActivity extends Activity {
         TextView status = text("Поиск: " + query + "\\nПодключение к Jackett…", 13, TEAL, false);
         panel.addView(status);
         ScrollView scroll = new ScrollView(this);
+        scroll.setFocusable(false);
+        scroll.setDescendantFocusability(ViewGroup.FOCUS_AFTER_DESCENDANTS);
         LinearLayout results = new LinearLayout(this);
         results.setOrientation(LinearLayout.VERTICAL);
         scroll.addView(results);
@@ -1060,12 +1062,18 @@ public class MainActivity extends Activity {
                     results.addView(text("По этому названию ничего не найдено.", 14, Color.LTGRAY, false));
                     return;
                 }
+                View firstResult = null;
                 for (Element item : items) {
                     String name = item.selectFirst("title") == null ? "Без названия" : item.selectFirst("title").text();
-                    String size = item.selectFirst("size") == null ? "—" : item.selectFirst("size").text();
-                    String seeders = item.selectFirst("seeders") == null ? "—" : item.selectFirst("seeders").text();
-                    String peers = item.selectFirst("peers") == null ? "—" : item.selectFirst("peers").text();
-                    String tracker = item.selectFirst("jackettindexer") == null ? "" : item.selectFirst("jackettindexer").text();
+                    String size = jackettAttribute(item, "size");
+                    if ("—".equals(size)) {
+                        Element enclosure = item.selectFirst("enclosure");
+                        if (enclosure != null) size = enclosure.attr("length");
+                    }
+                    String seeders = jackettAttribute(item, "seeders");
+                    String peers = jackettAttribute(item, "peers");
+                    String tracker = jackettAttribute(item, "jackettindexer");
+                    if ("—".equals(tracker)) tracker = "";
                     Element link = item.selectFirst("link");
                     String target = link == null ? "" : link.text().trim();
                     if (target.isEmpty() && link != null) target = link.attr("href");
@@ -1079,23 +1087,48 @@ public class MainActivity extends Activity {
                     row.setPadding(dp(10), dp(8), dp(10), dp(8));
                     row.setBackground(shape(PANEL, 0));
                     row.setFocusable(true);
+                    row.setFocusableInTouchMode(true);
+                    row.setClickable(true);
+                    row.setOnFocusChangeListener((view, focused) ->
+                            view.setBackground(shape(focused ? Color.rgb(65, 72, 73) : PANEL, focused ? GOLD : 0)));
                     TextView titleView = text(name, 14, Color.WHITE, true);
                     row.addView(titleView);
                     row.addView(text((tracker.isEmpty() ? "" : tracker + " · ")
                             + "Размер: " + size + " · Сиды: " + seeders + " · Пиры: " + peers,
                             11, TEAL, false));
                     if (!resultUrl.isEmpty()) row.setOnClickListener(v -> {
-                        try { startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(resultUrl))); }
-                        catch (Exception e) { showMessage("Не удалось открыть ссылку результата."); }
+                        try {
+                            Intent open = new Intent(Intent.ACTION_VIEW, Uri.parse(resultUrl));
+                            open.putExtra("poster", posterUrl == null ? "" : posterUrl);
+                            open.putExtra("title", name);
+                            startActivity(open);
+                        } catch (Exception e) { showMessage("Не удалось открыть ссылку результата."); }
                     });
                     LinearLayout.LayoutParams rowParams = new LinearLayout.LayoutParams(-1, -2);
                     rowParams.bottomMargin = dp(6);
                     results.addView(row, rowParams);
+                    if (firstResult == null && !resultUrl.isEmpty()) firstResult = row;
+                }
+                if (firstResult != null) {
+                    View focusTarget = firstResult;
+                    focusTarget.post(focusTarget::requestFocus);
                 }
             });
         });
     }
 
+    private String jackettAttribute(Element item, String name) {
+        if (item == null) return "—";
+        Element direct = item.selectFirst(name);
+        if (direct != null && !direct.text().trim().isEmpty()) return direct.text().trim();
+        for (Element attr : item.select("attr")) {
+            if (name.equalsIgnoreCase(attr.attr("name"))) {
+                String value = attr.attr("value").trim();
+                if (!value.isEmpty()) return value;
+            }
+        }
+        return "—";
+    }
     private void addMenu(String icon, String label, Runnable action) {
         Button b = button(icon + "   " + label);
         if ("Недавно смотрели".equals(label)) {
@@ -2369,7 +2402,7 @@ public class MainActivity extends Activity {
                 v.setBackground(shape(focused ? Color.rgb(65, 72, 73) : PANEL, focused ? GOLD : 0)));
         descriptionTab.setOnClickListener(v -> { active[0] = 0; render.run(); });
         technicalTab.setOnClickListener(v -> { active[0] = 1; render.run(); });
-        jackettTab.setOnClickListener(v -> searchJackett(torrent.title));
+        jackettTab.setOnClickListener(v -> searchJackett(torrent.title, data.poster));
         render.run();
 
         watch.setOnClickListener(v -> playTorrent(data));
