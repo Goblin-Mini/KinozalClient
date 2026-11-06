@@ -10,8 +10,8 @@ android {
         applicationId = "com.goblinmini.kinozalclient"
         minSdk = 23
         targetSdk = 28
-        versionCode = 45
-        versionName = "0.5.35-torrent-response-diagnostics"
+        versionCode = 46
+        versionName = "0.5.36-native-infohash-magnet"
     }
 
     lint {
