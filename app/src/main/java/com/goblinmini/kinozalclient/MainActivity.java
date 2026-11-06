@@ -1433,13 +1433,20 @@ public class MainActivity extends Activity {
                 // the exact same details URL through the native cookie jar.
                 if (!browserDetails.torrentLink.startsWith("magnet:")) {
                     io.execute(() -> {
-                        TorrentDetails nativeDetails = null;
+                        TorrentDetails nativeDetails = browserDetails;
                         try {
                             String nativeHtml = client.fetch(t.href);
                             nativeDetails = parseTorrentDetails(Jsoup.parse(nativeHtml, t.href), t);
                         } catch (Exception ignored) { }
-                        final TorrentDetails result = nativeDetails != null
-                                && nativeDetails.torrentLink.startsWith("magnet:")
+
+                        if (nativeDetails == null) nativeDetails = browserDetails;
+                        if (!nativeDetails.torrentLink.startsWith("magnet:")) {
+                            try {
+                                String magnet = fetchMagnetFromServer(t);
+                                if (!magnet.isEmpty()) nativeDetails.torrentLink = magnet;
+                            } catch (Exception ignored) { }
+                        }
+                        final TorrentDetails result = nativeDetails.torrentLink.startsWith("magnet:")
                                 ? nativeDetails : browserDetails;
                         runOnUiThread(() -> {
                             progress.setVisibility(View.GONE);
@@ -1458,6 +1465,12 @@ public class MainActivity extends Activity {
                 String html = client.fetch(t.href);
                 Document doc = Jsoup.parse(html, t.href);
                 TorrentDetails details = parseTorrentDetails(doc, t);
+                if (!details.torrentLink.startsWith("magnet:")) {
+                    try {
+                        String magnet = fetchMagnetFromServer(t);
+                        if (!magnet.isEmpty()) details.torrentLink = magnet;
+                    } catch (Exception ignored) { }
+                }
                 runOnUiThread(() -> {
                     progress.setVisibility(View.GONE);
                     showTorrentDetails(t, details);
@@ -1474,6 +1487,10 @@ public class MainActivity extends Activity {
     private TorrentDetails parseTorrentDetails(Document doc, Torrent torrent) {
         TorrentDetails data = new TorrentDetails();
         data.title = torrent.title;
+        Element pageTitle = doc.selectFirst("h1");
+        if (pageTitle != null && !pageTitle.text().trim().isEmpty()) {
+            data.title = pageTitle.text().replaceAll("\\s+", " ").trim();
+        }
         data.sourcePage = torrent.href;
         Element info = doc.selectFirst(".bx1.justify h2");
         if (info != null) extractBoldFields(info, data.fields);
@@ -1510,6 +1527,44 @@ public class MainActivity extends Activity {
             if (download != null) data.torrentLink = download.absUrl("href");
         }
         return data;
+    }
+
+    /**
+     * Kinozal's details page can expose the magnet hash through its server-side
+     * details endpoint instead of a direct TSA_magnet anchor. The endpoint
+     * returns the info hash in the first list item (action=2, id=<torrent id>).
+     */
+    private String fetchMagnetFromServer(Torrent torrent) throws Exception {
+        if (torrent == null || torrent.href == null) return "";
+        java.util.regex.Matcher idMatcher = java.util.regex.Pattern
+                .compile("[?&]id=(\\d+)", java.util.regex.Pattern.CASE_INSENSITIVE)
+                .matcher(torrent.href);
+        if (!idMatcher.find()) return "";
+
+        String endpoint = client.getMirror() + "/get_srv_details.php?action=2&id="
+                + idMatcher.group(1);
+        String html = client.fetch(endpoint);
+        Document response = Jsoup.parse(html, endpoint);
+
+        Element directMagnet = response.selectFirst("a[href^=magnet:]");
+        if (directMagnet != null) return directMagnet.attr("href").trim();
+
+        Element firstItem = response.selectFirst("li:first-child");
+        String hashText = firstItem == null ? response.text() : firstItem.text();
+        java.util.regex.Matcher hashMatcher = java.util.regex.Pattern
+                .compile("(?i)[a-f0-9]{40}").matcher(hashText);
+        if (!hashMatcher.find()) {
+            hashMatcher = java.util.regex.Pattern.compile("(?i)[a-f0-9]{40}")
+                    .matcher(response.text());
+        }
+        if (!hashMatcher.find()) return "";
+
+        String magnet = "magnet:?xt=urn:btih:" + hashMatcher.group();
+        String title = torrent.title == null ? "" : torrent.title.trim();
+        if (!title.isEmpty()) {
+            magnet += "&dn=" + URLEncoder.encode(title, "UTF-8");
+        }
+        return magnet;
     }
 
     private void extractBoldFields(Element block, java.util.LinkedHashMap<String, String> fields) {
