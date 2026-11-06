@@ -64,6 +64,7 @@ public class MainActivity extends Activity {
     private TextView heading, status;
     private ProgressBar progress;
     private EditText search;
+    private View focusedTorrentSource;
     private final List<Torrent> torrents = new ArrayList<>();
     private int page = 0;
     private String searchSort = "date";
@@ -1799,6 +1800,7 @@ public class MainActivity extends Activity {
     }
 
     private void showTorrent(Torrent t) {
+        focusedTorrentSource = getCurrentFocus();
         progress.setVisibility(View.VISIBLE);
         if (sessionWebView != null) {
             fetchBrowserPage(t.href, null, html -> {
@@ -2090,6 +2092,19 @@ public class MainActivity extends Activity {
                 .setView(root)
                 .create();
         dialog.show();
+        dialog.setOnDismissListener(ignored -> {
+            View returnFocus = focusedTorrentSource;
+            focusedTorrentSource = null;
+            if (returnFocus != null) {
+                returnFocus.post(() -> {
+                    if (returnFocus.isAttachedToWindow()
+                            && returnFocus.getVisibility() == View.VISIBLE
+                            && returnFocus.isFocusable()) {
+                        returnFocus.requestFocus();
+                    }
+                });
+            }
+        });
         if (dialog.getWindow() != null) {
             android.view.Window window = dialog.getWindow();
             window.setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(BG));
