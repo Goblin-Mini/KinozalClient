@@ -1613,15 +1613,12 @@ public class MainActivity extends Activity {
         AlertDialog dialog = new AlertDialog.Builder(this)
                 .setView(root)
                 .create();
-        // Close the modal details window before handing the URI/file to another app.
-        // Posting the launch after dismissal avoids a first-launch race while the
-        // dialog still owns window focus, especially on Android TV devices.
+        // Keep the details dialog open. Launching a torrent handler must not
+        // dismiss the user's current page or permanently disable the Watch button.
+        // Post the hand-off to the main queue so it runs after the click/focus event.
         watch.setOnClickListener(v -> {
-            if (!v.isEnabled()) return;
-            v.setEnabled(false);
-            v.setAlpha(0.65f);
-            dialog.dismiss();
-            browserHandler.postDelayed(() -> playTorrent(data), 250);
+            Toast.makeText(this, "Передача ссылки на воспроизведение…", Toast.LENGTH_SHORT).show();
+            v.post(() -> playTorrent(data));
         });
         dialog.show();
         if (dialog.getWindow() != null) {
