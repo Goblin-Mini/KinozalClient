@@ -1553,11 +1553,13 @@ public class MainActivity extends Activity {
         String hashText = firstItem == null ? response.text() : firstItem.text();
         java.util.regex.Matcher hashMatcher = java.util.regex.Pattern
                 .compile("(?i)[a-f0-9]{40}").matcher(hashText);
-        if (!hashMatcher.find()) {
+        boolean hashFound = hashMatcher.find();
+        if (!hashFound) {
             hashMatcher = java.util.regex.Pattern.compile("(?i)[a-f0-9]{40}")
                     .matcher(response.text());
+            hashFound = hashMatcher.find();
         }
-        if (!hashMatcher.find()) return "";
+        if (!hashFound) return "";
 
         String magnet = "magnet:?xt=urn:btih:" + hashMatcher.group();
         String title = torrent.title == null ? "" : torrent.title.trim();
