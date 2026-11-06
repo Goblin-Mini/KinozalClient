@@ -701,14 +701,31 @@ public class MainActivity extends Activity {
         searchParams.rightMargin = dp(8);
         search.setBackgroundColor(Color.TRANSPARENT);
         search.setPadding(dp(4), 0, dp(4), 0);
-        Button voiceSearch = button("Голос");
-        voiceSearch.setTextSize(11);
-        voiceSearch.setTextColor(GOLD);
+        View voiceSearch = new View(this) {
+            private final android.graphics.Paint iconPaint = new android.graphics.Paint(
+                    android.graphics.Paint.ANTI_ALIAS_FLAG);
+            @Override protected void onDraw(android.graphics.Canvas canvas) {
+                super.onDraw(canvas);
+                iconPaint.setColor(GOLD);
+                iconPaint.setStyle(android.graphics.Paint.Style.STROKE);
+                iconPaint.setStrokeWidth(dp(2.4f));
+                iconPaint.setStrokeCap(android.graphics.Paint.Cap.ROUND);
+                float cx = getWidth() / 2f - dp(2);
+                float cy = getHeight() / 2f - dp(2);
+                float radius = dp(7);
+                canvas.drawCircle(cx, cy, radius, iconPaint);
+                canvas.drawLine(cx + radius * 0.72f, cy + radius * 0.72f,
+                        cx + dp(12), cy + dp(12), iconPaint);
+            }
+        };
         voiceSearch.setContentDescription("Голосовой поиск");
         voiceSearch.setFocusable(true);
         voiceSearch.setFocusableInTouchMode(false);
+        voiceSearch.setBackground(shape(PANEL, 0));
+        voiceSearch.setOnFocusChangeListener((v, focused) ->
+                v.setBackground(shape(focused ? Color.rgb(65, 72, 73) : PANEL, focused ? GOLD : 0)));
         voiceSearch.setNextFocusRightId(View.NO_ID);
-        LinearLayout.LayoutParams voiceParams = new LinearLayout.LayoutParams(dp(52), dp(40));
+        LinearLayout.LayoutParams voiceParams = new LinearLayout.LayoutParams(dp(40), dp(40));
         voiceParams.rightMargin = dp(3);
         searchField.addView(voiceSearch, voiceParams);
         voiceSearch.setOnClickListener(v -> startVoiceSearch());
