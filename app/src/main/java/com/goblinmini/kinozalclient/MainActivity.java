@@ -1384,18 +1384,42 @@ public class MainActivity extends Activity {
     private void showTorrent(Torrent t) {
         progress.setVisibility(View.VISIBLE);
         if (sessionWebView != null) {
-            fetchBrowserPage(t.href, null, html -> {
-                progress.setVisibility(View.GONE);
-                if (html == null || html.isEmpty()) {
+            fetchBrowserPage(t.href, null, browserHtml -> {
+                if (browserHtml == null || browserHtml.isEmpty()) {
+                    progress.setVisibility(View.GONE);
                     showMessage("Не удалось загрузить карточку через браузерную сессию.");
                     return;
                 }
+                final TorrentDetails browserDetails;
                 try {
-                    Document doc = Jsoup.parse(html, t.href);
-                    TorrentDetails details = parseTorrentDetails(doc, t);
-                    showTorrentDetails(t, details);
+                    browserDetails = parseTorrentDetails(Jsoup.parse(browserHtml, t.href), t);
                 } catch (Exception e) {
+                    progress.setVisibility(View.GONE);
                     showMessage("Не удалось разобрать карточку: " + safe(e.getMessage()));
+                    return;
+                }
+
+                // Experiment: the browser HTML and the authenticated native HTTP
+                // response may differ. If WebView did not expose a magnet, query
+                // the exact same details URL through the native cookie jar.
+                if (!browserDetails.torrentLink.startsWith("magnet:")) {
+                    io.execute(() -> {
+                        TorrentDetails nativeDetails = null;
+                        try {
+                            String nativeHtml = client.fetch(t.href);
+                            nativeDetails = parseTorrentDetails(Jsoup.parse(nativeHtml, t.href), t);
+                        } catch (Exception ignored) { }
+                        final TorrentDetails result = nativeDetails != null
+                                && nativeDetails.torrentLink.startsWith("magnet:")
+                                ? nativeDetails : browserDetails;
+                        runOnUiThread(() -> {
+                            progress.setVisibility(View.GONE);
+                            showTorrentDetails(t, result);
+                        });
+                    });
+                } else {
+                    progress.setVisibility(View.GONE);
+                    showTorrentDetails(t, browserDetails);
                 }
             });
             return;
@@ -1447,10 +1471,14 @@ public class MainActivity extends Activity {
             if (poster != null) data.poster = poster.absUrl("src");
         }
 
-        Element download = doc.selectFirst("a[href*=/download.php], a[href$=.torrent], a[href*=magnet:]");
-        if (download != null) {
-            String href = download.attr("href").trim();
-            data.torrentLink = href.startsWith("magnet:") ? href : download.absUrl("href");
+        // Magnet must have priority: Kinozal commonly places download.php
+        // before the TSA_magnet anchor in the same table cell.
+        Element magnet = doc.selectFirst("a.TSA_magnet[href^=magnet:], a[href^=magnet:]");
+        if (magnet != null) {
+            data.torrentLink = magnet.attr("href").trim();
+        } else {
+            Element download = doc.selectFirst("a[href*=/download.php], a[href$=.torrent]");
+            if (download != null) data.torrentLink = download.absUrl("href");
         }
         return data;
     }
