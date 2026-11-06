@@ -145,71 +145,6 @@ public class MainActivity extends Activity {
     private static class HomePoster {
         Torrent torrent;
         String imageUrl;
-        boolean ratingsRequested = false;
-    }
-
-    private void addPosterRatings(LinearLayout card, HomePoster item) {
-        LinearLayout ratings = new LinearLayout(this);
-        ratings.setOrientation(LinearLayout.VERTICAL);
-        ratings.setPadding(dp(2), dp(3), dp(2), dp(1));
-        TextView imdb = text("IMDb   —", 10, Color.LTGRAY, false);
-        TextView kinopoisk = text("Кинопоиск   —", 10, Color.LTGRAY, false);
-        TextView kinozal = text("Kinozal   ☆☆☆☆☆☆☆☆☆☆", 10, TEAL, true);
-        ratings.addView(imdb);
-        ratings.addView(kinopoisk);
-        ratings.addView(kinozal);
-        card.addView(ratings, new LinearLayout.LayoutParams(dp(126), -2));
-        // Focus listener is installed by renderHome so it can also keep the
-        // card highlight without replacing the rating loader.
-    }
-
-    private void loadPosterRatings(HomePoster item, TextView imdb, TextView kinopoisk, TextView kinozal) {
-        if (item.ratingsRequested) return;
-        item.ratingsRequested = true;
-        Runnable parse = () -> {
-            // IMDb and Kinopoisk are not embedded in Kinozal's details HTML.
-            // Keep honest placeholders until a verified external source is available.
-        };
-        if (sessionWebView != null) {
-            fetchBrowserPage(item.torrent.href, null, html -> {
-                if (html == null || html.isEmpty()) { item.ratingsRequested = false; return; }
-                try {
-                    Document doc = Jsoup.parse(html, item.torrent.href);
-                    RatingInfo rating = parseKinozalRating(doc);
-                    runOnUiThread(() -> kinozal.setText(rating.label));
-                } catch (Exception ignored) { item.ratingsRequested = false; }
-            });
-        } else {
-            io.execute(() -> {
-                try {
-                    String html = client.fetch(item.torrent.href);
-                    RatingInfo rating = parseKinozalRating(Jsoup.parse(html, item.torrent.href));
-                    runOnUiThread(() -> kinozal.setText(rating.label));
-                } catch (Exception ignored) { item.ratingsRequested = false; }
-            });
-        }
-    }
-
-    private static class RatingInfo { String label = "Kinozal   —"; }
-
-    private RatingInfo parseKinozalRating(Document doc) {
-        RatingInfo info = new RatingInfo();
-        Element value = doc.selectFirst("[itemprop=ratingValue]");
-        Element count = doc.selectFirst("[itemprop=ratingCount]");
-        double score = 0;
-        try { if (value != null) score = Double.parseDouble(value.text().replace(',', '.')); }
-        catch (Exception ignored) { }
-        int votes = 0;
-        try {
-            if (count != null) votes = Integer.parseInt(count.hasAttr("content")
-                    ? count.attr("content") : count.text());
-        } catch (Exception ignored) { }
-        int filled = Math.max(0, Math.min(10, (int)Math.round(score)));
-        StringBuilder stars = new StringBuilder();
-        for (int i = 0; i < 10; i++) stars.append(i < filled ? "★" : "☆");
-        info.label = "Kinozal  " + (value == null ? "—" : String.format(java.util.Locale.US, "%.1f", score))
-                + "  " + stars + (votes > 0 ? " (" + votes + ")" : "");
-        return info;
     }
 
     private void loadInitialCatalog() {
@@ -603,21 +538,8 @@ public class MainActivity extends Activity {
                 card.setBackground(shape(PANEL, 0));
                 card.setFocusable(true);
                 card.setClickable(true);
-                card.setOnFocusChangeListener((v, focused) -> {
-                    v.setBackground(shape(focused ? Color.rgb(57, 68, 70) : PANEL, focused ? GOLD : 0));
-                    if (focused) {
-                        View ratingView = card.getChildAt(2);
-                        if (ratingView instanceof LinearLayout) {
-                            LinearLayout ratingRows = (LinearLayout) ratingView;
-                            if (ratingRows.getChildCount() >= 3) {
-                                loadPosterRatings(item,
-                                        (TextView) ratingRows.getChildAt(0),
-                                        (TextView) ratingRows.getChildAt(1),
-                                        (TextView) ratingRows.getChildAt(2));
-                            }
-                        }
-                    }
-                });
+                card.setOnFocusChangeListener((v, focused) ->
+                        v.setBackground(shape(focused ? Color.rgb(57, 68, 70) : PANEL, focused ? GOLD : 0)));
                 ImageView poster = new ImageView(this);
                 poster.setScaleType(ImageView.ScaleType.CENTER_CROP);
                 poster.setBackground(shape(Color.rgb(40, 45, 49), 0));
@@ -627,7 +549,6 @@ public class MainActivity extends Activity {
                 name.setEllipsize(android.text.TextUtils.TruncateAt.END);
                 name.setPadding(dp(2), dp(6), dp(2), dp(2));
                 card.addView(name, new LinearLayout.LayoutParams(dp(126), dp(42)));
-                addPosterRatings(card, item);
                 LinearLayout.LayoutParams cardParams = new LinearLayout.LayoutParams(dp(138), -2);
                 cardParams.rightMargin = dp(8);
                 strip.addView(card, cardParams);
@@ -639,8 +560,8 @@ public class MainActivity extends Activity {
                 }
             }
             horizontal.addView(strip);
-            // Poster + title + three rating rows; keep the complete card visible.
-            LinearLayout.LayoutParams rowParams = new LinearLayout.LayoutParams(-1, dp(282));
+            // Poster + title only; ratings belong to the details screen.
+            LinearLayout.LayoutParams rowParams = new LinearLayout.LayoutParams(-1, dp(238));
             list.addView(horizontal, rowParams);
         }
         if (sections.isEmpty()) addEmpty("На главной пока нет подборок.");
@@ -1751,6 +1672,7 @@ public class MainActivity extends Activity {
 
     private static class TorrentDetails {
         String title = "", poster = "", torrentLink = "", sourcePage = "";
+        String imdbRating = "—", kinopoiskRating = "—", kinozalRating = "—", kinozalStars = "☆☆☆☆☆☆☆☆☆☆", kinozalVotes = "";
         final java.util.LinkedHashMap<String, String> fields = new java.util.LinkedHashMap<>();
     }
 
@@ -1795,6 +1717,38 @@ public class MainActivity extends Activity {
         TorrentDetails data = new TorrentDetails();
         data.title = torrent.title;
         data.sourcePage = torrent.href;
+
+        // All ratings are read from the current Kinozal details HTML.
+        Element imdbLink = doc.selectFirst("a[href*="imdb.com"]");
+        if (imdbLink != null) {
+            Element score = imdbLink.selectFirst(".floatright");
+            if (score != null && !score.text().trim().isEmpty()) data.imdbRating = score.text().trim();
+        }
+        Element kpLink = doc.selectFirst("a[href*="kinopoisk.ru"]");
+        if (kpLink != null) {
+            Element score = kpLink.selectFirst(".floatright");
+            if (score != null && !score.text().trim().isEmpty()) data.kinopoiskRating = score.text().trim();
+        }
+        Element kzValue = doc.selectFirst("[itemprop=ratingValue]");
+        if (kzValue != null && !kzValue.text().trim().isEmpty()) data.kinozalRating = kzValue.text().trim();
+        Element votes = doc.selectFirst("[itemprop=ratingCount], [itemprop=votes]");
+        if (votes != null) {
+            String count = votes.hasAttr("content") ? votes.attr("content") : votes.text();
+            if (!count.trim().isEmpty()) data.kinozalVotes = count.trim();
+        }
+        Element starbar = doc.selectFirst("#starbar");
+        if (starbar != null) {
+            java.util.regex.Matcher width = java.util.regex.Pattern.compile("([0-9]+(?:\\.[0-9]+)?)px")
+                    .matcher(starbar.attr("style"));
+            if (width.find()) {
+                try {
+                    int filled = Math.max(0, Math.min(10, (int)Math.round(Double.parseDouble(width.group(1)) / 10.0)));
+                    StringBuilder stars = new StringBuilder();
+                    for (int i = 0; i < 10; i++) stars.append(i < filled ? "★" : "☆");
+                    data.kinozalStars = stars.toString();
+                } catch (Exception ignored) { }
+            }
+        }
         Element info = doc.selectFirst(".bx1.justify h2");
         if (info != null) extractBoldFields(info, data.fields);
 
@@ -1897,6 +1851,18 @@ public class MainActivity extends Activity {
         poster.setScaleType(ImageView.ScaleType.FIT_CENTER);
         poster.setBackground(shape(PANEL, 0));
         posterColumn.addView(poster, new LinearLayout.LayoutParams(-1, dp(260)));
+        LinearLayout ratings = new LinearLayout(this);
+        ratings.setOrientation(LinearLayout.VERTICAL);
+        ratings.setGravity(Gravity.CENTER_HORIZONTAL);
+        ratings.setPadding(dp(3), dp(8), dp(3), dp(2));
+        ratings.addView(text("IMDb   " + data.imdbRating, 12, Color.LTGRAY, false));
+        ratings.addView(text("Кинопоиск   " + data.kinopoiskRating, 12, Color.LTGRAY, false));
+        ratings.addView(text("Kinozal   " + data.kinozalRating, 12, TEAL, true));
+        TextView stars = text(data.kinozalStars, 13, GOLD, true);
+        ratings.addView(stars);
+        if (!data.kinozalVotes.isEmpty())
+            ratings.addView(text("Голосов: " + data.kinozalVotes, 10, Color.LTGRAY, false));
+        posterColumn.addView(ratings, new LinearLayout.LayoutParams(-1, -2));
         LinearLayout.LayoutParams posterParams = new LinearLayout.LayoutParams(dp(190), -1);
         posterParams.rightMargin = dp(12);
         mainArea.addView(posterColumn, posterParams);
