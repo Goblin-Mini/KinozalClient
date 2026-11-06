@@ -1448,42 +1448,20 @@ public class MainActivity extends Activity {
             if (poster != null) data.poster = poster.absUrl("src");
         }
 
-        // Inspect the visible magnet control; Kinozal may store its URI in JS attributes.
-        Element magnetControl = null;
-        for (Element el : doc.getAllElements()) {
-            String label = (el.text() + " " + el.attr("title")).toLowerCase(java.util.Locale.ROOT);
-            if (label.contains("magnet") || label.contains("магнет")) {
-                magnetControl = el;
-                String markup = el.outerHtml().replaceAll("\\s+", " ");
-                playbackLog("MAGNET_CONTROL tag=" + el.tagName() + " markup=" + markup.substring(0, Math.min(700, markup.length())));
-                break;
+        // Kinozal's magnet button is <a class="TSA_magnet" href="magnet:?...">.
+        // Prefer this exact control; never interpret a torrent download link as a magnet.
+        Element magnetControl = doc.selectFirst("a.TSA_magnet[href]");
+        if (magnetControl == null) magnetControl = doc.selectFirst("a[href^=magnet:]");
+        if (magnetControl != null) {
+            String href = org.jsoup.parser.Parser.unescapeEntities(
+                    magnetControl.attr("href").trim(), false);
+            if (href.regionMatches(true, 0, "magnet:", 0, 7)) {
+                data.torrentLink = href;
             }
-        }
-        for (Element el : doc.select("a[href], [onclick], [data-magnet], [data-clipboard-text], [value]")) {
-            String[] values = {el.attr("href"), el.attr("onclick"), el.attr("data-magnet"),
-                    el.attr("data-clipboard-text"), el.attr("value"), el.outerHtml()};
-            for (String value : values) {
-                int pos = value.toLowerCase(java.util.Locale.ROOT).indexOf("magnet:?");
-                if (pos >= 0) {
-                    String candidate = org.jsoup.parser.Parser.unescapeEntities(value.substring(pos), false);
-                    int stop = candidate.length();
-                    int quote = candidate.indexOf('"');
-                    if (quote >= 0) stop = Math.min(stop, quote);
-                    quote = candidate.indexOf("'");
-                    if (quote >= 0) stop = Math.min(stop, quote);
-                    quote = candidate.indexOf('<');
-                    if (quote >= 0) stop = Math.min(stop, quote);
-                    quote = candidate.indexOf(' ');
-                    if (quote >= 0) stop = Math.min(stop, quote);
-                    data.torrentLink = candidate.substring(0, stop).replace("&amp;", "&");
-                    break;
-                }
-            }
-            if (!data.torrentLink.isEmpty()) break;
         }
         playbackLog("DETAIL_MAGNET_PARSE found=" + !data.torrentLink.isEmpty()
-                + " anchors=" + doc.select("a[href]").size()
-                + " magnetControl=" + (magnetControl == null ? "none" : magnetControl.tagName()));
+                + " classTsaMagnet=" + (magnetControl != null)
+                + " href=" + (magnetControl == null ? "none" : magnetControl.attr("href")));
         return data;
     }
 
