@@ -1008,6 +1008,7 @@ public class MainActivity extends Activity {
 
     private void renderTorrents(List<Torrent> items) {
         if (list == null) return;
+        List<Torrent> displayItems = new ArrayList<>(items);
         boolean isSearch = currentPath != null && currentPath.contains("s=");
         if (isSearch) {
             if (searchSortBar == null || searchSortBar.getParent() != list) {
