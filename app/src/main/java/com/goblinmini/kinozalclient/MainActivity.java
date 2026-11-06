@@ -61,6 +61,7 @@ public class MainActivity extends Activity {
     private String mirror;
     private String currentPath = "browse.php";
     private String currentTitle = "Все раздачи";
+    private String activeTorrentDetailsHref = "";
     private LinearLayout root, sidebar, content, list, menuItems;
     private TextView heading, status;
     private ProgressBar progress;
@@ -2619,42 +2620,96 @@ public class MainActivity extends Activity {
 
     private void showTorrent(Torrent t) {
         focusedTorrentSource = getCurrentFocus();
-        progress.setVisibility(View.VISIBLE);
-        if (sessionWebView != null) {
-            fetchBrowserPage(t.href, null, html -> {
-                progress.setVisibility(View.GONE);
-                if (html == null || html.isEmpty()) {
-                    showMessage("Не удалось загрузить карточку через браузерную сессию.");
-                    return;
-                }
-                try {
-                    Document doc = Jsoup.parse(html, t.href);
-                    TorrentDetails details = parseTorrentDetails(doc, t);
-                    saveRecentlyViewed(t);
-                    showTorrentDetails(t, details);
-                } catch (Exception e) {
-                    showMessage("Не удалось разобрать карточку: " + safe(e.getMessage()));
-                }
-            });
+        if (t == null || t.href == null || t.href.trim().isEmpty()) {
+            showMessage("Не удалось определить адрес раздачи.");
             return;
         }
-        io.execute(() -> {
-            try {
-                String html = client.fetch(t.href);
-                Document doc = Jsoup.parse(html, t.href);
-                TorrentDetails details = parseTorrentDetails(doc, t);
-                runOnUiThread(() -> {
-                    progress.setVisibility(View.GONE);
-                    saveRecentlyViewed(t);
-                    showTorrentDetails(t, details);
-                });
-            } catch (Exception e) {
-                runOnUiThread(() -> {
-                    progress.setVisibility(View.GONE);
-                    showMessage("Не удалось загрузить карточку: " + safe(e.getMessage()));
-                });
+
+        final String href = t.href;
+        final String cacheKey = "details|" + client.getMirror() + "|" + href;
+        activeTorrentDetailsHref = href;
+
+        // Render a previously validated detail page immediately. The network
+        // refresh below updates ratings, peer counts and other changing fields.
+        String cachedHtml = null;
+        synchronized (pageCache) { cachedHtml = pageCache.get(cacheKey); }
+        if (cachedHtml == null) {
+            byte[] saved = diskCache.get(cacheKey, 30L * 60L * 1000L);
+            if (saved != null) {
+                cachedHtml = new String(saved, StandardCharsets.UTF_8);
+                synchronized (pageCache) { pageCache.put(cacheKey, cachedHtml); }
             }
-        });
+        }
+
+        if (cachedHtml != null) {
+            try {
+                Document cachedDoc = Jsoup.parse(cachedHtml, href);
+                TorrentDetails cachedDetails = parseTorrentDetails(cachedDoc, t);
+                saveRecentlyViewed(t);
+                showTorrentDetails(t, cachedDetails);
+            } catch (Exception ignored) {
+                cachedHtml = null;
+            }
+        }
+
+        final boolean hasCachedDetails = cachedHtml != null;
+        if (!hasCachedDetails) progress.setVisibility(View.VISIBLE);
+
+        java.util.function.Consumer<String> onFreshHtml = html -> {
+            if (html == null || html.trim().isEmpty()) {
+                if (!hasCachedDetails && href.equals(activeTorrentDetailsHref)) {
+                    progress.setVisibility(View.GONE);
+                    showMessage("Не удалось загрузить карточку через браузерную сессию.");
+                }
+                return;
+            }
+            try {
+                Document doc = Jsoup.parse(html, href);
+                TorrentDetails details = parseTorrentDetails(doc, t);
+                // Do not let a challenge/login/empty document replace a good entry.
+                boolean validDetails = !details.title.trim().isEmpty()
+                        && (doc.selectFirst("#main .content") != null
+                        || doc.selectFirst("a[href*=download.php]") != null);
+                if (!validDetails) {
+                    if (!hasCachedDetails && href.equals(activeTorrentDetailsHref)) {
+                        progress.setVisibility(View.GONE);
+                        showMessage("Сайт вернул неполную страницу раздачи.");
+                    }
+                    return;
+                }
+                synchronized (pageCache) { pageCache.put(cacheKey, html); }
+                diskCache.put(cacheKey, html.getBytes(StandardCharsets.UTF_8));
+                saveRecentlyViewed(t);
+                if (href.equals(activeTorrentDetailsHref)) {
+                    progress.setVisibility(View.GONE);
+                    showTorrentDetails(t, details);
+                }
+            } catch (Exception e) {
+                if (!hasCachedDetails && href.equals(activeTorrentDetailsHref)) {
+                    progress.setVisibility(View.GONE);
+                    showMessage("Не удалось разобрать карточку: " + safe(e.getMessage()));
+                }
+            }
+        };
+
+        if (sessionWebView != null) {
+            // A single authenticated WebView request avoids the known HTTP 403
+            // attempt followed by a second browser navigation.
+            fetchBrowserPage(href, null, onFreshHtml);
+        } else {
+            io.execute(() -> {
+                try {
+                    onFreshHtml.accept(client.fetch(href));
+                } catch (Exception e) {
+                    runOnUiThread(() -> {
+                        if (!hasCachedDetails && href.equals(activeTorrentDetailsHref)) {
+                            progress.setVisibility(View.GONE);
+                            showMessage("Не удалось загрузить карточку: " + safe(e.getMessage()));
+                        }
+                    });
+                }
+            });
+        }
     }
 
     private TorrentDetails parseTorrentDetails(Document doc, Torrent torrent) {
