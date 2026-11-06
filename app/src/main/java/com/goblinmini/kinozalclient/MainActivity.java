@@ -701,6 +701,16 @@ public class MainActivity extends Activity {
         searchParams.rightMargin = dp(8);
         search.setBackgroundColor(Color.TRANSPARENT);
         search.setPadding(dp(4), 0, dp(4), 0);
+        Button voiceSearch = button("🎙");
+        voiceSearch.setTextSize(17);
+        voiceSearch.setContentDescription("Голосовой поиск");
+        voiceSearch.setFocusable(true);
+        voiceSearch.setFocusableInTouchMode(false);
+        voiceSearch.setNextFocusRightId(View.NO_ID);
+        LinearLayout.LayoutParams voiceParams = new LinearLayout.LayoutParams(dp(38), dp(40));
+        voiceParams.rightMargin = dp(3);
+        searchField.addView(voiceSearch, voiceParams);
+        voiceSearch.setOnClickListener(v -> startVoiceSearch());
         searchField.addView(search, new LinearLayout.LayoutParams(0, -1, 1f));
         Button clearSearch = button("×");
         clearSearch.setTextSize(23);
@@ -735,7 +745,7 @@ public class MainActivity extends Activity {
         main.addView(searchBar, sbp);
         progress = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
         progress.setIndeterminate(true);
-        progress.setIndeterminateTintList(android.content.res.ColorStateList.valueOf(TEAL));
+        progress.setIndeterminateTintList(android.content.res.ColorStateList.valueOf(GOLD));
         progress.setVisibility(View.GONE);
         LinearLayout.LayoutParams progressParams = new LinearLayout.LayoutParams(-1, dp(3));
         progressParams.bottomMargin = dp(5);
@@ -1196,6 +1206,41 @@ public class MainActivity extends Activity {
                 })
                 .setNegativeButton("Закрыть", null)
                 .show();
+    }
+
+    private static final int REQUEST_VOICE_SEARCH = 7401;
+
+    private void startVoiceSearch() {
+        android.content.Intent intent = new android.content.Intent(
+                android.speech.RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
+        intent.putExtra(android.speech.RecognizerIntent.EXTRA_LANGUAGE_MODEL,
+                android.speech.RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
+        intent.putExtra(android.speech.RecognizerIntent.EXTRA_LANGUAGE, "ru-RU");
+        intent.putExtra(android.speech.RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, "ru-RU");
+        intent.putExtra(android.speech.RecognizerIntent.EXTRA_PROMPT, "Скажите название фильма или раздачи");
+        intent.putExtra(android.speech.RecognizerIntent.EXTRA_MAX_RESULTS, 1);
+        try {
+            startActivityForResult(intent, REQUEST_VOICE_SEARCH);
+        } catch (android.content.ActivityNotFoundException e) {
+            showMessage("На устройстве не найдено приложение для голосового ввода.");
+        } catch (Exception e) {
+            showMessage("Не удалось запустить голосовой ввод: " + safe(e.getMessage()));
+        }
+    }
+
+    @Override protected void onActivityResult(int requestCode, int resultCode, android.content.Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode != REQUEST_VOICE_SEARCH || resultCode != RESULT_OK || data == null) return;
+        java.util.ArrayList<String> results = data.getStringArrayListExtra(
+                android.speech.RecognizerIntent.EXTRA_RESULTS);
+        if (results != null && !results.isEmpty()) {
+            String recognized = results.get(0);
+            if (recognized != null && !recognized.trim().isEmpty()) {
+                search.setText(recognized.trim());
+                search.setSelection(search.length());
+                submitSearch();
+            }
+        }
     }
 
     private void submitSearch() {
