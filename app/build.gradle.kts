@@ -10,8 +10,8 @@ android {
         applicationId = "com.goblinmini.kinozalclient"
         minSdk = 23
         targetSdk = 28
-        versionCode = 18
-        versionName = "0.5.13"
+        versionCode = 19
+        versionName = "0.5.14"
     }
 
     lint {
@@ -45,4 +45,5 @@ android {
 
 dependencies {
     implementation("org.jsoup:jsoup:1.18.3")
+    implementation("androidx.webkit:webkit:1.14.0")
 }
