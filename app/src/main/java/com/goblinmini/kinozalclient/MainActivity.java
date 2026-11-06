@@ -2102,34 +2102,68 @@ public class MainActivity extends Activity {
             playTorrentFallback(data);
             return;
         }
-        magnetDiag("MAGNET_LOOKUP_START", "id=" + id + ", endpoint=" + client.getMirror() + "/get_srv_details.php?action=2&id=" + id);
-        io.execute(() -> {
+        WebView web = sessionWebView;
+        if (web == null) {
+            magnetDiag("MAGNET_LOOKUP_FAILED", "id=" + id + ", error=authenticated WebView is unavailable");
+            showMessage("Браузерная сессия недоступна. Пробую обычную ссылку .torrent…");
+            playTorrentFallback(data);
+            return;
+        }
+
+        String endpoint = client.getMirror() + "/get_srv_details.php?action=2&id=" + id;
+        magnetDiag("MAGNET_LOOKUP_START", "transport=WebView fetch, id=" + id
+                + ", endpoint=" + safeNetworkUrl(endpoint));
+        String script = "(function(){return fetch(" + org.json.JSONObject.quote(endpoint)
+                + ",{method:'GET',credentials:'include',cache:'no-store',"
+                + "headers:{'Accept':'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'}})"
+                + ".then(function(r){return r.text().then(function(t){return JSON.stringify({status:r.status,"
+                + "url:r.url,body:t.slice(0,20000)});});})"
+                + ".catch(function(e){return JSON.stringify({error:String(e)});});})()";
+        web.evaluateJavascript(script, value -> {
             try {
-                String browserCookies = CookieManager.getInstance().getCookie(client.getMirror());
-                if (browserCookies != null && !browserCookies.isEmpty()) {
-                    client.importBrowserCookies(browserCookies);
+                String jsonText = new org.json.JSONArray("[" + value + "]").getString(0);
+                org.json.JSONObject response = new org.json.JSONObject(jsonText);
+                if (response.has("error")) {
+                    throw new java.io.IOException("WebView fetch: " + response.optString("error"));
                 }
-                String hash = client.fetchMagnetHash(id, data.sourcePage);
+                int statusCode = response.optInt("status", 0);
+                String responseUrl = response.optString("url", endpoint);
+                String html = response.optString("body", "");
+                magnetDiag("MAGNET_WEBVIEW_RESPONSE", "id=" + id + ", status=" + statusCode
+                        + ", url=" + safeNetworkUrl(responseUrl) + ", chars=" + html.length()
+                        + ", preview=" + safeDiag(Jsoup.parse(html).text().substring(
+                                0, Math.min(220, Jsoup.parse(html).text().length()))));
+                if (statusCode < 200 || statusCode >= 300) {
+                    throw new java.io.IOException("HTTP " + statusCode + " через WebView");
+                }
+                Document doc = Jsoup.parse(html, responseUrl);
+                Element first = doc.selectFirst("li:first-child");
+                if (first == null) throw new java.io.IOException("Ответ endpoint не содержит li:first-child");
+                java.util.regex.Matcher matcher = java.util.regex.Pattern
+                        .compile("(?i)[a-f0-9]{40}").matcher(first.text());
+                if (!matcher.find()) {
+                    throw new java.io.IOException("В ответе endpoint не найден infohash: "
+                            + safeDiag(first.text()).substring(0, Math.min(180, safeDiag(first.text()).length())));
+                }
+                String hash = matcher.group().toLowerCase(java.util.Locale.ROOT);
                 String magnet = "magnet:?xt=urn:btih:" + hash
                         + "&dn=" + URLEncoder.encode(data.title == null ? "" : data.title, "UTF-8");
-                magnetDiag("MAGNET_LOOKUP_SUCCESS", "id=" + id + ", hash=" + hash);
-                runOnUiThread(() -> {
-                    try {
-                        Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(magnet));
-                        intent.putExtra("poster", data.poster == null ? "" : data.poster);
-                        intent.putExtra("title", data.title == null ? "" : data.title);
-                        startActivity(intent);
-                    } catch (Exception e) {
-                        magnetDiag("MAGNET_OPEN_FAILED", safeDiag(e.getMessage()));
-                        showMessage("Magnet получен, но не удалось открыть приложение TorrServe: " + safe(e.getMessage()));
-                    }
-                });
+                magnetDiag("MAGNET_LOOKUP_SUCCESS", "transport=WebView, id=" + id + ", hash=" + hash);
+                try {
+                    Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(magnet));
+                    intent.putExtra("poster", data.poster == null ? "" : data.poster);
+                    intent.putExtra("title", data.title == null ? "" : data.title);
+                    startActivity(intent);
+                } catch (Exception e) {
+                    magnetDiag("MAGNET_OPEN_FAILED", safeDiag(e.getMessage()));
+                    showMessage("Magnet получен, но не удалось открыть приложение TorrServe: " + safe(e.getMessage()));
+                }
             } catch (Exception e) {
-                magnetDiag("MAGNET_LOOKUP_FAILED", "id=" + id + ", error=" + safeDiag(e.getMessage()));
-                runOnUiThread(() -> {
-                    showMessage("Не удалось получить magnet: " + safe(e.getMessage()) + ". Пробую обычную ссылку .torrent…");
-                    playTorrentFallback(data);
-                });
+                magnetDiag("MAGNET_LOOKUP_FAILED", "transport=WebView, id=" + id
+                        + ", error=" + safeDiag(e.getMessage()));
+                showMessage("Не удалось получить magnet: " + safe(e.getMessage())
+                        + ". Пробую обычную ссылку .torrent…");
+                playTorrentFallback(data);
             }
         });
     }
