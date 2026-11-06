@@ -984,11 +984,12 @@ public class MainActivity extends Activity {
     }
 
     private void searchJackett(String query, String posterUrl) {
+        String searchTitle = extractJackettSearchTitle(query);
         LinearLayout panel = new LinearLayout(this);
         panel.setOrientation(LinearLayout.VERTICAL);
         panel.setPadding(dp(12), dp(8), dp(12), dp(8));
         panel.setBackgroundColor(BG);
-        TextView status = text("Поиск: " + query + "\\nПодключение к Jackett…", 13, TEAL, false);
+        TextView status = text("Поиск: " + searchTitle + "\\nПодключение к Jackett…", 13, TEAL, false);
         panel.addView(status);
         ScrollView scroll = new ScrollView(this);
         scroll.setFocusable(false);
@@ -1014,7 +1015,7 @@ public class MainActivity extends Activity {
             String error = "Серверы не ответили";
             for (String server : servers) {
                 try {
-                    String encoded = URLEncoder.encode(query, "UTF-8");
+                    String encoded = URLEncoder.encode(searchTitle, "UTF-8");
                     String apiKey = jackettApiKey();
                     String endpoint = server.replaceAll("/+$", "")
                             + "/api/v2.0/indexers/all/results/torznab/api?"
@@ -1120,6 +1121,19 @@ public class MainActivity extends Activity {
         });
     }
 
+    private String extractJackettSearchTitle(String fullTitle) {
+        if (fullTitle == null) return "";
+        String value = fullTitle.trim();
+        int slash = value.indexOf('/');
+        if (slash >= 0 && slash + 1 < value.length()) {
+            String english = value.substring(slash + 1).trim();
+            int nextSlash = english.indexOf('/');
+            if (nextSlash >= 0) english = english.substring(0, nextSlash).trim();
+            if (!english.isEmpty()) return english;
+        }
+        return value;
+    }
+
     private String jackettAttribute(Element item, String name) {
         if (item == null) return "—";
         Element direct = item.selectFirst(name);
@@ -1141,8 +1155,7 @@ public class MainActivity extends Activity {
             long bytes = Long.parseLong(raw.replaceAll("[^0-9]", ""));
             if (bytes <= 0) return "—";
             double gib = bytes / (1024d * 1024d * 1024d);
-            if (gib >= 1d) return String.format(java.util.Locale.US, "%.2f ГБ", gib);
-            return String.format(java.util.Locale.US, "%.0f МБ", bytes / (1024d * 1024d));
+            return String.format(java.util.Locale.US, "%.2f ГБ", gib);
         } catch (Exception ignored) { return raw; }
     }
 
