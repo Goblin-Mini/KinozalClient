@@ -3424,5 +3424,5 @@ public class MainActivity extends Activity {
     private String safe(String s) { return s == null ? "Ошибка сети" : s; }
 
     @Override public void onBackPressed() { finish(); }
-    @Override protected void onDestroy() { io.shutdownNow(); super.onDestroy(); }
+    @Override protected void onDestroy() { if (socks5Bridge != null) socks5Bridge.stop(); io.shutdownNow(); super.onDestroy(); }
 }
