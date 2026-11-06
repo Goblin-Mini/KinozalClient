@@ -17,6 +17,7 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.view.inputmethod.EditorInfo;
 import android.widget.Button;
+import android.widget.CheckBox;
 import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.ProgressBar;
@@ -37,11 +38,17 @@ import org.jsoup.nodes.Element;
 import org.jsoup.select.Elements;
 
 import java.net.URLEncoder;
+import java.net.Proxy;
+import java.net.HttpURLConnection;
+import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import androidx.webkit.ProxyConfig;
+import androidx.webkit.ProxyController;
+import androidx.webkit.WebViewFeature;
 
 public class MainActivity extends Activity {
     private static final int BG = Color.rgb(16, 19, 23);
@@ -57,6 +64,7 @@ public class MainActivity extends Activity {
 
     private final ExecutorService io = Executors.newSingleThreadExecutor();
     private KinozalHttpClient client;
+    private Socks5ProxyBridge socks5Bridge;
     private DiskCache diskCache;
     private String mirror;
     private String currentPath = "browse.php";
@@ -107,15 +115,148 @@ public class MainActivity extends Activity {
         client = new KinozalHttpClient(this, mirror);
         diskCache = new DiskCache(this, 200L * 1024L * 1024L);
         buildShell();
+        socks5Bridge = new Socks5ProxyBridge(this);
         String savedBrowserCookies = client.getSavedBrowserCookies();
-        if (savedBrowserCookies != null) {
-            restoreBrowserSession(savedBrowserCookies);
-        } else {
-            // Wait until the TV window is actually focused before the first request.
-            markStartupCatalogReady();
+        initializeNetwork(savedBrowserCookies);
+    }
+
+
+    private void initializeNetwork(String savedBrowserCookies) {
+        Socks5ProxyBridge.Settings config = socks5Bridge.getSettings();
+        if (!config.enabled) {
+            client.setProxy(Proxy.NO_PROXY);
+            continueStartup(savedBrowserCookies);
+            return;
+        }
+        try {
+            Proxy localProxy = socks5Bridge.start();
+            if (!WebViewFeature.isFeatureSupported(WebViewFeature.PROXY_OVERRIDE)) {
+                socks5Bridge.stop();
+                throw new IllegalStateException("Компонент WebView не поддерживает прокси. Обновите Android System WebView.");
+            }
+            applyWebViewProxy(true, () -> {
+                client.setProxy(localProxy);
+                continueStartup(savedBrowserCookies);
+            });
+        } catch (Exception e) {
+            client.setProxy(blockedProxy());
+            status.setText("SOCKS5 не запущен: " + safe(e.getMessage()));
+            showMessage("Не удалось включить SOCKS5: " + safe(e.getMessage())
+                    + "\\nПрямое подключение не используется.");
         }
     }
 
+    private Proxy blockedProxy() {
+        // Fail closed if an enabled proxy cannot start; never silently fall back to direct traffic.
+        return new Proxy(Proxy.Type.HTTP, new java.net.InetSocketAddress("127.0.0.1", 1));
+    }
+
+    private void continueStartup(String savedBrowserCookies) {
+        if (savedBrowserCookies != null) restoreBrowserSession(savedBrowserCookies);
+        else markStartupCatalogReady();
+    }
+
+    private void applyWebViewProxy(boolean enabled, Runnable callback) {
+        if (!WebViewFeature.isFeatureSupported(WebViewFeature.PROXY_OVERRIDE)) {
+            if (enabled) throw new IllegalStateException("Эта версия WebView не поддерживает прокси");
+            callback.run();
+            return;
+        }
+        ProxyConfig.Builder builder = new ProxyConfig.Builder();
+        if (enabled) builder.addProxyRule("http://127.0.0.1:" + socks5Bridge.getLocalPort());
+        else builder.addDirect();
+        ProxyController.getInstance().setProxyOverride(builder.build(),
+                command -> runOnUiThread(command), callback);
+    }
+
+    private void showSocks5Settings() {
+        Socks5ProxyBridge.Settings cfg = socks5Bridge.getSettings();
+        LinearLayout panel = new LinearLayout(this);
+        panel.setOrientation(LinearLayout.VERTICAL);
+        panel.setPadding(dp(18), dp(12), dp(18), dp(8));
+        panel.setBackgroundColor(BG);
+        CheckBox enabled = new CheckBox(this);
+        enabled.setText("Использовать SOCKS5 для приложения");
+        enabled.setTextColor(GOLD);
+        enabled.setButtonTintList(android.content.res.ColorStateList.valueOf(TEAL));
+        enabled.setChecked(cfg.enabled);
+        panel.addView(enabled);
+        EditText host = proxyField("Адрес сервера", cfg.host, android.text.InputType.TYPE_CLASS_TEXT
+                | android.text.InputType.TYPE_TEXT_VARIATION_URI);
+        EditText port = proxyField("Порт", String.valueOf(cfg.port), android.text.InputType.TYPE_CLASS_NUMBER);
+        EditText username = proxyField("Логин (если требуется)", cfg.username,
+                android.text.InputType.TYPE_CLASS_TEXT | android.text.InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD);
+        EditText password = proxyField("Пароль (если требуется)", cfg.password,
+                android.text.InputType.TYPE_CLASS_TEXT | android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD);
+        addProxyField(panel, "Сервер", host);
+        addProxyField(panel, "Порт", port);
+        addProxyField(panel, "Логин", username);
+        addProxyField(panel, "Пароль", password);
+        TextView note = text("Прокси применяется к WebView, каталогу, карточкам и диагностике. Пароль хранится зашифрованным в Android Keystore.",
+                12, TEAL, false);
+        note.setPadding(0, dp(8), 0, dp(4));
+        panel.addView(note);
+        AlertDialog dialog = new AlertDialog.Builder(this).setTitle("SOCKS5").setView(panel)
+                .setNegativeButton("Отмена", null).setPositiveButton("Сохранить", null).create();
+        dialog.setOnShowListener(ignored -> {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setTextColor(GOLD);
+            dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setTextColor(TEAL);
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
+                int portValue;
+                try { portValue = Integer.parseInt(port.getText().toString().trim()); }
+                catch (Exception e) { showMessage("Укажите корректный порт SOCKS5"); return; }
+                try {
+                    socks5Bridge.saveSettings(enabled.isChecked(), host.getText().toString(),
+                            portValue, username.getText().toString(), password.getText().toString());
+                    Proxy local;
+                    if (enabled.isChecked()) local = socks5Bridge.start();
+                    else { socks5Bridge.stop(); local = Proxy.NO_PROXY; }
+                    if (enabled.isChecked() && !WebViewFeature.isFeatureSupported(WebViewFeature.PROXY_OVERRIDE)) {
+                        socks5Bridge.stop();
+                        throw new IllegalStateException("Обновите Android System WebView: нет поддержки прокси");
+                    }
+                    applyWebViewProxy(enabled.isChecked(), () -> {
+                        client.setProxy(local);
+                        dialog.dismiss();
+                        showMessage(enabled.isChecked() ? "SOCKS5 включён" : "SOCKS5 отключён");
+                        if (sessionWebView != null) loadInitialCatalog();
+                    });
+                } catch (Exception e) {
+                    client.setProxy(enabled.isChecked() ? blockedProxy() : Proxy.NO_PROXY);
+                    showMessage("Ошибка SOCKS5: " + safe(e.getMessage()));
+                }
+            });
+        });
+        dialog.show();
+        if (dialog.getWindow() != null) {
+            dialog.getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(BG));
+            dialog.getWindow().setLayout(Math.min(dp(560),
+                    getResources().getDisplayMetrics().widthPixels - dp(48)),
+                    ViewGroup.LayoutParams.WRAP_CONTENT);
+        }
+        enabled.requestFocus();
+    }
+
+    private EditText proxyField(String hint, String value, int inputType) {
+        EditText field = new EditText(this);
+        field.setSingleLine(true);
+        field.setText(value);
+        field.setHint(hint);
+        field.setTextColor(Color.WHITE);
+        field.setHintTextColor(TEAL);
+        field.setTextSize(14);
+        field.setInputType(inputType);
+        field.setPadding(dp(10), dp(7), dp(10), dp(7));
+        field.setBackground(shape(PANEL, TEAL));
+        return field;
+    }
+
+    private void addProxyField(LinearLayout panel, String label, EditText field) {
+        TextView caption = text(label, 13, TEAL, true);
+        caption.setPadding(0, dp(5), 0, dp(2));
+        panel.addView(caption);
+        panel.addView(field, new LinearLayout.LayoutParams(-1, dp(43)));
+    }
 
     @Override public void onWindowFocusChanged(boolean hasFocus) {
         super.onWindowFocusChanged(hasFocus);
@@ -1032,10 +1173,11 @@ public class MainActivity extends Activity {
         Button mirrorButton = button("◇   Выбрать зеркало");
         Button updates = button("↻   Проверить обновления");
         Button diagnostics = button("▤   Диагностика / кэш");
+        Button socks5 = button("◉   SOCKS5 прокси");
         Button jackett = button("⌕   Поиск Jackett");
         Button about = button("ⓘ   О приложении");
         Button close = button("Закрыть");
-        for (Button action : new Button[]{login, mirrorButton, updates, diagnostics, jackett, about, close}) {
+        for (Button action : new Button[]{login, mirrorButton, updates, diagnostics, socks5, jackett, about, close}) {
             action.setTextSize(15);
             action.setGravity(Gravity.CENTER);
             LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-1, dp(48));
@@ -1046,6 +1188,7 @@ public class MainActivity extends Activity {
         mirrorButton.setOnClickListener(v -> { settingsDialog.dismiss(); chooseMirror(); });
         updates.setOnClickListener(v -> { settingsDialog.dismiss(); new UpdateManager(this).check(); });
         diagnostics.setOnClickListener(v -> { settingsDialog.dismiss(); showDiagnostics(); });
+        socks5.setOnClickListener(v -> { settingsDialog.dismiss(); showSocks5Settings(); });
         jackett.setOnClickListener(v -> showJackettSettings());
         about.setOnClickListener(v -> showAbout());
         close.setOnClickListener(v -> settingsDialog.dismiss());
@@ -1071,16 +1214,21 @@ public class MainActivity extends Activity {
         panel.setPadding(dp(20), dp(14), dp(20), dp(12));
         panel.setBackgroundColor(BG);
 
+        TextView networkInfo = text("Внешний IP и страна: проверка…", 14, GOLD, false);
+        networkInfo.setLineSpacing(dp(4), 1f);
+        panel.addView(networkInfo);
         TextView cacheInfo = text(
-                "Дисковый кэш Kinozal\n"
-                + String.format(java.util.Locale.ROOT, "Занято: %.2f МБ из %.0f МБ (%.1f%%)\n",
+                "Дисковый кэш Kinozal\\n"
+                + String.format(java.util.Locale.ROOT, "Занято: %.2f МБ из %.0f МБ (%.1f%%)\\n",
                         usedMb, limitMb, percent)
-                + String.format(java.util.Locale.ROOT, "Файлов в кэше: %d\n", diskCache.getEntryCount())
-                + "Расположение: cache/kinozal_cache\n"
+                + String.format(java.util.Locale.ROOT, "Файлов в кэше: %d\\n", diskCache.getEntryCount())
+                + "Расположение: cache/kinozal_cache\\n"
                 + homeCacheDiagnostic,
                 15, Color.WHITE, false);
         cacheInfo.setLineSpacing(dp(5), 1f);
-        panel.addView(cacheInfo);
+        LinearLayout.LayoutParams cacheParams = new LinearLayout.LayoutParams(-1, -2);
+        cacheParams.topMargin = dp(12);
+        panel.addView(cacheInfo, cacheParams);
 
         Button refresh = button("Обновить данные");
         refresh.setGravity(Gravity.CENTER);
@@ -1094,13 +1242,14 @@ public class MainActivity extends Activity {
                 .create();
         refresh.setOnClickListener(v -> {
             long current = diskCache.getSizeBytes();
-            cacheInfo.setText("Дисковый кэш Kinozal\n"
-                    + String.format(java.util.Locale.ROOT, "Занято: %.2f МБ из %.0f МБ (%.1f%%)\n",
+            cacheInfo.setText("Дисковый кэш Kinozal\\n"
+                    + String.format(java.util.Locale.ROOT, "Занято: %.2f МБ из %.0f МБ (%.1f%%)\\n",
                             current / (1024d * 1024d), limitMb, limit > 0 ? current * 100d / limit : 0d)
-                    + String.format(java.util.Locale.ROOT, "Файлов в кэше: %d\n", diskCache.getEntryCount())
-                    + "Расположение: cache/kinozal_cache\n"
+                    + String.format(java.util.Locale.ROOT, "Файлов в кэше: %d\\n", diskCache.getEntryCount())
+                    + "Расположение: cache/kinozal_cache\\n"
                     + homeCacheDiagnostic);
-        });
+            loadExternalIpInfo(networkInfo);
+        });;
         dialog.show();
         if (dialog.getWindow() != null) {
             dialog.getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(BG));
@@ -1109,7 +1258,55 @@ public class MainActivity extends Activity {
                     ViewGroup.LayoutParams.WRAP_CONTENT);
         }
         dialog.getButton(AlertDialog.BUTTON_POSITIVE).setTextColor(GOLD);
+        loadExternalIpInfo(networkInfo);
         refresh.requestFocus();
+    }
+
+    private void loadExternalIpInfo(TextView target) {
+        target.setText("Внешний IP и страна: проверка…");
+        io.execute(() -> {
+            HttpURLConnection connection = null;
+            try {
+                Socks5ProxyBridge.Settings cfg = socks5Bridge.getSettings();
+                Proxy route;
+                if (cfg.enabled) {
+                    if (!socks5Bridge.isRunning()) throw new IllegalStateException("SOCKS5 включён, но туннель не запущен");
+                    route = socks5Bridge.localHttpProxy();
+                } else route = Proxy.NO_PROXY;
+                connection = (HttpURLConnection) new URL("https://ipwho.is/").openConnection(route);
+                connection.setConnectTimeout(10000);
+                connection.setReadTimeout(10000);
+                connection.setRequestProperty("Accept", "application/json");
+                connection.setRequestProperty("User-Agent", "KinozalClient/0.5.13");
+                int code = connection.getResponseCode();
+                if (code < 200 || code >= 300) throw new java.io.IOException("HTTP " + code);
+                StringBuilder body = new StringBuilder();
+                try (java.io.InputStream in = connection.getInputStream();
+                     java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream()) {
+                    byte[] buffer = new byte[4096];
+                    int n;
+                    while ((n = in.read(buffer)) != -1) out.write(buffer, 0, n);
+                    body.append(new String(out.toByteArray(), StandardCharsets.UTF_8));
+                }
+                org.json.JSONObject json = new org.json.JSONObject(body.toString());
+                if (!json.optBoolean("success", false)) throw new java.io.IOException(json.optString("message", "Не удалось определить страну"));
+                String ip = json.optString("ip", "—");
+                String country = json.optString("country", "не определена");
+                String codeCountry = json.optString("country_code", "");
+                org.json.JSONObject connectionInfo = json.optJSONObject("connection");
+                String isp = connectionInfo == null ? "" : connectionInfo.optString("isp", "");
+                String result = "Маршрут: " + (cfg.enabled ? "SOCKS5" : "напрямую")
+                        + "\\nВнешний IP: " + ip
+                        + "\\nСтрана: " + country + (codeCountry.isEmpty() ? "" : " (" + codeCountry + ")")
+                        + (isp.isEmpty() ? "" : "\\nПровайдер: " + isp);
+                runOnUiThread(() -> target.setText(result));
+            } catch (Exception e) {
+                String message = "Не удалось определить внешний IP/страну: " + safe(e.getMessage());
+                runOnUiThread(() -> target.setText(message));
+            } finally {
+                if (connection != null) connection.disconnect();
+            }
+        });
     }
 
     private void showAbout() {
@@ -3234,5 +3431,5 @@ public class MainActivity extends Activity {
     private String safe(String s) { return s == null ? "Ошибка сети" : s; }
 
     @Override public void onBackPressed() { finish(); }
-    @Override protected void onDestroy() { io.shutdownNow(); super.onDestroy(); }
+    @Override protected void onDestroy() { if (socks5Bridge != null) socks5Bridge.stop(); io.shutdownNow(); super.onDestroy(); }
 }
