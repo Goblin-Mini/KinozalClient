@@ -1719,12 +1719,12 @@ public class MainActivity extends Activity {
         data.sourcePage = torrent.href;
 
         // All ratings are read from the current Kinozal details HTML.
-        Element imdbLink = doc.selectFirst("a[href*="imdb.com"]");
+        Element imdbLink = doc.selectFirst("a[href*=imdb.com]");
         if (imdbLink != null) {
             Element score = imdbLink.selectFirst(".floatright");
             if (score != null && !score.text().trim().isEmpty()) data.imdbRating = score.text().trim();
         }
-        Element kpLink = doc.selectFirst("a[href*="kinopoisk.ru"]");
+        Element kpLink = doc.selectFirst("a[href*=kinopoisk.ru]");
         if (kpLink != null) {
             Element score = kpLink.selectFirst(".floatright");
             if (score != null && !score.text().trim().isEmpty()) data.kinopoiskRating = score.text().trim();
