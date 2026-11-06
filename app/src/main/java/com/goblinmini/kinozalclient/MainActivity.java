@@ -2097,6 +2097,44 @@ public class MainActivity extends Activity {
     }
 
     private void playTorrent(TorrentDetails data) {
+        String id = torrentId(data.sourcePage);
+        if ("unknown".equals(id)) {
+            playTorrentFallback(data);
+            return;
+        }
+        magnetDiag("MAGNET_LOOKUP_START", "id=" + id + ", endpoint=" + client.getMirror() + "/get_srv_details.php?action=2&id=" + id);
+        io.execute(() -> {
+            try {
+                String browserCookies = CookieManager.getInstance().getCookie(client.getMirror());
+                if (browserCookies != null && !browserCookies.isEmpty()) {
+                    client.importBrowserCookies(browserCookies);
+                }
+                String hash = client.fetchMagnetHash(id, data.sourcePage);
+                String magnet = "magnet:?xt=urn:btih:" + hash
+                        + "&dn=" + URLEncoder.encode(data.title == null ? "" : data.title, "UTF-8");
+                magnetDiag("MAGNET_LOOKUP_SUCCESS", "id=" + id + ", hash=" + hash);
+                runOnUiThread(() -> {
+                    try {
+                        Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(magnet));
+                        intent.putExtra("poster", data.poster == null ? "" : data.poster);
+                        intent.putExtra("title", data.title == null ? "" : data.title);
+                        startActivity(intent);
+                    } catch (Exception e) {
+                        magnetDiag("MAGNET_OPEN_FAILED", safeDiag(e.getMessage()));
+                        showMessage("Magnet получен, но не удалось открыть приложение TorrServe: " + safe(e.getMessage()));
+                    }
+                });
+            } catch (Exception e) {
+                magnetDiag("MAGNET_LOOKUP_FAILED", "id=" + id + ", error=" + safeDiag(e.getMessage()));
+                runOnUiThread(() -> {
+                    showMessage("Не удалось получить magnet: " + safe(e.getMessage()) + ". Пробую обычную ссылку .torrent…");
+                    playTorrentFallback(data);
+                });
+            }
+        });
+    }
+
+    private void playTorrentFallback(TorrentDetails data) {
         if (data.torrentLink == null || data.torrentLink.isEmpty()) {
             showMessage("Не удалось найти ссылку на торрент на странице раздачи.");
             return;
