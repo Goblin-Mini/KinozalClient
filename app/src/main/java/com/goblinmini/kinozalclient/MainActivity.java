@@ -1694,9 +1694,15 @@ public class MainActivity extends Activity {
     private String torrentId(String href) {
         if (href == null) return "unknown";
         java.util.regex.Matcher m = java.util.regex.Pattern.compile("[?&]id=(\\d+)", java.util.regex.Pattern.CASE_INSENSITIVE).matcher(href);
-        return m.find() ? m.group(1) : "unknown";\n    }\n\n    private String safeDiag(String value) {
+        return m.find() ? m.group(1) : "unknown";
+    }
+
+    private String safeDiag(String value) {
         if (value == null) return "";
-        return value.replaceAll("[\\r\\n\\t]+", " ").replaceAll("\\s+", " ").trim();\n    }\n\n    private String cleanDetailLabel(String value) {
+        return value.replaceAll("[\\r\\n\\t]+", " ").replaceAll("\\s+", " ").trim();
+    }
+
+    private String cleanDetailLabel(String value) {
         return value == null ? "" : value.replaceAll("[:：*]+$", "").trim();
     }
 
