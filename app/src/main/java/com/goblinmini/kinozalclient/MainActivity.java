@@ -1683,7 +1683,7 @@ public class MainActivity extends Activity {
         }
     }
 
-    private String torrentId(String href) {\n        if (href == null) return "unknown";\n        java.util.regex.Matcher m = java.util.regex.Pattern.compile("[?&]id=(\\\\d+)", java.util.regex.Pattern.CASE_INSENSITIVE).matcher(href);\n        return m.find() ? m.group(1) : "unknown";\n    }\n\n    private String safeDiag(String value) {\n        if (value == null) return "";\n        return value.replaceAll("[\\\\r\\\\n\\\\t]+", " ").replaceAll("\\\\s+", " ").trim();\n    }\n\n    private String cleanDetailLabel(String value) {
+    private String torrentId(String href) {\n        if (href == null) return "unknown";\n        java.util.regex.Matcher m = java.util.regex.Pattern.compile("[?&]id=(\\d+)", java.util.regex.Pattern.CASE_INSENSITIVE).matcher(href);\n        return m.find() ? m.group(1) : "unknown";\n    }\n\n    private String safeDiag(String value) {\n        if (value == null) return "";\n        return value.replaceAll("[\\r\\n\\t]+", " ").replaceAll("\\s+", " ").trim();\n    }\n\n    private String cleanDetailLabel(String value) {
         return value == null ? "" : value.replaceAll("[:：*]+$", "").trim();
     }
 
