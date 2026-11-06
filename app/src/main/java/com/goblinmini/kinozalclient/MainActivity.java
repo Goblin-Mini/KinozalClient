@@ -2690,7 +2690,7 @@ public class MainActivity extends Activity {
                     showMessage("Не удалось разобрать карточку: " + safe(e.getMessage()));
                 }
             }
-        }));
+        });
 
         if (sessionWebView != null) {
             // A single authenticated WebView request avoids the known HTTP 403
