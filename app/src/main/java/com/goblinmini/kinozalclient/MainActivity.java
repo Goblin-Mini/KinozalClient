@@ -69,6 +69,7 @@ public class MainActivity extends Activity {
     private volatile String lastHtml = "";
     private WebView sessionWebView;
     private BrowserPageCallback pendingBrowserCallback;
+    private String pendingBrowserTarget = "";
     private final android.os.Handler browserHandler = new android.os.Handler(android.os.Looper.getMainLooper());
     private Runnable browserRequestTimeout;
     private boolean startupCatalogReady = false;
@@ -785,9 +786,12 @@ public class MainActivity extends Activity {
             }
             @Override public void onPageFinished(WebView view, String url) {
                 super.onPageFinished(view, url);
-                if (pendingBrowserCallback != null) {
+                // A WebView can finish an older navigation after a newer request
+                // has installed its callback. Never let that stale page consume it.
+                if (pendingBrowserCallback != null && isExpectedBrowserPage(url)) {
                     BrowserPageCallback cb = pendingBrowserCallback;
                     pendingBrowserCallback = null;
+                    pendingBrowserTarget = "";
                     view.evaluateJavascript("(document.documentElement ? document.documentElement.outerHTML : '')", value -> {
                         String html = "";
                         try { html = new org.json.JSONArray("[" + value + "]").getString(0); }
@@ -818,6 +822,25 @@ public class MainActivity extends Activity {
         web.setWebChromeClient(new WebChromeClient());
     }
 
+    private boolean isExpectedBrowserPage(String finishedUrl) {
+        if (finishedUrl == null || finishedUrl.isEmpty() || pendingBrowserTarget.isEmpty()) return false;
+        try {
+            java.net.URI finished = java.net.URI.create(finishedUrl);
+            java.net.URI expected = java.net.URI.create(pendingBrowserTarget);
+            String finishedPath = finished.getPath() == null ? "/" : finished.getPath();
+            String expectedPath = expected.getPath() == null ? "/" : expected.getPath();
+            // Login redirects are valid completions: the callback will report the
+            // expired session instead of leaving the request waiting for timeout.
+            String lowerPath = finishedPath.toLowerCase(java.util.Locale.ROOT);
+            if (lowerPath.contains("login.php") || lowerPath.contains("takelogin.php")) return true;
+            String finishedQuery = finished.getRawQuery() == null ? "" : finished.getRawQuery();
+            String expectedQuery = expected.getRawQuery() == null ? "" : expected.getRawQuery();
+            return finishedPath.equals(expectedPath) && finishedQuery.equals(expectedQuery);
+        } catch (Exception ignored) {
+            return finishedUrl.equals(pendingBrowserTarget);
+        }
+    }
+
     private void fetchBrowserPage(String path, String postBody,
             java.util.function.Consumer<String> callback) {
         WebView web = sessionWebView;
@@ -828,22 +851,28 @@ public class MainActivity extends Activity {
         if (pendingBrowserCallback != null) {
             BrowserPageCallback previous = pendingBrowserCallback;
             pendingBrowserCallback = null;
+            pendingBrowserTarget = "";
             previous.onPage(null, "Предыдущий запрос отменён");
         }
+        // Stop the previous navigation before assigning the next request.
+        web.stopLoading();
         if (web.getParent() instanceof ViewGroup) ((ViewGroup) web.getParent()).removeView(web);
         web.setVisibility(View.INVISIBLE);
         if (web.getParent() == null) root.addView(web, new LinearLayout.LayoutParams(1, 1));
         String target = path.startsWith("http") ? path
                 : client.getMirror() + "/" + path.replaceFirst("^/+", "");
+        pendingBrowserTarget = target;
         pendingBrowserCallback = (html, error) -> {
             if (browserRequestTimeout != null) browserHandler.removeCallbacks(browserRequestTimeout);
             browserRequestTimeout = null;
+            pendingBrowserTarget = "";
             runOnUiThread(() -> callback.accept(error == null ? html : null));
         };
         browserRequestTimeout = () -> {
             if (pendingBrowserCallback == null) return;
             BrowserPageCallback timedOut = pendingBrowserCallback;
             pendingBrowserCallback = null;
+            pendingBrowserTarget = "";
             browserRequestTimeout = null;
             web.stopLoading();
             timedOut.onPage(null, "Тайм-аут ожидания ответа Kinozal (30 секунд). Проверьте соединение или авторизацию.");
