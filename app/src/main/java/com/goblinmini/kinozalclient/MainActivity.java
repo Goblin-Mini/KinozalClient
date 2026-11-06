@@ -1501,20 +1501,24 @@ public class MainActivity extends Activity {
             try {
                 String html = client.fetch(selected.href);
                 Document doc = Jsoup.parse(html, selected.href);
-                nativeDetails = parseTorrentDetails(doc, selected);\n                magnetDiag("HTTP_DETAILS", "id=" + torrentId(selected.href) + ", htmlBytes=" + html.length() + ", magnet=" + nativeDetails.torrentLink.startsWith("magnet:") + ", magnetAnchors=" + doc.select("a[href^=magnet:]").size() + ", title=" + safeDiag(nativeDetails.title));
+                nativeDetails = parseTorrentDetails(doc, selected);
+                magnetDiag("HTTP_DETAILS", "id=" + torrentId(selected.href) + ", htmlBytes=" + html.length() + ", magnet=" + nativeDetails.torrentLink.startsWith("magnet:") + ", magnetAnchors=" + doc.select("a[href^=magnet:]").size() + ", title=" + safeDiag(nativeDetails.title));
                 boolean hasDetails = !nativeDetails.fields.isEmpty()
                         || !nativeDetails.poster.isEmpty()
                         || !nativeDetails.torrentLink.isEmpty()
                         || (doc.selectFirst("h1") != null);
                 if (!hasDetails) nativeDetails = null;
             } catch (Exception e) {
-                nativeError = safe(e.getMessage());\n                magnetDiag("HTTP_ERROR", "id=" + torrentId(selected.href) + ", error=" + safeDiag(nativeError));
+                nativeError = safe(e.getMessage());
+                magnetDiag("HTTP_ERROR", "id=" + torrentId(selected.href) + ", error=" + safeDiag(nativeError));
             }
 
             if (nativeDetails != null) {
                 if (!nativeDetails.torrentLink.startsWith("magnet:")) {
                     try {
-                        magnetDiag("SERVER_FALLBACK_START", "id=" + torrentId(selected.href));\n                        String magnet = fetchMagnetFromServer(selected);\n                        magnetDiag("SERVER_FALLBACK_RESULT", "id=" + torrentId(selected.href) + ", found=" + !magnet.isEmpty());
+                        magnetDiag("SERVER_FALLBACK_START", "id=" + torrentId(selected.href));
+                        String magnet = fetchMagnetFromServer(selected);
+                        magnetDiag("SERVER_FALLBACK_RESULT", "id=" + torrentId(selected.href) + ", found=" + !magnet.isEmpty());
                         if (!magnet.isEmpty()) nativeDetails.torrentLink = magnet;
                     } catch (Exception ignored) { }
                 }
@@ -1540,7 +1544,8 @@ public class MainActivity extends Activity {
                             + (failure == null ? "страница раздачи пуста" : failure));
                     return;
                 }
-                magnetDiag("WEBVIEW_FALLBACK_START", "id=" + torrentId(selected.href));\n                fetchBrowserPage(selected.href, null, browserHtml -> {
+                magnetDiag("WEBVIEW_FALLBACK_START", "id=" + torrentId(selected.href));
+                fetchBrowserPage(selected.href, null, browserHtml -> {
                     if (requestId != torrentRequestSerial || isFinishing()) return;
                     if (browserHtml == null || browserHtml.isEmpty()) {
                         progress.setVisibility(View.GONE);
@@ -1615,7 +1620,9 @@ public class MainActivity extends Activity {
 
         // Magnet must have priority: Kinozal commonly places download.php
         // before the TSA_magnet anchor in the same table cell.
-        Elements magnetAnchors = doc.select("a[href^=magnet:]");\n        magnetDiag("PARSE_MAGNET", "id=" + torrentId(torrent.href) + ", anchors=" + magnetAnchors.size() + ", tsa=" + doc.select("a.TSA_magnet").size());\n        Element magnet = doc.selectFirst("a.TSA_magnet[href^=magnet:], a[href^=magnet:]");
+        Elements magnetAnchors = doc.select("a[href^=magnet:]");
+        magnetDiag("PARSE_MAGNET", "id=" + torrentId(torrent.href) + ", anchors=" + magnetAnchors.size() + ", tsa=" + doc.select("a.TSA_magnet").size());
+        Element magnet = doc.selectFirst("a.TSA_magnet[href^=magnet:], a[href^=magnet:]");
         if (magnet != null) {
             data.torrentLink = magnet.attr("href").trim();
         } else {
@@ -1639,7 +1646,8 @@ public class MainActivity extends Activity {
 
         String endpoint = client.getMirror() + "/get_srv_details.php?action=2&id="
                 + idMatcher.group(1);
-        String html = client.fetch(endpoint);\n        magnetDiag("SERVER_RESPONSE", "id=" + idMatcher.group(1) + ", chars=" + html.length() + ", hasMagnet=" + html.contains("magnet:") + ", hasHash=" + java.util.regex.Pattern.compile("(?i)[a-f0-9]{40}").matcher(html).find());
+        String html = client.fetch(endpoint);
+        magnetDiag("SERVER_RESPONSE", "id=" + idMatcher.group(1) + ", chars=" + html.length() + ", hasMagnet=" + html.contains("magnet:") + ", hasHash=" + java.util.regex.Pattern.compile("(?i)[a-f0-9]{40}").matcher(html).find());
         Document response = Jsoup.parse(html, endpoint);
 
         Element directMagnet = response.selectFirst("a[href^=magnet:]");
@@ -1683,7 +1691,12 @@ public class MainActivity extends Activity {
         }
     }
 
-    private String torrentId(String href) {\n        if (href == null) return "unknown";\n        java.util.regex.Matcher m = java.util.regex.Pattern.compile("[?&]id=(\\d+)", java.util.regex.Pattern.CASE_INSENSITIVE).matcher(href);\n        return m.find() ? m.group(1) : "unknown";\n    }\n\n    private String safeDiag(String value) {\n        if (value == null) return "";\n        return value.replaceAll("[\\r\\n\\t]+", " ").replaceAll("\\s+", " ").trim();\n    }\n\n    private String cleanDetailLabel(String value) {
+    private String torrentId(String href) {
+        if (href == null) return "unknown";
+        java.util.regex.Matcher m = java.util.regex.Pattern.compile("[?&]id=(\\d+)", java.util.regex.Pattern.CASE_INSENSITIVE).matcher(href);
+        return m.find() ? m.group(1) : "unknown";\n    }\n\n    private String safeDiag(String value) {
+        if (value == null) return "";
+        return value.replaceAll("[\\r\\n\\t]+", " ").replaceAll("\\s+", " ").trim();\n    }\n\n    private String cleanDetailLabel(String value) {
         return value == null ? "" : value.replaceAll("[:：*]+$", "").trim();
     }
 
@@ -1808,7 +1821,13 @@ public class MainActivity extends Activity {
         technicalTab.setOnClickListener(v -> { active[0] = 1; render.run(); });
         render.run();
 
-        watch.setOnClickListener(v -> playTorrent(data));\n        Button diagnostics = button("Диагностика magnet");\n        diagnostics.setTextSize(12);\n        diagnostics.setOnClickListener(v -> showMagnetDiagnostics());\n        LinearLayout.LayoutParams diagParams = new LinearLayout.LayoutParams(-1, dp(38));\n        diagParams.topMargin = dp(8);\n        root.addView(diagnostics, diagParams);
+        watch.setOnClickListener(v -> playTorrent(data));
+        Button diagnostics = button("Диагностика magnet");
+        diagnostics.setTextSize(12);
+        diagnostics.setOnClickListener(v -> showMagnetDiagnostics());
+        LinearLayout.LayoutParams diagParams = new LinearLayout.LayoutParams(-1, dp(38));
+        diagParams.topMargin = dp(8);
+        root.addView(diagnostics, diagParams);
         root.setLayoutParams(new ViewGroup.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         AlertDialog dialog = new AlertDialog.Builder(this)
@@ -1854,7 +1873,8 @@ public class MainActivity extends Activity {
             showMessage("Не удалось найти ссылку на торрент на странице раздачи.");
             return;
         }
-        magnetDiag("PLAY_REQUEST", "magnet=" + data.torrentLink.startsWith("magnet:") + ", title=" + safeDiag(data.title));\n        if (data.torrentLink.startsWith("magnet:")) {
+        magnetDiag("PLAY_REQUEST", "magnet=" + data.torrentLink.startsWith("magnet:") + ", title=" + safeDiag(data.title));
+        if (data.torrentLink.startsWith("magnet:")) {
             try {
                 Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(data.torrentLink));
                 // Use Android resolver; do not hardcode a specific TorrServe package.
