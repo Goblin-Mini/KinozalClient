@@ -254,16 +254,19 @@ public class MainActivity extends Activity {
             List<HomeSection> sections, int retry) {
         if (index >= paths.length) {
             removeHomeDuplicates(sections);
-            int total = 0;
-            for (HomeSection section : sections) total += section.items.size();
+            // Re-render the final de-duplicated model. This replaces each row
+            // in place, so cards discarded by final normalization disappear too.
+            for (HomeSection section : sections) renderHomeSection(section);
+            int total = countHomeCards(sections);
             progress.setVisibility(View.GONE);
             if (total == 0) {
                 status.setText("Нет соединения");
                 addEmpty("Не удалось получить постеры Kinozal. Проверьте авторизацию и выбранное зеркало.");
             } else {
                 setCatalogStatus("Постеров", total);
-                status.setText(homeCacheDisplayed
-                        ? "Каталог обновлён" : "Все ленты загружены");
+                status.setText("Главная · Лент показано: " + sections.size() + "/" + paths.length
+                        + "\\nЗапросов обработано: " + paths.length + "/" + paths.length
+                        + (homeCacheDisplayed ? "\\nКэш обновлён" : ""));
             }
             return;
         }
@@ -301,7 +304,7 @@ public class MainActivity extends Activity {
                     status.setText("Обработано " + (index + 1) + "/" + paths.length
                             + " · показано лент " + sections.size() + " · карточек "
                             + countHomeCards(sections));
-                    setCatalogStatus("Лент", sections.size());
+                    setHomeProgress(index + 1, paths.length, sections.size());
                     browserHandler.postDelayed(() -> loadHomeSectionsInBrowser(
                             paths, titles, index + 1, sections, 0), 100);
                 });
@@ -508,6 +511,12 @@ public class MainActivity extends Activity {
         }
     }
 
+    private void setHomeProgress(int processed, int total, int displayed) {
+        status.setText("Главная · Запросов: " + processed + "/" + total
+                + " · Лент отображено: " + displayed + "/" + total
+                + "\\nВерсия: " + getAppVersionName());
+    }
+
     private void setCatalogStatus(String itemType, int count) {
         status.setText(currentTitle + " · Загружено: " + count + " " + itemType
                 + "\nВерсия: " + getAppVersionName());
@@ -528,7 +537,12 @@ public class MainActivity extends Activity {
 
     private String normalizeHomeTitle(String title) {
         if (title == null) return "";
-        String value = title.toLowerCase(java.util.Locale.ROOT);
+        String value = title.toLowerCase(java.util.Locale.ROOT).trim();
+        // The same movie often appears as "Русское название / Original title /
+        // year / release". Use the leading title as the primary identity so
+        // alternate encodes don't fill a feed with copies of one film.
+        int slash = value.indexOf(" / ");
+        if (slash > 0) value = value.substring(0, slash);
         value = value.replaceAll("\\b(2160p|1080p|720p|480p|4k|uhd|hdr10?|web[- .]?dl|webrip|blu[- .]?ray|bdrip|brrip|dvdrip|hdtv|h265|h264|x265|x264|hevc|avc|aac|dts|ac3|proper|repack|remux)\\b", " ");
         return value.replaceAll("[^\\p{L}\\p{N}]+", " ")
                 .replaceAll("\\s+", " ").trim();
