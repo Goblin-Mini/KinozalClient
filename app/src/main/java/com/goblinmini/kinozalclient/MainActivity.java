@@ -723,14 +723,14 @@ public class MainActivity extends Activity {
                 super.onDraw(canvas);
                 iconPaint.setColor(GOLD);
                 iconPaint.setStyle(android.graphics.Paint.Style.STROKE);
-                iconPaint.setStrokeWidth(dp(2.4f));
+                iconPaint.setStrokeWidth(dp(2.1f));
                 iconPaint.setStrokeCap(android.graphics.Paint.Cap.ROUND);
                 float cx = getWidth() / 2f - dp(2);
                 float cy = getHeight() / 2f - dp(2);
-                float radius = dp(7);
+                float radius = dp(6);
                 canvas.drawCircle(cx, cy, radius, iconPaint);
                 canvas.drawLine(cx + radius * 0.72f, cy + radius * 0.72f,
-                        cx + dp(12), cy + dp(12), iconPaint);
+                        cx + dp(10), cy + dp(10), iconPaint);
             }
         };
         voiceSearch.setContentDescription("Голосовой поиск");
@@ -766,6 +766,7 @@ public class MainActivity extends Activity {
         searchBar.addView(history, historyParams);
         history.setOnClickListener(v -> showSearchHistory());
         Button find = button("Найти");
+        find.setTextSize(12);
         find.setMinWidth(0);
         LinearLayout.LayoutParams findParams = new LinearLayout.LayoutParams(dp(104), dp(48));
         searchBar.addView(find, findParams);
@@ -884,6 +885,13 @@ public class MainActivity extends Activity {
 
     private void addMenu(String icon, String label, Runnable action) {
         Button b = button(icon + "   " + label);
+        if ("Недавно смотрели".equals(label)) {
+            android.text.SpannableString menuText =
+                    new android.text.SpannableString(icon + "   " + label);
+            menuText.setSpan(new android.text.style.RelativeSizeSpan(1.2f),
+                    0, icon.length(), android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+            b.setText(menuText);
+        }
         b.setGravity(Gravity.CENTER_VERTICAL | Gravity.LEFT);
         b.setTextSize(14);
         b.setPadding(dp(14), 0, dp(8), 0);
