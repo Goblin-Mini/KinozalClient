@@ -1655,14 +1655,16 @@ public class MainActivity extends Activity {
             return;
         }
         if (data.torrentLink.startsWith("magnet:")) {
+            Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(data.torrentLink));
+            intent.putExtra("poster", data.poster == null ? "" : data.poster);
+            intent.putExtra("title", data.title == null ? "" : data.title);
             try {
-                Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(data.torrentLink));
-                intent.setPackage("ru.yourok.torrserve");
-                intent.putExtra("poster", data.poster == null ? "" : data.poster);
-                intent.putExtra("title", data.title == null ? "" : data.title);
+                // Let Android resolve the URI to any compatible torrent client.
                 startActivity(intent);
+            } catch (android.content.ActivityNotFoundException e) {
+                showMessage("Не найдено приложение, которое умеет открывать magnet-ссылки.");
             } catch (Exception e) {
-                showMessage("Не удалось открыть magnet в TorrServe: " + safe(e.getMessage()));
+                showMessage("Не удалось передать magnet-ссылку: " + safe(e.getMessage()));
             }
             return;
         }
@@ -1734,8 +1736,16 @@ public class MainActivity extends Activity {
             java.io.File target = new java.io.File(getCacheDir(), "kinozal-transfer.torrent");
             try (java.io.FileOutputStream out = new java.io.FileOutputStream(target)) { out.write(bytes); }
             Uri fileUri = Uri.parse("content://" + getPackageName() + ".torrentprovider/torrent");
+            Intent view = new Intent(Intent.ACTION_VIEW);
+            view.setDataAndType(fileUri, "application/x-bittorrent");
+            view.putExtra("poster", data.poster == null ? "" : data.poster);
+            view.putExtra("title", data.title == null ? "" : data.title);
+            view.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            view.setClipData(android.content.ClipData.newUri(getContentResolver(), "torrent", fileUri));
+
+            // Prefer the standard open-file contract. If no app handles it,
+            // retry with the equally common Android share contract.
             Intent send = new Intent(Intent.ACTION_SEND);
-            send.setPackage("ru.yourok.torrserve");
             send.setType("application/x-bittorrent");
             send.putExtra(Intent.EXTRA_STREAM, fileUri);
             send.putExtra("poster", data.poster == null ? "" : data.poster);
@@ -1743,8 +1753,19 @@ public class MainActivity extends Activity {
             send.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
             send.setClipData(android.content.ClipData.newUri(getContentResolver(), "torrent", fileUri));
             runOnUiThread(() -> {
-                try { startActivity(send); }
-                catch (Exception e) { showMessage("TorrServe MatriX не установлен или не принимает файл."); }
+                try {
+                    startActivity(view);
+                } catch (android.content.ActivityNotFoundException firstError) {
+                    try {
+                        startActivity(send);
+                    } catch (android.content.ActivityNotFoundException secondError) {
+                        showMessage("Не найдено приложение для открытия торрент-файлов.");
+                    } catch (Exception e) {
+                        showMessage("Не удалось передать торрент: " + safe(e.getMessage()));
+                    }
+                } catch (Exception e) {
+                    showMessage("Не удалось открыть торрент: " + safe(e.getMessage()));
+                }
             });
         } catch (Exception e) {
             runOnUiThread(() -> showMessage("Не удалось подготовить торрент: " + safe(e.getMessage())));
