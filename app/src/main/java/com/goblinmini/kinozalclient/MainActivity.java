@@ -1430,85 +1430,105 @@ public class MainActivity extends Activity {
     }
 
     private void showTorrent(Torrent t) {
+        // Snapshot the selected row. The catalogue can be refreshed while a
+        // details request is in flight; never let a mutable row reference
+        // change the identity of the request.
+        final Torrent selected = new Torrent();
+        selected.title = t.title;
+        selected.href = t.href;
+        selected.size = t.size;
+        selected.seeds = t.seeds;
+        selected.leeches = t.leeches;
+        selected.uploaded = t.uploaded;
+
         final long requestId = ++torrentRequestSerial;
         progress.setVisibility(View.VISIBLE);
-        if (sessionWebView != null) {
-            fetchBrowserPage(t.href, null, browserHtml -> {
-                if (requestId != torrentRequestSerial) return;
-                if (browserHtml == null || browserHtml.isEmpty()) {
-                    progress.setVisibility(View.GONE);
-                    showMessage("Не удалось загрузить карточку через браузерную сессию.");
-                    return;
-                }
-                final TorrentDetails browserDetails;
-                try {
-                    browserDetails = parseTorrentDetails(Jsoup.parse(browserHtml, t.href), t);
-                } catch (Exception e) {
-                    progress.setVisibility(View.GONE);
-                    showMessage("Не удалось разобрать карточку: " + safe(e.getMessage()));
-                    return;
-                }
 
-                // Experiment: the browser HTML and the authenticated native HTTP
-                // response may differ. If WebView did not expose a magnet, query
-                // the exact same details URL through the native cookie jar.
-                if (!browserDetails.torrentLink.startsWith("magnet:")) {
-                    io.execute(() -> {
-                        TorrentDetails nativeDetails = browserDetails;
-                        try {
-                            String nativeHtml = client.fetch(t.href);
-                            nativeDetails = parseTorrentDetails(Jsoup.parse(nativeHtml, t.href), t);
-                        } catch (Exception ignored) { }
-
-                        if (nativeDetails == null) nativeDetails = browserDetails;
-                        if (!nativeDetails.torrentLink.startsWith("magnet:")) {
-                            try {
-                                String magnet = fetchMagnetFromServer(t);
-                                if (!magnet.isEmpty()) nativeDetails.torrentLink = magnet;
-                            } catch (Exception ignored) { }
-                        }
-                        final TorrentDetails result = nativeDetails.torrentLink.startsWith("magnet:")
-                                ? nativeDetails : browserDetails;
-                        if (requestId != torrentRequestSerial) return;
-                        runOnUiThread(() -> {
-                            if (requestId != torrentRequestSerial) return;
-                            progress.setVisibility(View.GONE);
-                            showTorrentDetails(t, result);
-                        });
-                    });
-                } else {
-                    if (requestId != torrentRequestSerial) return;
-                    progress.setVisibility(View.GONE);
-                    showTorrentDetails(t, browserDetails);
-                }
-            });
-            return;
-        }
+        // Details pages are fetched through the authenticated native HTTP
+        // client first. It serializes requests and returns HTML tied to this
+        // exact URL, avoiding races in the single shared WebView document.
         io.execute(() -> {
+            TorrentDetails nativeDetails = null;
+            String nativeError = null;
             try {
-                String html = client.fetch(t.href);
-                Document doc = Jsoup.parse(html, t.href);
-                TorrentDetails details = parseTorrentDetails(doc, t);
-                if (!details.torrentLink.startsWith("magnet:")) {
+                String html = client.fetch(selected.href);
+                Document doc = Jsoup.parse(html, selected.href);
+                nativeDetails = parseTorrentDetails(doc, selected);
+                boolean hasDetails = !nativeDetails.fields.isEmpty()
+                        || !nativeDetails.poster.isEmpty()
+                        || !nativeDetails.torrentLink.isEmpty()
+                        || (doc.selectFirst("h1") != null);
+                if (!hasDetails) nativeDetails = null;
+            } catch (Exception e) {
+                nativeError = safe(e.getMessage());
+            }
+
+            if (nativeDetails != null) {
+                if (!nativeDetails.torrentLink.startsWith("magnet:")) {
                     try {
-                        String magnet = fetchMagnetFromServer(t);
-                        if (!magnet.isEmpty()) details.torrentLink = magnet;
+                        String magnet = fetchMagnetFromServer(selected);
+                        if (!magnet.isEmpty()) nativeDetails.torrentLink = magnet;
                     } catch (Exception ignored) { }
                 }
+                final TorrentDetails result = nativeDetails;
                 if (requestId != torrentRequestSerial) return;
                 runOnUiThread(() -> {
-                    if (requestId != torrentRequestSerial) return;
+                    if (requestId != torrentRequestSerial || isFinishing()) return;
                     progress.setVisibility(View.GONE);
-                    showTorrentDetails(t, details);
+                    showTorrentDetails(selected, result);
                 });
-            } catch (Exception e) {
-                if (requestId != torrentRequestSerial) return;
-                runOnUiThread(() -> {
-                    if (requestId != torrentRequestSerial) return;
-                    progress.setVisibility(View.GONE);
-                    showMessage("Не удалось загрузить карточку: " + safe(e.getMessage()));
-                });
+                return;
             }
+
+            // Some mirrors expose the details only through the logged-in
+            // browser session (Cloudflare or browser-only cookies). Use the
+            // WebView strictly as a fallback, never as the primary source.
+            final String failure = nativeError;
+            runOnUiThread(() -> {
+                if (requestId != torrentRequestSerial || isFinishing()) return;
+                if (sessionWebView == null) {
+                    progress.setVisibility(View.GONE);
+                    showMessage("Не удалось загрузить карточку: "
+                            + (failure == null ? "страница раздачи пуста" : failure));
+                    return;
+                }
+                fetchBrowserPage(selected.href, null, browserHtml -> {
+                    if (requestId != torrentRequestSerial || isFinishing()) return;
+                    if (browserHtml == null || browserHtml.isEmpty()) {
+                        progress.setVisibility(View.GONE);
+                        showMessage("Не удалось загрузить карточку: "
+                                + (failure == null ? "браузерная сессия не вернула страницу" : failure));
+                        return;
+                    }
+                    final TorrentDetails browserDetails;
+                    try {
+                        browserDetails = parseTorrentDetails(
+                                Jsoup.parse(browserHtml, selected.href), selected);
+                    } catch (Exception e) {
+                        progress.setVisibility(View.GONE);
+                        showMessage("Не удалось разобрать карточку: " + safe(e.getMessage()));
+                        return;
+                    }
+                    if (!browserDetails.torrentLink.startsWith("magnet:")) {
+                        io.execute(() -> {
+                            TorrentDetails result = browserDetails;
+                            try {
+                                String magnet = fetchMagnetFromServer(selected);
+                                if (!magnet.isEmpty()) result.torrentLink = magnet;
+                            } catch (Exception ignored) { }
+                            if (requestId != torrentRequestSerial) return;
+                            runOnUiThread(() -> {
+                                if (requestId != torrentRequestSerial || isFinishing()) return;
+                                progress.setVisibility(View.GONE);
+                                showTorrentDetails(selected, result);
+                            });
+                        });
+                    } else {
+                        progress.setVisibility(View.GONE);
+                        showTorrentDetails(selected, browserDetails);
+                    }
+                });
+            });
         });
     }
 
