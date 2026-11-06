@@ -27,6 +27,7 @@ import android.webkit.CookieManager;
 import android.webkit.JavascriptInterface;
 import android.webkit.WebChromeClient;
 import android.webkit.WebResourceRequest;
+import android.webkit.WebResourceError;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
@@ -55,6 +56,146 @@ public class MainActivity extends Activity {
             "https://kinozal.tv", "https://kinozal.me"
     };
 
+    private static final String MAGNET_DIAG_FILE = "magnet-diagnostics.log";
+
+    private synchronized void magnetDiag(String stage, String detail) {
+        String line = new java.text.SimpleDateFormat("HH:mm:ss.SSS", java.util.Locale.US)
+                .format(new java.util.Date()) + " [" + stage + "] " + (detail == null ? "" : detail) + "\n";
+        android.util.Log.i("KinozalMagnet", line.trim());
+        try (java.io.FileOutputStream out = openFileOutput(MAGNET_DIAG_FILE, MODE_APPEND)) {
+            out.write(line.getBytes(StandardCharsets.UTF_8));
+        } catch (Exception e) {
+            android.util.Log.e("KinozalMagnet", "Не удалось записать журнал", e);
+        }
+    }
+
+    private String safeNetworkUrl(String raw) {
+        try { Uri u = Uri.parse(raw); StringBuilder b = new StringBuilder(); b.append(u.getScheme()).append("://").append(u.getHost());
+            if (u.getPort() > 0) b.append(":").append(u.getPort()); b.append(u.getPath() == null ? "/" : u.getPath());
+            java.util.Set<String> keys = new java.util.TreeSet<>(u.getQueryParameterNames()); boolean first = true;
+            for (String k : keys) { b.append(first ? "?" : "&"); first = false; String z = k.toLowerCase(java.util.Locale.ROOT);
+                String v = ("id".equals(z) || "action".equals(z) || "type".equals(z) || "page".equals(z) || "t".equals(z) || "d".equals(z) || "f".equals(z) || "k".equals(z) || "w".equals(z)) ? u.getQueryParameter(k) : "[redacted]";
+                b.append(k).append("=").append(v == null ? "" : v); } return b.toString();
+        } catch (Exception e) { return "[url]"; }
+    }
+
+    private String readMagnetDiagnostics() {
+        try (java.io.FileInputStream in = openFileInput(MAGNET_DIAG_FILE)) {
+            byte[] bytes = new byte[(int) Math.min(in.available(), 128 * 1024)];
+            int count = in.read(bytes);
+            return count > 0 ? new String(bytes, 0, count, StandardCharsets.UTF_8) : "Журнал пуст.";
+        } catch (java.io.FileNotFoundException e) {
+            return "Журнал пока пуст. Открой карточку раздачи, чтобы выполнить проверку.";
+        } catch (Exception e) {
+            return "Не удалось прочитать журнал: " + safe(e.getMessage());
+        }
+    }
+
+    private void showMagnetDiagnostics() {
+        String log = readMagnetDiagnostics();
+        new AlertDialog.Builder(this)
+                .setTitle("Диагностика получения magnet")
+                .setMessage(log)
+                .setPositiveButton("Отправить", (d, w) -> {
+                    try {
+                        Intent share = new Intent(Intent.ACTION_SEND);
+                        share.setType("text/plain");
+                        share.putExtra(Intent.EXTRA_SUBJECT, "KinozalClient — диагностика magnet");
+                        share.putExtra(Intent.EXTRA_TEXT, log);
+                        startActivity(Intent.createChooser(share, "Отправить журнал"));
+                    } catch (Exception e) {
+                        showMessage("Не удалось открыть отправку: " + safeDiag(e.getMessage()));
+                    }
+                })
+                .setNeutralButton("Сохранить", (d, w) -> {
+                    new AlertDialog.Builder(this)
+                            .setTitle("Что сохранить?")
+                            .setItems(new String[]{"Журнал диагностики", "HTML карточки раздачи"},
+                                    (choiceDialog, which) -> {
+                                        if (which == 0) saveMagnetDiagnostics(log);
+                                        else saveDetailsHtmlDiagnostic();
+                                    })
+                            .setNegativeButton("Отмена", null)
+                            .show();
+                })
+                .setNegativeButton("Закрыть", null)
+                .show();
+    }
+
+    private void saveDetailsHtmlDiagnostic() {
+        String html = lastDetailsHtml;
+        String url = lastDetailsUrl;
+        if (html == null || html.isEmpty()) {
+            showMessage("HTML карточки пока нет. Сначала откройте карточку раздачи.");
+            return;
+        }
+        try {
+            Document doc = Jsoup.parse(html, url);
+            for (Element input : doc.select("input")) input.removeAttr("value");
+            for (Element area : doc.select("textarea")) area.text("");
+            String safeHtml = "<!-- URL: " + safeDiag(url) + " -->\\n" + doc.outerHtml();
+            if (safeHtml.length() > 512 * 1024) {
+                showMessage("HTML слишком большой для экспорта (" + safeHtml.length() + " символов).");
+                return;
+            }
+            if (android.os.Build.VERSION.SDK_INT >= 29) {
+                android.content.ContentValues values = new android.content.ContentValues();
+                values.put(android.provider.MediaStore.Downloads.DISPLAY_NAME, "kinozal-details-diagnostic.html");
+                values.put(android.provider.MediaStore.Downloads.MIME_TYPE, "text/html");
+                values.put(android.provider.MediaStore.Downloads.RELATIVE_PATH,
+                        android.os.Environment.DIRECTORY_DOWNLOADS + "/KinozalClient");
+                android.net.Uri uri = getContentResolver().insert(
+                        android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI, values);
+                if (uri == null) throw new java.io.IOException("Не удалось создать HTML в Downloads");
+                try (java.io.OutputStream out = getContentResolver().openOutputStream(uri)) {
+                    if (out == null) throw new java.io.IOException("Не удалось открыть HTML-файл");
+                    out.write(safeHtml.getBytes(StandardCharsets.UTF_8));
+                }
+            } else {
+                java.io.File dir = getExternalFilesDir(android.os.Environment.DIRECTORY_DOCUMENTS);
+                if (dir == null) throw new java.io.IOException("Папка документов недоступна");
+                try (java.io.FileOutputStream out = new java.io.FileOutputStream(
+                        new java.io.File(dir, "kinozal-details-diagnostic.html"))) {
+                    out.write(safeHtml.getBytes(StandardCharsets.UTF_8));
+                }
+            }
+            showMessage("HTML карточки сохранён в Downloads/KinozalClient.");
+        } catch (Exception e) {
+            showMessage("Ошибка сохранения HTML: " + safeDiag(e.getMessage()));
+        }
+    }
+
+    private void saveMagnetDiagnostics(String log) {
+        try {
+            if (android.os.Build.VERSION.SDK_INT >= 29) {
+                android.content.ContentValues values = new android.content.ContentValues();
+                values.put(android.provider.MediaStore.Downloads.DISPLAY_NAME,
+                        "kinozal-magnet-diagnostics.txt");
+                values.put(android.provider.MediaStore.Downloads.MIME_TYPE, "text/plain");
+                values.put(android.provider.MediaStore.Downloads.RELATIVE_PATH,
+                        android.os.Environment.DIRECTORY_DOWNLOADS + "/KinozalClient");
+                android.net.Uri uri = getContentResolver().insert(
+                        android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI, values);
+                if (uri == null) throw new java.io.IOException("Не удалось создать файл в Downloads");
+                try (java.io.OutputStream out = getContentResolver().openOutputStream(uri)) {
+                    if (out == null) throw new java.io.IOException("Не удалось открыть файл");
+                    out.write(log.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                }
+                showMessage("Журнал сохранён: Downloads/KinozalClient/kinozal-magnet-diagnostics.txt");
+            } else {
+                java.io.File dir = getExternalFilesDir(android.os.Environment.DIRECTORY_DOCUMENTS);
+                if (dir == null) throw new java.io.IOException("Папка документов недоступна");
+                java.io.File file = new java.io.File(dir, "kinozal-magnet-diagnostics.txt");
+                try (java.io.FileOutputStream out = new java.io.FileOutputStream(file)) {
+                    out.write(log.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                }
+                showMessage("Журнал сохранён: " + file.getAbsolutePath());
+            }
+        } catch (Exception e) {
+            showMessage("Ошибка сохранения журнала: " + safeDiag(e.getMessage()));
+        }
+    }
+
     private final ExecutorService io = Executors.newSingleThreadExecutor();
     private KinozalHttpClient client;
     private String mirror;
@@ -67,8 +208,13 @@ public class MainActivity extends Activity {
     private final List<Torrent> torrents = new ArrayList<>();
     private int page = 0;
     private volatile String lastHtml = "";
+    private volatile String lastDetailsHtml = "";
+    private volatile String lastDetailsUrl = "";
     private WebView sessionWebView;
     private BrowserPageCallback pendingBrowserCallback;
+    private String pendingBrowserTarget = "";
+    private long browserRequestSerial = 0;
+    private volatile long torrentRequestSerial = 0;
     private final android.os.Handler browserHandler = new android.os.Handler(android.os.Looper.getMainLooper());
     private Runnable browserRequestTimeout;
     private boolean startupCatalogReady = false;
@@ -451,9 +597,7 @@ public class MainActivity extends Activity {
             try { encoded = new org.json.JSONArray("[" + result + "]").getString(0); }
             catch (Exception ignored) { }
             if (encoded == null || encoded.isEmpty() || "null".equals(encoded)) {
-                loadImageWithHttp(imageUrl, target, referer);
-                return;
-            }
+                loadImageWithHttp(imageUrl, target, referer);                return;            }
             final String base64 = encoded;
             io.execute(() -> {
                 try {
@@ -744,6 +888,13 @@ public class MainActivity extends Activity {
     }
 
     private void restoreBrowserSession(String cookieHeader) {
+        // Restore the same authenticated browser session into the native HTTP
+        // cookie jar as well. The WebView and HttpURLConnection keep separate jars.
+        try {
+            client.importBrowserCookies(cookieHeader);
+        } catch (Exception e) {
+            showMessage("Не удалось восстановить HTTP-сессию Kinozal: " + safe(e.getMessage()));
+        }
         WebView web = new WebView(this);
         sessionWebView = web;
         web.setVisibility(View.INVISIBLE);
@@ -783,28 +934,144 @@ public class MainActivity extends Activity {
             @Override public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
                 return request.isForMainFrame() && !isMirror(request.getUrl());
             }
+            @Override public android.webkit.WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
+                if (request != null && request.getUrl() != null) {
+                    Uri u = request.getUrl(); String p = u.getPath() == null ? "" : u.getPath().toLowerCase(java.util.Locale.ROOT);
+                    String m = request.getMethod() == null ? "GET" : request.getMethod();
+                    if (!"GET".equalsIgnoreCase(m) || p.endsWith(".php") || p.endsWith(".json") || p.contains("/ajax/") || p.contains("/api/") || p.contains("magnet") || p.contains("torrent")) {
+                        magnetDiag("WEBVIEW_REQUEST", m + " " + safeNetworkUrl(u.toString()) + ", mainFrame=" + request.isForMainFrame());
+                    }
+                }
+                return super.shouldInterceptRequest(view, request);
+            }
+            @Override public void onPageStarted(WebView view, String url, android.graphics.Bitmap favicon) {
+                super.onPageStarted(view, url, favicon);
+                if (pendingBrowserCallback != null) {
+                    magnetDiag("WEBVIEW_PAGE_START", "url=" + safeDiag(url));
+                }
+            }
+            @Override public void onReceivedHttpError(WebView view, WebResourceRequest request,
+                    android.webkit.WebResourceResponse response) {
+                super.onReceivedHttpError(view, request, response);
+                if (request != null && request.isForMainFrame()) {
+                    magnetDiag("WEBVIEW_HTTP_ERROR", "status=" + response.getStatusCode()
+                            + ", reason=" + safeDiag(response.getReasonPhrase())
+                            + ", url=" + safeDiag(request.getUrl().toString()));
+                }
+            }
+            @Override public void onReceivedError(WebView view, WebResourceRequest request,
+                    WebResourceError error) {
+                super.onReceivedError(view, request, error);
+                if (request != null && request.isForMainFrame()) {
+                    magnetDiag("WEBVIEW_LOAD_ERROR", "code=" + error.getErrorCode()
+                            + ", description=" + safeDiag(String.valueOf(error.getDescription()))
+                            + ", url=" + safeDiag(request.getUrl().toString()));
+                }
+            }
             @Override public void onPageFinished(WebView view, String url) {
                 super.onPageFinished(view, url);
-                if (pendingBrowserCallback != null) {
-                    BrowserPageCallback cb = pendingBrowserCallback;
+                installNetworkProbe(view);
+                // A WebView can finish an older navigation after a newer request
+                // has installed its callback. Never let that stale page consume it.
+                if (pendingBrowserCallback != null
+                        && isExpectedBrowserPage(url, pendingBrowserTarget)) {
+                    final BrowserPageCallback cb = pendingBrowserCallback;
+                    final long completedSerial = browserRequestSerial;
+                    final String completedTarget = pendingBrowserTarget;
                     pendingBrowserCallback = null;
-                    view.evaluateJavascript("(document.documentElement ? document.documentElement.outerHTML : '')", value -> {
-                        String html = "";
-                        try { html = new org.json.JSONArray("[" + value + "]").getString(0); }
-                        catch (Exception ignored) { }
-                        if (html.isEmpty()) {
-                            cb.onPage(null, "Пустая страница браузера");
-                            return;
-                        }
-                        Document loaded = Jsoup.parse(html);
-                        boolean loginForm = !loaded.select("form:has(input[type=password])").isEmpty();
-                        String pageUrl = view.getUrl() == null ? "" : view.getUrl().toLowerCase(java.util.Locale.ROOT);
-                        if (loginForm || pageUrl.contains("login.php") || pageUrl.contains("takelogin.php")) {
-                            cb.onPage(null, "Сессия Kinozal не активна: сайт снова показывает форму входа. Откройте «Авторизация» и войдите.");
-                            return;
-                        }
-                        cb.onPage(html, null);
-                    });
+                    pendingBrowserTarget = "";
+                    magnetDiag("WEBVIEW_PAGE_FINISHED", "url=" + safeDiag(url)
+                            + ", title=" + safeDiag(view.getTitle()));
+                    // Kinozal may append its magnet anchor after the main document
+                    // load. Inspect the live DOM after a short settling period.
+                    browserHandler.postDelayed(() -> {
+                        if (completedSerial != browserRequestSerial
+                                || !isExpectedBrowserPage(view.getUrl(), completedTarget)) return;
+                        String script = "(function(){var d=document;var e=d.documentElement;"
+                                + "var a=d.querySelectorAll('a[href^=\\\"magnet:\\\"]');"
+                                + "var t=d.querySelectorAll('a.TSA_magnet');"
+                                + "return JSON.stringify({html:e?e.outerHTML:'',title:d.title||'',"
+                                + "url:location.href,body:(d.body?d.body.innerText:'').slice(0,700),"
+                                + "magnet:a.length,tsa:t.length});})()";
+                        view.evaluateJavascript(script, value -> {
+                            if (completedSerial != browserRequestSerial
+                                    || !isExpectedBrowserPage(view.getUrl(), completedTarget)) return;
+                            String html = "";
+                            String pageTitle = "";
+                            String pageUrl = view.getUrl() == null ? "" : view.getUrl();
+                            String body = "";
+                            int magnetCount = -1, tsaCount = -1;
+                            try {
+                                String jsonText = new org.json.JSONArray("[" + value + "]").getString(0);
+                                org.json.JSONObject snapshot = new org.json.JSONObject(jsonText);
+                                html = snapshot.optString("html", "");
+                                pageTitle = snapshot.optString("title", "");
+                                pageUrl = snapshot.optString("url", pageUrl);
+                                body = snapshot.optString("body", "");
+                                magnetCount = snapshot.optInt("magnet", -1);
+                                tsaCount = snapshot.optInt("tsa", -1);
+                            } catch (Exception e) {
+                                magnetDiag("WEBVIEW_SNAPSHOT_ERROR", "error=" + safeDiag(e.getMessage())
+                                        + ", raw=" + safeDiag(value));
+                            }
+                            magnetDiag("WEBVIEW_SNAPSHOT", "url=" + safeDiag(pageUrl)
+                                    + ", title=" + safeDiag(pageTitle)
+                                    + ", magnetAnchors=" + magnetCount + ", tsaAnchors=" + tsaCount
+                                    + ", htmlBytes=" + html.length()
+                                    + ", body=" + safeDiag(body));
+                            if (pageUrl.toLowerCase(java.util.Locale.ROOT).contains("details.php?id=")) {
+                                lastDetailsHtml = html;
+                                lastDetailsUrl = pageUrl;
+                                Document diagnosticDoc = Jsoup.parse(html, pageUrl);
+                                Elements anchors = diagnosticDoc.select("a[href]");
+                                int magnetLinks = 0, downloadLinks = 0;
+                                for (Element anchor : anchors) {
+                                    String href = anchor.attr("href").toLowerCase(java.util.Locale.ROOT);
+                                    if (href.startsWith("magnet:")) magnetLinks++;
+                                    if (href.contains("download.php") || href.contains(".torrent")
+                                            || href.contains("get_srv_details")) downloadLinks++;
+                                }
+                                StringBuilder candidates = new StringBuilder();
+                                for (Element anchor : anchors) {
+                                    String href = anchor.attr("href");
+                                    String low = href.toLowerCase(java.util.Locale.ROOT);
+                                    if (low.startsWith("magnet:") || low.contains("download.php")
+                                            || low.contains("get_srv_details") || low.contains(".torrent")) {
+                                        if (candidates.length() > 0) candidates.append(" ; ");
+                                        candidates.append(anchor.text().replaceAll("\\s+", " ").trim())
+                                                .append(" -> ").append(safeDiag(href));
+                                        if (candidates.length() > 3500) break;
+                                    }
+                                }
+                                magnetDiag("DETAILS_HTML_CAPTURED", "chars=" + html.length()
+                                        + ", links=" + anchors.size() + ", magnet=" + magnetLinks
+                                        + ", downloadRelated=" + downloadLinks
+                                        + ", scripts=" + diagnosticDoc.select("script").size()
+                                        + ", candidates=" + safeDiag(candidates.toString()));
+                            }
+                            if (html.isEmpty()) {
+                                cb.onPage(null, "Пустая страница браузера");
+                                return;
+                            }
+                            Document loaded = Jsoup.parse(html, pageUrl);
+                            boolean loginForm = !loaded.select("form:has(input[type=password])").isEmpty();
+                            String lowerUrl = pageUrl.toLowerCase(java.util.Locale.ROOT);
+                            String pageText = safeDiag(loaded.text()).toLowerCase(java.util.Locale.ROOT);
+                            String pageKind = loginForm || lowerUrl.contains("login.php")
+                                    || lowerUrl.contains("takelogin.php") ? "LOGIN"
+                                    : (lowerUrl.contains("captcha") || pageText.contains("captcha")
+                                    || pageText.contains("проверка браузера")) ? "CHALLENGE"
+                                    : (pageText.contains("доступ запрещ") || pageText.contains("access denied")
+                                    || pageText.contains("forbidden")) ? "BLOCKED" : "CONTENT";
+                            magnetDiag("WEBVIEW_PAGE_CLASS", "kind=" + pageKind
+                                    + ", id=" + torrentId(completedTarget));
+                            if ("LOGIN".equals(pageKind)) {
+                                cb.onPage(null, "Сессия Kinozal не активна: сайт снова показывает форму входа. Откройте «Авторизация» и войдите.");
+                                return;
+                            }
+                            cb.onPage(html, null);
+                        });
+                    }, 1400);
                 }
                 String currentCookies = manager.getCookie(client.getMirror());
                 if (currentCookies != null && !currentCookies.isEmpty()) {
@@ -815,7 +1082,53 @@ public class MainActivity extends Activity {
                 }
             }
         });
-        web.setWebChromeClient(new WebChromeClient());
+        web.setWebChromeClient(new WebChromeClient() {
+            @Override public boolean onConsoleMessage(android.webkit.ConsoleMessage message) {
+                if (message != null && message.message() != null && message.message().startsWith("KZNET|")) {
+                    magnetDiag("WEBVIEW_XHR_FETCH", safeDiag(message.message().substring(6))); return true;
+                }
+                return super.onConsoleMessage(message);
+            }
+        });
+    }
+
+    private void installNetworkProbe(WebView view) {
+        if (view == null) return;
+        String script = "(function(){if(window.__kzNetProbe)return;window.__kzNetProbe=true;" +
+            "function clean(u){try{var x=new URL(String(u),location.href),q=[];x.searchParams.forEach(function(v,k){q.push(k+'='+(['id','action','type','page','t','d','f','k','w'].indexOf(k.toLowerCase())>=0?v:'[redacted]'));});return x.origin+x.pathname+(q.length?'?'+q.join('&'):'');}catch(e){return '[url]';}}" +
+            "var f=window.fetch;if(f)window.fetch=function(){var a=arguments[0],u=a&&a.url?a.url:a,label=clean(u);return f.apply(this,arguments).then(function(r){var ct=r.headers.get('content-type')||'',cd=(r.headers.get('content-disposition')||'').replace(/[\\r\\n]+/g,' ').slice(0,120),finalUrl=clean(r.url||u);console.log('KZNET|FETCH '+r.status+' '+label+' ct='+ct);if(/download\\.php|\\.torrent/i.test(String(a&&a.url?a.url:u))){r.clone().arrayBuffer().then(function(b){var v=new Uint8Array(b),h=[];for(var i=0;i<Math.min(v.length,32);i++)h.push(('0'+v[i].toString(16)).slice(-2));console.log('KZNET|FETCH_DOWNLOAD '+label+' final='+finalUrl+' redirected='+r.redirected+' bytes='+v.length+' prefix='+h.join('')+' ct='+ct+' attachment='+(cd.toLowerCase().indexOf('attachment')>=0)+' filenameTorrent='+/\\.torrent(?:[;\\\" ]|$)/i.test(cd));if(/text\\/html|application\\/(?:json|xml)/i.test(ct)){try{var txt=new TextDecoder('windows-1251').decode(v);var plain=txt.replace(/<script\\b[\\s\\S]*?<\\/script>/gi,' ').replace(/<style\\b[\\s\\S]*?<\\/style>/gi,' ').replace(/<[^>]*>/g,' ').replace(/&nbsp;|&#160;/gi,' ').replace(/&amp;/gi,'&').replace(/&lt;/gi,'<').replace(/&gt;/gi,'>').replace(/\\s+/g,' ').trim().slice(0,1800);var links=[];txt.replace(/<a\\b[^>]*href\\s*=\\s*(['\\\"])(.*?)\\1[^>]*>([\\s\\S]*?)<\\/a>/gi,function(_,q,href,body){if(links.length<12){var labelText=body.replace(/<[^>]*>/g,' ').replace(/\\s+/g,' ').trim().slice(0,100);links.push(clean(href)+' ['+labelText+']');}return _;});console.log('KZNET|FETCH_DOWNLOAD_HTML '+label+' title='+((txt.match(/<title[^>]*>([\\s\\S]*?)<\\/title>/i)||[])[1]||'').replace(/<[^>]*>/g,' ').trim().slice(0,160)+' links='+links.join(' || ')+' text='+plain);}catch(e){console.log('KZNET|FETCH_DOWNLOAD_HTML_ERROR '+label+' '+String(e));}}}).catch(function(e){console.log('KZNET|FETCH_DOWNLOAD_ERROR '+label+' '+String(e));});}else{r.clone().text().then(function(t){var n=(t.match(/magnet:/ig)||[]).length;if(n||/TSA_magnet|get_srv_details|download\\.php/i.test(t))console.log('KZNET|FETCH_BODY '+label+' chars='+t.length+' magnet='+n+' tsa='+(t.indexOf('TSA_magnet')>=0)+' srv='+(t.indexOf('get_srv_details')>=0));}).catch(function(){});}return r;},function(e){console.log('KZNET|FETCH_ERROR '+label+' '+String(e));throw e;});};" +
+            "var op=XMLHttpRequest.prototype.open,send=XMLHttpRequest.prototype.send;XMLHttpRequest.prototype.open=function(m,u){this.__kz={m:m,u:clean(u)};return op.apply(this,arguments);};XMLHttpRequest.prototype.send=function(){var x=this,z=x.__kz||{};x.addEventListener('loadend',function(){var ct='';try{ct=x.getResponseHeader('content-type')||'';}catch(e){}console.log('KZNET|XHR '+x.status+' '+(z.m||'')+' '+(z.u||'')+' ct='+ct);try{var t=typeof x.responseText==='string'?x.responseText:'',n=(t.match(/magnet:/ig)||[]).length;if(n||/TSA_magnet|get_srv_details|download\\.php/i.test(t))console.log('KZNET|XHR_BODY '+(z.u||'')+' chars='+t.length+' magnet='+n+' tsa='+(t.indexOf('TSA_magnet')>=0)+' srv='+(t.indexOf('get_srv_details')>=0));}catch(e){}});return send.apply(this,arguments);};console.log('KZNET|PROBE_INSTALLED '+location.pathname);})();";
+        view.evaluateJavascript(script, null);
+    }
+
+    private boolean isExpectedBrowserPage(String finishedUrl, String targetUrl) {
+        if (finishedUrl == null || finishedUrl.isEmpty()
+                || targetUrl == null || targetUrl.isEmpty()) return false;
+        try {
+            Uri finished = Uri.parse(finishedUrl);
+            Uri expected = Uri.parse(targetUrl);
+            String finishedHost = finished.getHost() == null ? "" : finished.getHost();
+            String expectedHost = expected.getHost() == null ? "" : expected.getHost();
+            if (!finishedHost.equalsIgnoreCase(expectedHost)) return false;
+
+            String finishedPath = finished.getPath() == null ? "/" : finished.getPath();
+            String expectedPath = expected.getPath() == null ? "/" : expected.getPath();
+            String lowerPath = finishedPath.toLowerCase(java.util.Locale.ROOT);
+            if (lowerPath.contains("login.php") || lowerPath.contains("takelogin.php")) return true;
+            if (!finishedPath.equals(expectedPath)) return false;
+
+            // Details pages are sometimes redirected with extra tracking/session
+            // parameters. Match the torrent ID, not the entire query-string order.
+            if (expectedPath.toLowerCase(java.util.Locale.ROOT).endsWith("/details.php")
+                    || expectedPath.equalsIgnoreCase("/details.php")) {
+                String expectedId = expected.getQueryParameter("id");
+                String finishedId = finished.getQueryParameter("id");
+                return expectedId != null && expectedId.equals(finishedId);
+            }
+            return java.util.Objects.equals(finished.getEncodedQuery(), expected.getEncodedQuery());
+        } catch (Exception ignored) {
+            return finishedUrl.equals(targetUrl);
+        }
     }
 
     private void fetchBrowserPage(String path, String postBody,
@@ -825,25 +1138,30 @@ public class MainActivity extends Activity {
         // Complete any previous request before starting another one. A stale
         // WebView callback must never leave the UI waiting indefinitely.
         if (browserRequestTimeout != null) browserHandler.removeCallbacks(browserRequestTimeout);
-        if (pendingBrowserCallback != null) {
-            BrowserPageCallback previous = pendingBrowserCallback;
-            pendingBrowserCallback = null;
-            previous.onPage(null, "Предыдущий запрос отменён");
-        }
+        final long requestSerial = ++browserRequestSerial;
+        // Superseded requests are silently discarded. Their callers validate their
+        // own request IDs and must not replace the UI with an obsolete error/result.
+        pendingBrowserCallback = null;
+        pendingBrowserTarget = "";
+        // Stop the previous navigation before assigning the next request.
+        web.stopLoading();
         if (web.getParent() instanceof ViewGroup) ((ViewGroup) web.getParent()).removeView(web);
         web.setVisibility(View.INVISIBLE);
         if (web.getParent() == null) root.addView(web, new LinearLayout.LayoutParams(1, 1));
         String target = path.startsWith("http") ? path
                 : client.getMirror() + "/" + path.replaceFirst("^/+", "");
+        pendingBrowserTarget = target;
         pendingBrowserCallback = (html, error) -> {
             if (browserRequestTimeout != null) browserHandler.removeCallbacks(browserRequestTimeout);
             browserRequestTimeout = null;
+            pendingBrowserTarget = "";
             runOnUiThread(() -> callback.accept(error == null ? html : null));
         };
         browserRequestTimeout = () -> {
-            if (pendingBrowserCallback == null) return;
+            if (requestSerial != browserRequestSerial || pendingBrowserCallback == null) return;
             BrowserPageCallback timedOut = pendingBrowserCallback;
             pendingBrowserCallback = null;
+            pendingBrowserTarget = "";
             browserRequestTimeout = null;
             web.stopLoading();
             timedOut.onPage(null, "Тайм-аут ожидания ответа Kinozal (30 секунд). Проверьте соединение или авторизацию.");
@@ -877,10 +1195,8 @@ public class MainActivity extends Activity {
             String name = a.text().trim();
             if (name.length() < 3) continue;
 
-            Element row = a.closest("tr");
-            String href = a.absUrl("href");
+            Element row = a.closest("tr");            String href = a.absUrl("href");
             if (href.isEmpty()) href = a.attr("href");
-
             Torrent t = new Torrent();
             t.title = name;
             t.href = href;
@@ -1382,45 +1698,122 @@ public class MainActivity extends Activity {
     }
 
     private void showTorrent(Torrent t) {
+        // Snapshot the selected row. The catalogue can be refreshed while a
+        // details request is in flight; never let a mutable row reference
+        // change the identity of the request.
+        final Torrent selected = new Torrent();
+        selected.title = t.title;
+        selected.href = t.href;
+        selected.size = t.size;
+        selected.seeds = t.seeds;
+        selected.leeches = t.leeches;
+        selected.uploaded = t.uploaded;
+
+        final long requestId = ++torrentRequestSerial;
         progress.setVisibility(View.VISIBLE);
-        if (sessionWebView != null) {
-            fetchBrowserPage(t.href, null, html -> {
-                progress.setVisibility(View.GONE);
-                if (html == null || html.isEmpty()) {
-                    showMessage("Не удалось загрузить карточку через браузерную сессию.");
+
+        // Details pages are fetched through the authenticated native HTTP
+        // client first. It serializes requests and returns HTML tied to this
+        // exact URL, avoiding races in the single shared WebView document.
+        io.execute(() -> {
+            TorrentDetails nativeDetails = null;
+            String nativeError = null;
+            try {
+                String html = client.fetch(selected.href);
+                Document doc = Jsoup.parse(html, selected.href);
+                nativeDetails = parseTorrentDetails(doc, selected);
+                magnetDiag("HTTP_DETAILS", "id=" + torrentId(selected.href) + ", htmlBytes=" + html.length() + ", magnet=" + nativeDetails.torrentLink.startsWith("magnet:") + ", magnetAnchors=" + doc.select("a[href^=magnet:]").size() + ", title=" + safeDiag(nativeDetails.title));
+                boolean hasDetails = !nativeDetails.fields.isEmpty()
+                        || !nativeDetails.poster.isEmpty()
+                        || !nativeDetails.torrentLink.isEmpty()
+                        || (doc.selectFirst("h1") != null);
+                if (!hasDetails) nativeDetails = null;
+            } catch (Exception e) {
+                nativeError = safe(e.getMessage());
+                magnetDiag("HTTP_ERROR", "id=" + torrentId(selected.href) + ", error=" + safeDiag(nativeError));
+            }
+
+            if (nativeDetails != null) {
+                if (!nativeDetails.torrentLink.startsWith("magnet:")) {
+                    try {
+                        magnetDiag("SERVER_FALLBACK_START", "id=" + torrentId(selected.href));
+                        String magnet = fetchMagnetFromServer(selected);
+                        magnetDiag("SERVER_FALLBACK_RESULT", "id=" + torrentId(selected.href) + ", found=" + !magnet.isEmpty());
+                        if (!magnet.isEmpty()) nativeDetails.torrentLink = magnet;
+                    } catch (Exception ignored) { }
+                }
+                final TorrentDetails result = nativeDetails;
+                if (requestId != torrentRequestSerial) return;
+                runOnUiThread(() -> {
+                    if (requestId != torrentRequestSerial || isFinishing()) return;
+                    progress.setVisibility(View.GONE);
+                    showTorrentDetails(selected, result);
+                });
+                return;
+            }
+
+            // Some mirrors expose the details only through the logged-in
+            // browser session (Cloudflare or browser-only cookies). Use the
+            // WebView strictly as a fallback, never as the primary source.
+            final String failure = nativeError;
+            runOnUiThread(() -> {
+                if (requestId != torrentRequestSerial || isFinishing()) return;
+                if (sessionWebView == null) {
+                    progress.setVisibility(View.GONE);
+                    showMessage("Не удалось загрузить карточку: "
+                            + (failure == null ? "страница раздачи пуста" : failure));
                     return;
                 }
-                try {
-                    Document doc = Jsoup.parse(html, t.href);
-                    TorrentDetails details = parseTorrentDetails(doc, t);
-                    showTorrentDetails(t, details);
-                } catch (Exception e) {
-                    showMessage("Не удалось разобрать карточку: " + safe(e.getMessage()));
-                }
+                magnetDiag("WEBVIEW_FALLBACK_START", "id=" + torrentId(selected.href)
+                        + ", target=" + safeDiag(selected.href));
+                fetchBrowserPage(selected.href, null, browserHtml -> {
+                    if (requestId != torrentRequestSerial || isFinishing()) return;
+                    if (browserHtml == null || browserHtml.isEmpty()) {
+                        progress.setVisibility(View.GONE);
+                        showMessage("Не удалось загрузить карточку: "
+                                + (failure == null ? "браузерная сессия не вернула страницу" : failure));
+                        return;
+                    }
+                    final TorrentDetails browserDetails;
+                    try {
+                        browserDetails = parseTorrentDetails(
+                                Jsoup.parse(browserHtml, selected.href), selected);
+                    } catch (Exception e) {
+                        progress.setVisibility(View.GONE);
+                        showMessage("Не удалось разобрать карточку: " + safe(e.getMessage()));
+                        return;
+                    }
+                    magnetDiag("WEBVIEW_PARSED", "id=" + torrentId(selected.href)
+                            + ", magnet=" + browserDetails.torrentLink.startsWith("magnet:")
+                            + ", title=" + safeDiag(browserDetails.title));
+                    if (!browserDetails.torrentLink.startsWith("magnet:")) {
+                        io.execute(() -> {
+                            TorrentDetails result = browserDetails;
+                            try {
+                                String magnet = fetchMagnetFromServer(selected);
+                                if (!magnet.isEmpty()) result.torrentLink = magnet;
+                            } catch (Exception ignored) { }
+                            if (requestId != torrentRequestSerial) return;                            runOnUiThread(() -> {
+                                if (requestId != torrentRequestSerial || isFinishing()) return;
+                                progress.setVisibility(View.GONE);                                showTorrentDetails(selected, result);
+                            });
+                        });
+                    } else {
+                        progress.setVisibility(View.GONE);
+                        showTorrentDetails(selected, browserDetails);
+                    }
+                });
             });
-            return;
-        }
-        io.execute(() -> {
-            try {
-                String html = client.fetch(t.href);
-                Document doc = Jsoup.parse(html, t.href);
-                TorrentDetails details = parseTorrentDetails(doc, t);
-                runOnUiThread(() -> {
-                    progress.setVisibility(View.GONE);
-                    showTorrentDetails(t, details);
-                });
-            } catch (Exception e) {
-                runOnUiThread(() -> {
-                    progress.setVisibility(View.GONE);
-                    showMessage("Не удалось загрузить карточку: " + safe(e.getMessage()));
-                });
-            }
         });
     }
 
     private TorrentDetails parseTorrentDetails(Document doc, Torrent torrent) {
         TorrentDetails data = new TorrentDetails();
         data.title = torrent.title;
+        Element pageTitle = doc.selectFirst("h1");
+        if (pageTitle != null && !pageTitle.text().trim().isEmpty()) {
+            data.title = pageTitle.text().replaceAll("\\s+", " ").trim();
+        }
         data.sourcePage = torrent.href;
         Element info = doc.selectFirst(".bx1.justify h2");
         if (info != null) extractBoldFields(info, data.fields);
@@ -1447,12 +1840,59 @@ public class MainActivity extends Activity {
             if (poster != null) data.poster = poster.absUrl("src");
         }
 
-        Element download = doc.selectFirst("a[href*=/download.php], a[href$=.torrent], a[href*=magnet:]");
-        if (download != null) {
-            String href = download.attr("href").trim();
-            data.torrentLink = href.startsWith("magnet:") ? href : download.absUrl("href");
+        // Magnet must have priority: Kinozal commonly places download.php
+        // before the TSA_magnet anchor in the same table cell.
+        Elements magnetAnchors = doc.select("a[href^=magnet:]");
+        magnetDiag("PARSE_MAGNET", "id=" + torrentId(torrent.href) + ", anchors=" + magnetAnchors.size() + ", tsa=" + doc.select("a.TSA_magnet").size());
+        Element magnet = doc.selectFirst("a.TSA_magnet[href^=magnet:], a[href^=magnet:]");
+        if (magnet != null) {
+            data.torrentLink = magnet.attr("href").trim();
+        } else {
+            Element download = doc.selectFirst("a[href*=/download.php], a[href$=.torrent]");
+            if (download != null) data.torrentLink = download.absUrl("href");
         }
         return data;
+    }
+
+    /**
+     * Kinozal's details page can expose the magnet hash through its server-side
+     * details endpoint instead of a direct TSA_magnet anchor. The endpoint
+     * returns the info hash in the first list item (action=2, id=<torrent id>).
+     */
+    private String fetchMagnetFromServer(Torrent torrent) throws Exception {
+        if (torrent == null || torrent.href == null) return "";
+        java.util.regex.Matcher idMatcher = java.util.regex.Pattern
+                .compile("[?&]id=(\\d+)", java.util.regex.Pattern.CASE_INSENSITIVE)
+                .matcher(torrent.href);
+        if (!idMatcher.find()) return "";
+
+        String endpoint = client.getMirror() + "/get_srv_details.php?action=2&id="
+                + idMatcher.group(1);
+        String html = client.fetch(endpoint);
+        magnetDiag("SERVER_RESPONSE", "id=" + idMatcher.group(1) + ", chars=" + html.length() + ", hasMagnet=" + html.contains("magnet:") + ", hasHash=" + java.util.regex.Pattern.compile("(?i)[a-f0-9]{40}").matcher(html).find());
+        Document response = Jsoup.parse(html, endpoint);
+
+        Element directMagnet = response.selectFirst("a[href^=magnet:]");
+        if (directMagnet != null) return directMagnet.attr("href").trim();
+
+        Element firstItem = response.selectFirst("li:first-child");
+        String hashText = firstItem == null ? response.text() : firstItem.text();
+        java.util.regex.Matcher hashMatcher = java.util.regex.Pattern
+                .compile("(?i)[a-f0-9]{40}").matcher(hashText);
+        boolean hashFound = hashMatcher.find();
+        if (!hashFound) {
+            hashMatcher = java.util.regex.Pattern.compile("(?i)[a-f0-9]{40}")
+                    .matcher(response.text());
+            hashFound = hashMatcher.find();
+        }
+        if (!hashFound) return "";
+
+        String magnet = "magnet:?xt=urn:btih:" + hashMatcher.group();
+        String title = torrent.title == null ? "" : torrent.title.trim();
+        if (!title.isEmpty()) {
+            magnet += "&dn=" + URLEncoder.encode(title, "UTF-8");
+        }
+        return magnet;
     }
 
     private void extractBoldFields(Element block, java.util.LinkedHashMap<String, String> fields) {
@@ -1471,6 +1911,17 @@ public class MainActivity extends Activity {
             String text = value.toString().replaceAll("\\s+", " ").trim();
             if (!text.isEmpty()) fields.put(label, text);
         }
+    }
+
+    private String torrentId(String href) {
+        if (href == null) return "unknown";
+        java.util.regex.Matcher m = java.util.regex.Pattern.compile("[?&]id=(\\d+)", java.util.regex.Pattern.CASE_INSENSITIVE).matcher(href);
+        return m.find() ? m.group(1) : "unknown";
+    }
+
+    private String safeDiag(String value) {
+        if (value == null) return "";
+        return value.replaceAll("[\\r\\n\\t]+", " ").replaceAll("\\s+", " ").trim();
     }
 
     private String cleanDetailLabel(String value) {
@@ -1599,6 +2050,12 @@ public class MainActivity extends Activity {
         render.run();
 
         watch.setOnClickListener(v -> playTorrent(data));
+        Button diagnostics = button("Диагностика magnet");
+        diagnostics.setTextSize(12);
+        diagnostics.setOnClickListener(v -> showMagnetDiagnostics());
+        LinearLayout.LayoutParams diagParams = new LinearLayout.LayoutParams(-1, dp(38));
+        diagParams.topMargin = dp(8);
+        root.addView(diagnostics, diagParams);
         root.setLayoutParams(new ViewGroup.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         AlertDialog dialog = new AlertDialog.Builder(this)
@@ -1640,14 +2097,96 @@ public class MainActivity extends Activity {
     }
 
     private void playTorrent(TorrentDetails data) {
+        String id = torrentId(data.sourcePage);
+        if ("unknown".equals(id)) {
+            playTorrentFallback(data);
+            return;
+        }
+        WebView web = sessionWebView;
+        if (web == null) {
+            magnetDiag("MAGNET_LOOKUP_FAILED", "id=" + id + ", error=authenticated WebView is unavailable");
+            showMessage("Браузерная сессия недоступна. Пробую обычную ссылку .torrent…");
+            playTorrentFallback(data);
+            return;
+        }
+
+        String endpoint = client.getMirror() + "/get_srv_details.php?action=2&id=" + id;
+        magnetDiag("MAGNET_LOOKUP_START", "transport=WebView fetch, id=" + id
+                + ", endpoint=" + safeNetworkUrl(endpoint));
+        web.addJavascriptInterface(new Object() {
+            @JavascriptInterface
+            public void onResult(String payload) {
+                runOnUiThread(() -> handleMagnetWebViewResponse(data, id, endpoint, payload));
+            }
+        }, "KinozalMagnetBridge");
+        String script = "(function(){fetch(" + org.json.JSONObject.quote(endpoint)
+                + ",{method:'GET',credentials:'include',cache:'no-store',"
+                + "headers:{'Accept':'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'}})"
+                + ".then(function(r){return r.text().then(function(t){return JSON.stringify({status:r.status,"
+                + "url:r.url,body:t.slice(0,20000)});});})"
+                + ".then(function(x){window.KinozalMagnetBridge.onResult(x);})"
+                + ".catch(function(e){window.KinozalMagnetBridge.onResult(JSON.stringify({error:String(e)}));});})()";
+        web.evaluateJavascript(script, null);
+    }
+
+    private void handleMagnetWebViewResponse(TorrentDetails data, String id, String endpoint, String payload) {
+        try {
+            org.json.JSONObject response = new org.json.JSONObject(payload == null ? "{}" : payload);
+            if (response.has("error")) {
+                throw new java.io.IOException("WebView fetch: " + response.optString("error"));
+            }
+            int statusCode = response.optInt("status", 0);
+            String responseUrl = response.optString("url", endpoint);
+            String html = response.optString("body", "");
+            String responseText = Jsoup.parse(html).text();
+            String preview = responseText.substring(0, Math.min(220, responseText.length()));
+            magnetDiag("MAGNET_WEBVIEW_RESPONSE", "id=" + id + ", status=" + statusCode
+                    + ", url=" + safeNetworkUrl(responseUrl) + ", chars=" + html.length()
+                    + ", preview=" + safeDiag(preview));
+            if (statusCode < 200 || statusCode >= 300) {
+                throw new java.io.IOException("HTTP " + statusCode + " через WebView");
+            }
+            Document doc = Jsoup.parse(html, responseUrl);
+            Element first = doc.selectFirst("li:first-child");
+            if (first == null) throw new java.io.IOException("Ответ endpoint не содержит li:first-child");
+            java.util.regex.Matcher matcher = java.util.regex.Pattern
+                    .compile("(?i)[a-f0-9]{40}").matcher(first.text());
+            if (!matcher.find()) {
+                String text = safeDiag(first.text());
+                throw new java.io.IOException("В ответе endpoint не найден infohash: "
+                        + text.substring(0, Math.min(180, text.length())));
+            }
+            String hash = matcher.group().toLowerCase(java.util.Locale.ROOT);
+            String magnet = "magnet:?xt=urn:btih:" + hash
+                    + "&dn=" + URLEncoder.encode(data.title == null ? "" : data.title, "UTF-8");
+            magnetDiag("MAGNET_LOOKUP_SUCCESS", "transport=WebView, id=" + id + ", hash=" + hash);
+            try {
+                Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(magnet));
+                intent.putExtra("poster", data.poster == null ? "" : data.poster);
+                intent.putExtra("title", data.title == null ? "" : data.title);
+                startActivity(intent);
+            } catch (Exception e) {
+                magnetDiag("MAGNET_OPEN_FAILED", safeDiag(e.getMessage()));
+                showMessage("Magnet получен, но не удалось открыть приложение TorrServe: " + safe(e.getMessage()));
+            }
+        } catch (Exception e) {
+            magnetDiag("MAGNET_LOOKUP_FAILED", "transport=WebView, id=" + id
+                    + ", error=" + safeDiag(e.getMessage()));
+            showMessage("Не удалось получить magnet: " + safe(e.getMessage())
+                    + ". Пробую обычную ссылку .torrent…");
+            playTorrentFallback(data);
+        }
+    }
+
+    private void playTorrentFallback(TorrentDetails data) {
         if (data.torrentLink == null || data.torrentLink.isEmpty()) {
             showMessage("Не удалось найти ссылку на торрент на странице раздачи.");
             return;
         }
+        magnetDiag("PLAY_REQUEST", "magnet=" + data.torrentLink.startsWith("magnet:") + ", title=" + safeDiag(data.title));
         if (data.torrentLink.startsWith("magnet:")) {
             try {
                 Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(data.torrentLink));
-                intent.setPackage("ru.yourok.torrserve");
                 intent.putExtra("poster", data.poster == null ? "" : data.poster);
                 intent.putExtra("title", data.title == null ? "" : data.title);
                 startActivity(intent);
@@ -1657,13 +2196,41 @@ public class MainActivity extends Activity {
             return;
         }
 
-        // Download through the same WebView session that opened the details page.
-        // This preserves Cloudflare/session cookies and the real details-page Referer.
         WebView web = sessionWebView;
-        if (web != null) {
-            // evaluateJavascript does not await a returned Promise. Use a JS bridge
-            // so the response is delivered only after the authenticated fetch finishes.
-            web.addJavascriptInterface(new Object() {
+        if (web == null || data.sourcePage == null || data.sourcePage.isEmpty()) {
+            downloadTorrentNative(data);
+            return;
+        }
+
+        fetchBrowserPage(data.sourcePage, null, pageHtml -> {
+            if (pageHtml == null || pageHtml.isEmpty()) {
+                downloadTorrentNative(data);
+                return;
+            }
+            WebView activeWeb = sessionWebView;
+            if (activeWeb == null) {
+                downloadTorrentNative(data);
+                return;
+            }
+            activeWeb.addJavascriptInterface(new Object() {
+                @JavascriptInterface
+                public void onTorrentResponse(int statusCode, String contentType, String disposition,
+                        String finalUrl, boolean redirected, int byteCount, String prefixHex,
+                        String preview, String error) {
+                    String details = "HTTP " + statusCode
+                            + ", type=" + safeDiag(contentType)
+                            + ", disposition=" + safeDiag(disposition)
+                            + ", url=" + safeNetworkUrl(finalUrl)
+                            + ", redirected=" + redirected
+                            + ", bytes=" + byteCount
+                            + ", first=" + safeDiag(prefixHex)
+                            + (error == null || error.isEmpty() ? "" : ", error=" + safeDiag(error));
+                    magnetDiag("TORRENT_RESPONSE", details);
+                    if (preview != null && !preview.isEmpty()) {
+                        magnetDiag("TORRENT_BODY_PREVIEW", safeDiag(preview));
+                    }
+                }
+
                 @JavascriptInterface
                 public void onTorrentResult(int statusCode, String base64, String error) {
                     runOnUiThread(() -> {
@@ -1675,27 +2242,30 @@ public class MainActivity extends Activity {
                                 showMessage("Не удалось прочитать торрент: " + safe(e.getMessage()));
                             }
                         } else {
-                            // Keep the native retry as a fallback, but do not silently
-                            // treat the unresolved JS Promise as a successful response.
-                            downloadTorrentNative(data);
+                            magnetDiag("TORRENT_FETCH_FAILED", "HTTP " + statusCode + ", " + safeDiag(error));
+                            if (statusCode == 0) downloadTorrentNative(data);
+                            else showMessage("Kinozal не вернул .torrent. Подробности записаны в диагностический журнал.");
                         }
                     });
                 }
             }, "KinozalTorrentBridge");
+
             String url = org.json.JSONObject.quote(data.torrentLink);
-            String script = "(function(){fetch(" + url
-                    + ",{credentials:'include',redirect:'follow',cache:'no-store'})"
-                    + ".then(function(r){if(!r.ok){window.KinozalTorrentBridge.onTorrentResult(r.status,'','HTTP '+r.status);return;}"
-                    + "return r.blob().then(function(blob){var reader=new FileReader();"
-                    + "reader.onloadend=function(){var value=String(reader.result||'');"
-                    + "window.KinozalTorrentBridge.onTorrentResult(r.status,value.substring(value.indexOf(',')+1),'');};"
-                    + "reader.onerror=function(){window.KinozalTorrentBridge.onTorrentResult(0,'','FileReader error');};"
-                    + "reader.readAsDataURL(blob);});})"
-                    + ".catch(function(e){window.KinozalTorrentBridge.onTorrentResult(0,'',String(e));});})()";
-            web.evaluateJavascript(script, null);
-        } else {
-            downloadTorrentNative(data);
-        }
+            String script = "(function(){"
+                    + "function hex(a){return Array.prototype.map.call(new Uint8Array(a.slice(0,16)),function(x){return ('0'+x.toString(16)).slice(-2)}).join(' ');}"
+                    + "function decode(a){try{return new TextDecoder('windows-1251').decode(a)}catch(e){try{return new TextDecoder('utf-8').decode(a)}catch(x){return ''}}}"
+                    + "fetch(" + url + ",{credentials:'include',redirect:'follow',cache:'no-store'})"
+                    + ".then(function(r){return r.arrayBuffer().then(function(buf){"
+                    + "var a=new Uint8Array(buf), isTorrent=a.length>=20&&a[0]===100, preview='';"
+                    + "if(!isTorrent){preview=decode(a).replace(/<script[\\s\\S]*?<\\/script>/ig,' ').replace(/<style[\\s\\S]*?<\\/style>/ig,' ').replace(/<[^>]+>/g,' ').replace(/\\s+/g,' ').trim().substring(0,1800);}"
+                    + "window.KinozalTorrentBridge.onTorrentResponse(r.status,r.headers.get('content-type')||'',r.headers.get('content-disposition')||'',r.url||'',r.redirected,a.length,hex(buf),preview,'');"
+                    + "if(!r.ok||!isTorrent){window.KinozalTorrentBridge.onTorrentResult(r.status,'',isTorrent?'HTTP '+r.status:'Response is not a bencoded torrent');return;}"
+                    + "var binary='';for(var i=0;i<a.length;i++)binary+=String.fromCharCode(a[i]);"
+                    + "window.KinozalTorrentBridge.onTorrentResult(r.status,btoa(binary),'');"
+                    + "});})"
+                    + ".catch(function(e){window.KinozalTorrentBridge.onTorrentResponse(0,'','','',false,0,'','',String(e));window.KinozalTorrentBridge.onTorrentResult(0,'',String(e));});})()";
+            activeWeb.evaluateJavascript(script, null);
+        });
     }
 
     private void downloadTorrentNative(TorrentDetails data) {

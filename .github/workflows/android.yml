@@ -2,7 +2,7 @@ name: Android CI
 
 on:
   push:
-    branches: [ main ]
+    branches: [ main, experiment/magnet-network-analysis ]
   pull_request:
     branches: [ main ]
   workflow_dispatch:
@@ -88,8 +88,9 @@ jobs:
         with:
           tag_name: v${{ env.VERSION_CODE }}
           name: KinozalClient v${{ env.VERSION_NAME }}
-          target_commitish: main
+          target_commitish: ${{ github.sha }}
           files: dist/KinozalClient.apk
           overwrite_files: true
-          make_latest: true
+          prerelease: ${{ github.ref_name != 'main' }}
+          make_latest: ${{ github.ref_name == 'main' }}
           generate_release_notes: true

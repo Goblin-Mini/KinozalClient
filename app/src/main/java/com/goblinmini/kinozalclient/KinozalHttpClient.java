@@ -170,6 +170,30 @@ public final class KinozalHttpClient {
                 .remove(COOKIE_KEY).remove(BROWSER_COOKIE_KEY).apply();
     }
 
+    /** Retrieve the infohash using Kinozal's documented-by-client get_srv_details.php flow. */
+    public synchronized String fetchMagnetHash(String torrentId, String detailsReferer) throws Exception {
+        if (torrentId == null || !torrentId.matches("\\d+")) {
+            throw new IllegalArgumentException("Некорректный ID раздачи");
+        }
+        String endpoint = baseUrl + "/get_srv_details.php?action=2&id=" + enc(torrentId);
+        // The site clients use GET with action=2 and id, carrying the authenticated
+        // cookie jar and the mirror root as Referer.
+        String html = request(endpoint, "GET", null, false);
+        org.jsoup.nodes.Document document = org.jsoup.Jsoup.parse(html, endpoint);
+        org.jsoup.nodes.Element first = document.selectFirst("li:first-child");
+        if (first == null) {
+            throw new java.io.IOException("get_srv_details.php не вернул список с infohash");
+        }
+        java.util.regex.Matcher matcher = java.util.regex.Pattern
+                .compile("(?i)[a-f0-9]{40}").matcher(first.text());
+        if (!matcher.find()) {
+            String preview = first.text().replaceAll("\\s+", " ").trim();
+            if (preview.length() > 240) preview = preview.substring(0, 240);
+            throw new java.io.IOException("В ответе get_srv_details.php не найден infohash. Ответ: " + preview);
+        }
+        return matcher.group().toLowerCase(java.util.Locale.ROOT);
+    }
+
     /** Download a protected image or torrent using the same authenticated HTTP cookie jar. */
     public synchronized byte[] fetchBytes(String target, String accept) throws Exception {
         return fetchBytes(target, accept, baseUrl + "/");
