@@ -70,6 +70,8 @@ public class MainActivity extends Activity {
     private WebView sessionWebView;
     private BrowserPageCallback pendingBrowserCallback;
     private String pendingBrowserTarget = "";
+    private long browserRequestSerial = 0;
+    private volatile long torrentRequestSerial = 0;
     private final android.os.Handler browserHandler = new android.os.Handler(android.os.Looper.getMainLooper());
     private Runnable browserRequestTimeout;
     private boolean startupCatalogReady = false;
@@ -788,11 +790,18 @@ public class MainActivity extends Activity {
                 super.onPageFinished(view, url);
                 // A WebView can finish an older navigation after a newer request
                 // has installed its callback. Never let that stale page consume it.
-                if (pendingBrowserCallback != null && isExpectedBrowserPage(url)) {
-                    BrowserPageCallback cb = pendingBrowserCallback;
+                if (pendingBrowserCallback != null
+                        && isExpectedBrowserPage(url, pendingBrowserTarget)) {
+                    final BrowserPageCallback cb = pendingBrowserCallback;
+                    final long completedSerial = browserRequestSerial;
+                    final String completedTarget = pendingBrowserTarget;
                     pendingBrowserCallback = null;
                     pendingBrowserTarget = "";
                     view.evaluateJavascript("(document.documentElement ? document.documentElement.outerHTML : '')", value -> {
+                        // evaluateJavascript is asynchronous. A second navigation can
+                        // replace the document before this callback returns; discard it.
+                        if (completedSerial != browserRequestSerial
+                                || !isExpectedBrowserPage(view.getUrl(), completedTarget)) return;
                         String html = "";
                         try { html = new org.json.JSONArray("[" + value + "]").getString(0); }
                         catch (Exception ignored) { }
@@ -822,22 +831,33 @@ public class MainActivity extends Activity {
         web.setWebChromeClient(new WebChromeClient());
     }
 
-    private boolean isExpectedBrowserPage(String finishedUrl) {
-        if (finishedUrl == null || finishedUrl.isEmpty() || pendingBrowserTarget.isEmpty()) return false;
+    private boolean isExpectedBrowserPage(String finishedUrl, String targetUrl) {
+        if (finishedUrl == null || finishedUrl.isEmpty()
+                || targetUrl == null || targetUrl.isEmpty()) return false;
         try {
-            java.net.URI finished = java.net.URI.create(finishedUrl);
-            java.net.URI expected = java.net.URI.create(pendingBrowserTarget);
+            Uri finished = Uri.parse(finishedUrl);
+            Uri expected = Uri.parse(targetUrl);
+            String finishedHost = finished.getHost() == null ? "" : finished.getHost();
+            String expectedHost = expected.getHost() == null ? "" : expected.getHost();
+            if (!finishedHost.equalsIgnoreCase(expectedHost)) return false;
+
             String finishedPath = finished.getPath() == null ? "/" : finished.getPath();
             String expectedPath = expected.getPath() == null ? "/" : expected.getPath();
-            // Login redirects are valid completions: the callback will report the
-            // expired session instead of leaving the request waiting for timeout.
             String lowerPath = finishedPath.toLowerCase(java.util.Locale.ROOT);
             if (lowerPath.contains("login.php") || lowerPath.contains("takelogin.php")) return true;
-            String finishedQuery = finished.getRawQuery() == null ? "" : finished.getRawQuery();
-            String expectedQuery = expected.getRawQuery() == null ? "" : expected.getRawQuery();
-            return finishedPath.equals(expectedPath) && finishedQuery.equals(expectedQuery);
+            if (!finishedPath.equals(expectedPath)) return false;
+
+            // Details pages are sometimes redirected with extra tracking/session
+            // parameters. Match the torrent ID, not the entire query-string order.
+            if (expectedPath.toLowerCase(java.util.Locale.ROOT).endsWith("/details.php")
+                    || expectedPath.equalsIgnoreCase("/details.php")) {
+                String expectedId = expected.getQueryParameter("id");
+                String finishedId = finished.getQueryParameter("id");
+                return expectedId != null && expectedId.equals(finishedId);
+            }
+            return java.util.Objects.equals(finished.getEncodedQuery(), expected.getEncodedQuery());
         } catch (Exception ignored) {
-            return finishedUrl.equals(pendingBrowserTarget);
+            return finishedUrl.equals(targetUrl);
         }
     }
 
@@ -848,12 +868,11 @@ public class MainActivity extends Activity {
         // Complete any previous request before starting another one. A stale
         // WebView callback must never leave the UI waiting indefinitely.
         if (browserRequestTimeout != null) browserHandler.removeCallbacks(browserRequestTimeout);
-        if (pendingBrowserCallback != null) {
-            BrowserPageCallback previous = pendingBrowserCallback;
-            pendingBrowserCallback = null;
-            pendingBrowserTarget = "";
-            previous.onPage(null, "Предыдущий запрос отменён");
-        }
+        final long requestSerial = ++browserRequestSerial;
+        // Superseded requests are silently discarded. Their callers validate their
+        // own request IDs and must not replace the UI with an obsolete error/result.
+        pendingBrowserCallback = null;
+        pendingBrowserTarget = "";
         // Stop the previous navigation before assigning the next request.
         web.stopLoading();
         if (web.getParent() instanceof ViewGroup) ((ViewGroup) web.getParent()).removeView(web);
@@ -869,7 +888,7 @@ public class MainActivity extends Activity {
             runOnUiThread(() -> callback.accept(error == null ? html : null));
         };
         browserRequestTimeout = () -> {
-            if (pendingBrowserCallback == null) return;
+            if (requestSerial != browserRequestSerial || pendingBrowserCallback == null) return;
             BrowserPageCallback timedOut = pendingBrowserCallback;
             pendingBrowserCallback = null;
             pendingBrowserTarget = "";
@@ -1411,9 +1430,11 @@ public class MainActivity extends Activity {
     }
 
     private void showTorrent(Torrent t) {
+        final long requestId = ++torrentRequestSerial;
         progress.setVisibility(View.VISIBLE);
         if (sessionWebView != null) {
             fetchBrowserPage(t.href, null, browserHtml -> {
+                if (requestId != torrentRequestSerial) return;
                 if (browserHtml == null || browserHtml.isEmpty()) {
                     progress.setVisibility(View.GONE);
                     showMessage("Не удалось загрузить карточку через браузерную сессию.");
@@ -1448,12 +1469,15 @@ public class MainActivity extends Activity {
                         }
                         final TorrentDetails result = nativeDetails.torrentLink.startsWith("magnet:")
                                 ? nativeDetails : browserDetails;
+                        if (requestId != torrentRequestSerial) return;
                         runOnUiThread(() -> {
+                            if (requestId != torrentRequestSerial) return;
                             progress.setVisibility(View.GONE);
                             showTorrentDetails(t, result);
                         });
                     });
                 } else {
+                    if (requestId != torrentRequestSerial) return;
                     progress.setVisibility(View.GONE);
                     showTorrentDetails(t, browserDetails);
                 }
@@ -1471,12 +1495,16 @@ public class MainActivity extends Activity {
                         if (!magnet.isEmpty()) details.torrentLink = magnet;
                     } catch (Exception ignored) { }
                 }
+                if (requestId != torrentRequestSerial) return;
                 runOnUiThread(() -> {
+                    if (requestId != torrentRequestSerial) return;
                     progress.setVisibility(View.GONE);
                     showTorrentDetails(t, details);
                 });
             } catch (Exception e) {
+                if (requestId != torrentRequestSerial) return;
                 runOnUiThread(() -> {
+                    if (requestId != torrentRequestSerial) return;
                     progress.setVisibility(View.GONE);
                     showMessage("Не удалось загрузить карточку: " + safe(e.getMessage()));
                 });
