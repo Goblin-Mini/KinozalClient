@@ -247,12 +247,9 @@ public class MainActivity extends Activity {
                 status.setText("Нет соединения");
                 addEmpty("Не удалось получить постеры Kinozal. Проверьте авторизацию и выбранное зеркало.");
             } else {
-                if (!homeCacheDisplayed) {
-                    setCatalogStatus("Постеров", total);
-                    renderHome(sections);
-                } else {
-                    status.setText("Каталог обновлён");
-                }
+                setCatalogStatus("Постеров", total);
+                status.setText(homeCacheDisplayed
+                        ? "Каталог обновлён" : "Все ленты загружены");
             }
             return;
         }
