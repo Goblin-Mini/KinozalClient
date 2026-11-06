@@ -1689,7 +1689,8 @@ public class MainActivity extends Activity {
                     report = new String(buffer.toByteArray(), java.nio.charset.StandardCharsets.UTF_8);
                 }
             }
-            TextView body = text(report, 12, Color.WHITE, false);
+            final String reportToCopy = report;
+            TextView body = text(reportToCopy, 12, Color.WHITE, false);
             body.setTextIsSelectable(true);
             ScrollView scroll = new ScrollView(this);
             scroll.addView(body);
@@ -1698,7 +1699,7 @@ public class MainActivity extends Activity {
                     .setPositiveButton("Копировать", (d, w) -> {
                         android.content.ClipboardManager clipboard =
                                 (android.content.ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
-                        clipboard.setPrimaryClip(android.content.ClipData.newPlainText("Kinozal diagnostics", report));
+                        clipboard.setPrimaryClip(android.content.ClipData.newPlainText("Kinozal diagnostics", reportToCopy));
                         Toast.makeText(this, "Журнал скопирован", Toast.LENGTH_SHORT).show();
                     })
                     .setNegativeButton("Закрыть", null)
