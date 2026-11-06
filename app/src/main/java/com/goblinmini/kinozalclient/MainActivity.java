@@ -145,6 +145,73 @@ public class MainActivity extends Activity {
     private static class HomePoster {
         Torrent torrent;
         String imageUrl;
+        boolean ratingsRequested = false;
+    }
+
+    private void addPosterRatings(LinearLayout card, HomePoster item) {
+        LinearLayout ratings = new LinearLayout(this);
+        ratings.setOrientation(LinearLayout.VERTICAL);
+        ratings.setPadding(dp(2), dp(3), dp(2), dp(1));
+        TextView imdb = text("IMDb   —", 10, Color.LTGRAY, false);
+        TextView kinopoisk = text("Кинопоиск   —", 10, Color.LTGRAY, false);
+        TextView kinozal = text("Kinozal   ☆☆☆☆☆☆☆☆☆☆", 10, TEAL, true);
+        ratings.addView(imdb);
+        ratings.addView(kinopoisk);
+        ratings.addView(kinozal);
+        card.addView(ratings, new LinearLayout.LayoutParams(dp(126), -2));
+        card.setOnFocusChangeListener((v, focused) -> {
+            v.setBackground(shape(focused ? Color.rgb(57, 68, 70) : PANEL, focused ? GOLD : 0));
+            if (focused) loadPosterRatings(item, imdb, kinopoisk, kinozal);
+        });
+    }
+
+    private void loadPosterRatings(HomePoster item, TextView imdb, TextView kinopoisk, TextView kinozal) {
+        if (item.ratingsRequested) return;
+        item.ratingsRequested = true;
+        Runnable parse = () -> {
+            // IMDb and Kinopoisk are not embedded in Kinozal's details HTML.
+            // Keep honest placeholders until a verified external source is available.
+        };
+        if (sessionWebView != null) {
+            fetchBrowserPage(item.torrent.href, null, html -> {
+                if (html == null || html.isEmpty()) { item.ratingsRequested = false; return; }
+                try {
+                    Document doc = Jsoup.parse(html, item.torrent.href);
+                    RatingInfo rating = parseKinozalRating(doc);
+                    runOnUiThread(() -> kinozal.setText(rating.label));
+                } catch (Exception ignored) { item.ratingsRequested = false; }
+            });
+        } else {
+            io.execute(() -> {
+                try {
+                    String html = client.fetch(item.torrent.href);
+                    RatingInfo rating = parseKinozalRating(Jsoup.parse(html, item.torrent.href));
+                    runOnUiThread(() -> kinozal.setText(rating.label));
+                } catch (Exception ignored) { item.ratingsRequested = false; }
+            });
+        }
+    }
+
+    private static class RatingInfo { String label = "Kinozal   —"; }
+
+    private RatingInfo parseKinozalRating(Document doc) {
+        RatingInfo info = new RatingInfo();
+        Element value = doc.selectFirst("[itemprop=ratingValue]");
+        Element count = doc.selectFirst("[itemprop=ratingCount]");
+        double score = 0;
+        try { if (value != null) score = Double.parseDouble(value.text().replace(',', '.')); }
+        catch (Exception ignored) { }
+        int votes = 0;
+        try {
+            if (count != null) votes = Integer.parseInt(count.hasAttr("content")
+                    ? count.attr("content") : count.text());
+        } catch (Exception ignored) { }
+        int filled = Math.max(0, Math.min(10, (int)Math.round(score)));
+        StringBuilder stars = new StringBuilder();
+        for (int i = 0; i < 10; i++) stars.append(i < filled ? "★" : "☆");
+        info.label = "Kinozal  " + (value == null ? "—" : String.format(java.util.Locale.US, "%.1f", score))
+                + "  " + stars + (votes > 0 ? " (" + votes + ")" : "");
+        return info;
     }
 
     private void loadInitialCatalog() {
@@ -549,6 +616,7 @@ public class MainActivity extends Activity {
                 name.setEllipsize(android.text.TextUtils.TruncateAt.END);
                 name.setPadding(dp(2), dp(6), dp(2), dp(2));
                 card.addView(name, new LinearLayout.LayoutParams(dp(126), dp(42)));
+                addPosterRatings(card, item);
                 LinearLayout.LayoutParams cardParams = new LinearLayout.LayoutParams(dp(138), -2);
                 cardParams.rightMargin = dp(8);
                 strip.addView(card, cardParams);
