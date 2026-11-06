@@ -795,7 +795,7 @@ public class MainActivity extends Activity {
                             + "var started=Date.now();"
                             + "function capture(){"
                             + "var d=document.documentElement;if(!d){resolve('');return;}"
-                            + "var m=d.querySelector('a.TSA_magnet[href],a[href^=\\\"magnet:\\"]');"
+                            + "var m=d.querySelector('a.TSA_magnet[href]');"
                             + "if(m){var b=d.querySelector('#__kinozal_magnet_bridge');"
                             + "if(!b){b=document.createElement('a');b.id='__kinozal_magnet_bridge';d.appendChild(b);}"
                             + "b.setAttribute('href',m.getAttribute('href'));}"
