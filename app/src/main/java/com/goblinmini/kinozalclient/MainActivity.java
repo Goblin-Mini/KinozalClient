@@ -1723,7 +1723,6 @@ public class MainActivity extends Activity {
         currentTitle = "Недавно смотрели";
         heading.setText(currentTitle);
         java.util.List<Torrent> saved = new java.util.ArrayList<>(readRecentlyViewed().values());
-        java.util.Collections.reverse(saved);
         list.removeAllViews();
         setCatalogStatus("Недавно смотрели", saved.size());
         if (saved.isEmpty()) addEmpty("Здесь появятся открытые вами раздачи.");
