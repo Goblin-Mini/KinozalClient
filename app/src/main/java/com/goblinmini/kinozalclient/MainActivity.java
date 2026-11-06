@@ -566,6 +566,20 @@ public class MainActivity extends Activity {
             list.addView(horizontal, rowParams);
         }
         if (sections.isEmpty()) addEmpty("На главной пока нет подборок.");
+        animateContentTransition(list);
+    }
+
+    /** Subtle content entrance used after a catalogue or home section is rendered. */
+    private void animateContentTransition(View target) {
+        if (target == null) return;
+        target.animate().cancel();
+        target.setAlpha(0f);
+        target.setTranslationY(dp(7));
+        target.animate()
+                .alpha(1f)
+                .translationY(0f)
+                .setDuration(190)
+                .start();
     }
 
     private int dp(float n) { return (int)(n * getResources().getDisplayMetrics().density + .5f); }
@@ -1170,6 +1184,7 @@ public class MainActivity extends Activity {
         pages.addView(prev); pages.addView(next);
         LinearLayout.LayoutParams pp = new LinearLayout.LayoutParams(-1, dp(52)); pp.topMargin = dp(10); list.addView(pages, pp);
         prev.setOnClickListener(v -> changePage(-1)); next.setOnClickListener(v -> changePage(1));
+        animateContentTransition(list);
     }
 
     private void changePage(int delta) {
