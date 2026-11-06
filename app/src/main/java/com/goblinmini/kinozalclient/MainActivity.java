@@ -82,6 +82,8 @@ public class MainActivity extends Activity {
     private boolean startupCatalogReady = false;
     private boolean startupCatalogStarted = false;
     private boolean automaticUpdateCheckScheduled = false;
+    private boolean homeCacheDisplayed = false;
+
     private volatile String lastBrowserError = "Причина пока не определена";
     private interface BrowserPageCallback { void onPage(String html, String error); }
     private final java.util.LinkedHashMap<String, String> pageCache =
@@ -160,66 +162,78 @@ public class MainActivity extends Activity {
         currentTitle = "Главная";
         heading.setText("Главная");
         showPageLoading("Подключение к Kinozal…");
+        String[] homePaths = {"novinki.php", "top.php?c=0&d=0&f=0&j=&k=0&s=0&t=0",
+                "top.php?c=0&d=0&f=0&j=&k=0&s=0&t=0&w=1",
+                "top.php?c=0&d=0&f=0&j=&k=0&s=0&t=0&w=2",
+                "top.php?j=%D0%BB%D1%83%D1%87%D1%88%D0%B8%D0%B9%20%D1%84%D0%B8%D0%BB%D1%8C%D0%BC%20%D0%9E%D1%81%D0%BA%D0%B0%D1%80",
+                "top.php?j=Netflix", "top.php?j=HBO",
+                "top.php?j=Walt%20Disney%20Pictures", "top.php?j=Marvel"};
+        String[] homeTitles = {"Новинки", "Топ раздач", "Топ недели", "Топ месяца",
+                "Топ Оскар", "Топ Netflix", "Топ HBO", "Топ Walt Disney", "Топ Marvel"};
+
+        homeCacheDisplayed = loadHomeSectionsFromCache(homePaths, homeTitles);
         if (sessionWebView != null) {
-            loadHomeSectionsInBrowser(new String[]{"novinki.php", "top.php?c=0&d=0&f=0&j=&k=0&s=0&t=0",
-                    "top.php?c=0&d=0&f=0&j=&k=0&s=0&t=0&w=1",
-                    "top.php?c=0&d=0&f=0&j=&k=0&s=0&t=0&w=2",
-                    "top.php?j=%D0%BB%D1%83%D1%87%D1%88%D0%B8%D0%B9%20%D1%84%D0%B8%D0%BB%D1%8C%D0%BC%20%D0%9E%D1%81%D0%BA%D0%B0%D1%80",
-                    "top.php?j=Netflix",
-                    "top.php?j=HBO",
-                    "top.php?j=Walt%20Disney%20Pictures",
-                    "top.php?j=Marvel"},
-                    new String[]{"Новинки", "Топ раздач", "Топ недели", "Топ месяца",
-                            "Топ Оскар", "Топ Netflix", "Топ HBO", "Топ Walt Disney", "Топ Marvel"}, 0,
-                    new ArrayList<>(), 0);
+            loadHomeSectionsInBrowser(homePaths, homeTitles, 0, new ArrayList<>(), startupRetry);
             return;
         }
         io.execute(() -> {
             try {
-                String[] paths = {
-                        "novinki.php",
-                        "top.php?c=0&d=0&f=0&j=&k=0&s=0&t=0",
-                        "top.php?c=0&d=0&f=0&j=&k=0&s=0&t=0&w=1",
-                        "top.php?c=0&d=0&f=0&j=&k=0&s=0&t=0&w=2",
-                        "top.php?j=%D0%BB%D1%83%D1%87%D1%88%D0%B8%D0%B9%20%D1%84%D0%B8%D0%BB%D1%8C%D0%BC%20%D0%9E%D1%81%D0%BA%D0%B0%D1%80",
-                        "top.php?j=Netflix",
-                        "top.php?j=HBO",
-                        "top.php?j=Walt%20Disney%20Pictures",
-                        "top.php?j=Marvel"
-                };
-                String[] titles = {"Новинки", "Топ раздач", "Топ недели", "Топ месяца",
-                        "Топ Оскар", "Топ Netflix", "Топ HBO", "Топ Walt Disney", "Топ Marvel"};
                 List<HomeSection> sections = new ArrayList<>();
-                for (int i = 0; i < paths.length; i++) {
-                    String html = client.fetch(paths[i]);
-                    HomeSection section = new HomeSection(titles[i], paths[i]);
+                for (int i = 0; i < homePaths.length; i++) {
+                    String html = client.fetch(homePaths[i]);
+                    HomeSection section = new HomeSection(homeTitles[i], homePaths[i]);
                     section.items.addAll(parseHomePosters(Jsoup.parse(html, client.getMirror() + "/")));
                     sections.add(section);
+                    if (!section.items.isEmpty()) {
+                        diskCache.put("home|" + client.getMirror() + "|" + homePaths[i],
+                                html.getBytes(StandardCharsets.UTF_8));
+                    }
                 }
                 removeHomeDuplicates(sections);
-                int count = 0;
-                for (HomeSection section : sections) count += section.items.size();
-                final int total = count;
-                if (total == 0 && startupRetry == 0) {
-                    runOnUiThread(() -> {
-                        status.setText("Повторное подключение к Kinozal…");
-                        browserHandler.postDelayed(() -> loadInitialCatalog(1), 1500);
-                    });
-                    return;
-                }
+                int total = 0;
+                for (HomeSection section : sections) total += section.items.size();
+                final int finalTotal = total;
                 runOnUiThread(() -> {
                     progress.setVisibility(View.GONE);
-                    setCatalogStatus("Постеров", total);
-                    renderHome(sections);
+                    if (!homeCacheDisplayed) {
+                        setCatalogStatus("Постеров", finalTotal);
+                        renderHome(sections);
+                    }
                 });
             } catch (Exception e) {
                 runOnUiThread(() -> {
                     progress.setVisibility(View.GONE);
-                    status.setText("Нет соединения");
-                    addEmpty("Не удалось загрузить главную страницу. " + safe(e.getMessage()));
+                    if (!homeCacheDisplayed) {
+                        status.setText("Нет соединения");
+                        addEmpty("Не удалось загрузить главную страницу. " + safe(e.getMessage()));
+                    }
                 });
             }
         });
+    }
+
+    private boolean loadHomeSectionsFromCache(String[] paths, String[] titles) {
+        List<HomeSection> cached = new ArrayList<>();
+        for (int i = 0; i < paths.length; i++) {
+            byte[] bytes = diskCache.get("home|" + client.getMirror() + "|" + paths[i],
+                    7L * 24L * 60L * 60L * 1000L);
+            if (bytes == null || bytes.length == 0) continue;
+            try {
+                String html = new String(bytes, StandardCharsets.UTF_8);
+                HomeSection section = new HomeSection(titles[i], paths[i]);
+                section.items.addAll(parseHomePosters(Jsoup.parse(html, client.getMirror() + "/")));
+                if (!section.items.isEmpty()) cached.add(section);
+            } catch (Exception ignored) { }
+        }
+        removeHomeDuplicates(cached);
+        int total = 0;
+        for (HomeSection section : cached) total += section.items.size();
+        if (total == 0) return false;
+        setCatalogStatus("Постеров в кэше", total);
+        renderHome(cached);
+        progress.setVisibility(View.GONE);
+        status.setText("Показан сохранённый каталог · обновление…");
+        return true;
     }
 
     private void loadHomeSectionsInBrowser(String[] paths, String[] titles, int index,
@@ -233,8 +247,12 @@ public class MainActivity extends Activity {
                 status.setText("Нет соединения");
                 addEmpty("Не удалось получить постеры Kinozal. Проверьте авторизацию и выбранное зеркало.");
             } else {
-                setCatalogStatus("Постеров", total);
-                renderHome(sections);
+                if (!homeCacheDisplayed) {
+                    setCatalogStatus("Постеров", total);
+                    renderHome(sections);
+                } else {
+                    status.setText("Каталог обновлён");
+                }
             }
             return;
         }
