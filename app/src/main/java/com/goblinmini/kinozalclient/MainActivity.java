@@ -191,7 +191,7 @@ public class MainActivity extends Activity {
                 }
                 runOnUiThread(() -> {
                     progress.setVisibility(View.GONE);
-                    status.setText("Главная · Постеров: " + total + "\nВерсия: " + getAppVersionName());
+                    setCatalogStatus("Постеров", total);
                     renderHome(sections);
                 });
             } catch (Exception e) {
@@ -220,7 +220,7 @@ public class MainActivity extends Activity {
                 return;
             }
             progress.setVisibility(View.GONE);
-            status.setText("Главная · Постеров: " + total + "\nВерсия: " + getAppVersionName());
+            setCatalogStatus("Постеров", total);
             renderHome(sections);
             return;
         }
@@ -355,6 +355,11 @@ public class MainActivity extends Activity {
         } catch (Exception ignored) {
             return imageUrl.trim().toLowerCase(java.util.Locale.ROOT);
         }
+    }
+
+    private void setCatalogStatus(String itemType, int count) {
+        status.setText(currentTitle + " · Загружено: " + count + " " + itemType
+                + "\\nВерсия: " + getAppVersionName());
     }
 
     private String getAppVersionName() {
@@ -928,7 +933,7 @@ public class MainActivity extends Activity {
         List<Torrent> parsed = parseTorrents(Jsoup.parse(html, client.getMirror()));
         progress.setVisibility(View.GONE);
         torrents.clear(); torrents.addAll(parsed);
-        status.setText("Загружено: " + parsed.size());
+        setCatalogStatus("Раздач", parsed.size());
         renderTorrents(parsed);
         if (parsed.isEmpty()) addEmpty("Страница загружена, но раздачи не найдены. Возможно, фильтр не применился.");
     }
@@ -1564,7 +1569,7 @@ public class MainActivity extends Activity {
         heading.setText(currentTitle);
         java.util.List<Torrent> saved = new java.util.ArrayList<>(readFavorites().values());
         list.removeAllViews();
-        status.setText("Избранное · " + saved.size());
+        setCatalogStatus("Раздач в избранном", saved.size());
         if (saved.isEmpty()) addEmpty("Избранное пока пусто. Добавляйте раздачи из карточки.");
         else renderTorrents(saved);
     }
