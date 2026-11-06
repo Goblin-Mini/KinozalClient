@@ -2326,8 +2326,9 @@ public class MainActivity extends Activity {
             }
             String u = org.json.JSONObject.quote(username);
             String p = org.json.JSONObject.quote(password);
-                    + "var p=document.querySelector('input[type=password]');if(!p)return 'NO_FIELDS';"
-                    + "var f=p.closest('form');var scope=f||p.parentElement&&p.parentElement.parentElement||document;"
+            web.evaluateJavascript("(function(){var p=document.querySelector('input[type=password]');"
+                    + "if(!p)return 'NO_FIELDS';var f=p.closest('form');"
+                    + "var scope=f||p.parentElement&&p.parentElement.parentElement||document;"
                     + "var all=[].slice.call(scope.querySelectorAll('input'));"
                     + "var u=all.find(function(e){var t=(e.type||'text').toLowerCase();"
                     + "var n=((e.name||'')+' '+(e.id||'')+' '+(e.placeholder||'')+' '+(e.getAttribute('autocomplete')||'')).toLowerCase();"
@@ -2337,12 +2338,11 @@ public class MainActivity extends Activity {
                     + "setter.call(e,v);e.dispatchEvent(new Event('input',{bubbles:true}));"
                     + "e.dispatchEvent(new Event('change',{bubbles:true}));}"
                     + "put(u," + u + ");put(p," + p + ");"
-                    + "var f=p.closest('form')||u.closest('form');"
                     + "if(f){if(f.requestSubmit)f.requestSubmit();else f.submit();return 'SUBMITTED';}"
-                    + "var submit=document.querySelector('input[type=submit],button[type=submit],input[value*=Войти],button');"
+                    + "var submit=scope.querySelector('input[type=submit],button[type=submit],input[value*=Войти],button');"
                     + "if(submit){submit.click();return 'CLICKED';}return 'NO_SUBMIT';})()", result -> {
                 if (result == null || result.contains("NO_FIELDS") || result.contains("NO_SUBMIT")) {
-                    showMessage("Не удалось определить кнопку или поля входа на странице.");
+                    showMessage("Не удалось определить поля или кнопку входа на странице.");
                     return;
                 }
                 try { client.saveCredentials(username, password); }
