@@ -1130,20 +1130,26 @@ public class MainActivity extends Activity {
     private String extractJackettSearchTitle(String fullTitle) {
         if (fullTitle == null) return "";
         String value = fullTitle.trim();
+        java.util.regex.Matcher yearMatcher =
+                java.util.regex.Pattern.compile("(?<!\\\\d)(?:19|20)\\\\d{2}(?!\\\\d)").matcher(value);
+        String year = yearMatcher.find() ? yearMatcher.group() : "";
         String[] parts = value.split("/");
-        // Pick the first slash-separated segment that contains an actual
-        // Latin title. This skips a year or other numeric metadata after '/'.
+        String title = "";
+        // Select the first slash-separated segment containing a Latin title,
+        // skipping numeric metadata such as the year.
         for (int i = 1; i < parts.length; i++) {
             String candidate = parts[i].trim();
             if (candidate.matches(".*[A-Za-z].*")
                     && candidate.matches(".*[A-Za-z]{2,}.*")) {
-                candidate = candidate.replaceAll("\\s+", " ").trim();
-                if (!candidate.isEmpty()) return candidate;
+                title = candidate.replaceAll("\\\\s+", " ").trim();
+                break;
             }
         }
-        // No separate English segment: keep the original title so Russian
-        // releases are still searchable instead of accidentally querying a year.
-        return value;
+        if (title.isEmpty()) title = value;
+        if (!year.isEmpty() && !title.matches("(?s).*\\\\b" + year + "\\\\b.*")) {
+            title = title + " " + year;
+        }
+        return title;
     }
 
     private String jackettAttribute(Element item, String name) {
