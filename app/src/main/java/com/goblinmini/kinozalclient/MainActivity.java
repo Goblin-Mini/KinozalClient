@@ -276,30 +276,36 @@ public class MainActivity extends Activity {
                             paths, titles, 0, new ArrayList<>(), 1), 1200);
                     return;
                 }
-                // A failed category must not discard already loaded sections or
-                // prevent the remaining pages from being requested.
                 browserHandler.postDelayed(() -> loadHomeSectionsInBrowser(
                         paths, titles, index + 1, sections, 0), 150);
                 return;
             }
 
-            // Store every non-empty HTML response, including pages whose markup
-            // the poster parser does not recognise yet.
-            diskCache.put("home|" + client.getMirror() + "|" + paths[index],
-                    html.getBytes(StandardCharsets.UTF_8));
-            HomeSection section = new HomeSection(titles[index], paths[index]);
-            section.items.addAll(parseHomePosters(Jsoup.parse(html, client.getMirror() + "/")));
-            int cardCount = section.items.size();
-            if (cardCount > 0) {
-                sections.add(section);
-                renderHomeSection(section);
-            }
-            status.setText("Обработано " + (index + 1) + "/" + paths.length
-                    + " · показано лент " + sections.size() + " · карточек " 
-                    + countHomeCards(sections));
-            setCatalogStatus("Лент", sections.size());
-            browserHandler.postDelayed(() -> loadHomeSectionsInBrowser(
-                    paths, titles, index + 1, sections, 0), 100);
+            // Disk writes and Jsoup parsing are deliberately kept off the UI
+            // thread. Each completed page is processed independently, then
+            // only its small parsed model is handed back for rendering.
+            io.execute(() -> {
+                HomeSection section = new HomeSection(titles[index], paths[index]);
+                try {
+                    diskCache.put("home|" + client.getMirror() + "|" + paths[index],
+                            html.getBytes(StandardCharsets.UTF_8));
+                    section.items.addAll(parseHomePosters(
+                            Jsoup.parse(html, client.getMirror() + "/")));
+                } catch (Exception ignored) { }
+
+                runOnUiThread(() -> {
+                    if (!section.items.isEmpty()) {
+                        sections.add(section);
+                        renderHomeSection(section);
+                    }
+                    status.setText("Обработано " + (index + 1) + "/" + paths.length
+                            + " · показано лент " + sections.size() + " · карточек "
+                            + countHomeCards(sections));
+                    setCatalogStatus("Лент", sections.size());
+                    browserHandler.postDelayed(() -> loadHomeSectionsInBrowser(
+                            paths, titles, index + 1, sections, 0), 100);
+                });
+            });
         });
     }
 
