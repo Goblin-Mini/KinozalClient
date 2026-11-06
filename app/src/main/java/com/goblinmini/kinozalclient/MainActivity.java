@@ -2655,7 +2655,7 @@ public class MainActivity extends Activity {
         final boolean hasCachedDetails = cachedHtml != null;
         if (!hasCachedDetails) progress.setVisibility(View.VISIBLE);
 
-        java.util.function.Consumer<String> onFreshHtml = html -> {
+        java.util.function.Consumer<String> onFreshHtml = html -> runOnUiThread(() -> {
             if (html == null || html.trim().isEmpty()) {
                 if (!hasCachedDetails && href.equals(activeTorrentDetailsHref)) {
                     progress.setVisibility(View.GONE);
@@ -2690,7 +2690,7 @@ public class MainActivity extends Activity {
                     showMessage("Не удалось разобрать карточку: " + safe(e.getMessage()));
                 }
             }
-        };
+        }));
 
         if (sessionWebView != null) {
             // A single authenticated WebView request avoids the known HTTP 403
