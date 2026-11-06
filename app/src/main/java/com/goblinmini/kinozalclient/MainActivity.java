@@ -294,6 +294,9 @@ public class MainActivity extends Activity {
                             html.getBytes(StandardCharsets.UTF_8));
                     section.items.addAll(parseHomePosters(
                             Jsoup.parse(html, client.getMirror() + "/")));
+                    List<HomeSection> oneFeed = new ArrayList<>();
+                    oneFeed.add(section);
+                    removeHomeDuplicates(oneFeed);
                 } catch (Exception ignored) { }
 
                 runOnUiThread(() -> {
@@ -543,7 +546,9 @@ public class MainActivity extends Activity {
         // alternate encodes don't fill a feed with copies of one film.
         int slash = value.indexOf(" / ");
         if (slash > 0) value = value.substring(0, slash);
-        value = value.replaceAll("\\b(2160p|1080p|720p|480p|4k|uhd|hdr10?|web[- .]?dl|webrip|blu[- .]?ray|bdrip|brrip|dvdrip|hdtv|h265|h264|x265|x264|hevc|avc|aac|dts|ac3|proper|repack|remux)\\b", " ");
+        value = value.replaceAll("\\([^)]*\\)", " ");
+        value = value.replaceAll("\\b(19|20)\\d{2}\\b", " ");
+        value = value.replaceAll("\\b(2160p|1080p|720p|480p|4k|uhd|hdr10?|web[- .]?dl|webrip|blu[- .]?ray|bdrip|brrip|dvdrip|hdtv|h265|h264|x265|x264|hevc|avc|aac|dts|ac3|proper|repack|remux|extended|directors cut|theatrical|dubbed|subbed)\\b", " ");
         return value.replaceAll("[^\\p{L}\\p{N}]+", " ")
                 .replaceAll("\\s+", " ").trim();
     }
@@ -2290,14 +2295,16 @@ public class MainActivity extends Activity {
             String u = org.json.JSONObject.quote(username);
             String p = org.json.JSONObject.quote(password);
             web.evaluateJavascript("(function(){"
-                    + "var f=document.querySelector('form');if(!f)return 'NO_FORM';"
-                    + "var u=f.querySelector('input[type=text],input[type=email],input:not([type])');"
-                    + "var p=f.querySelector('input[type=password]');if(!u||!p)return 'NO_FIELDS';"
-                    + "u.value=" + u + ";p.value=" + p + ";"
-                    + "u.dispatchEvent(new Event('input',{bubbles:true}));"
-                    + "p.dispatchEvent(new Event('input',{bubbles:true}));"
-                    + "return 'OK';})()", result -> {
-                if (result == null || result.contains("NO_")) showMessage("На текущей странице нет формы входа.");
+                    + "var p=document.querySelector('input[type=password]');"
+                    + "var all=[].slice.call(document.querySelectorAll('input'));"
+                    + "var u=all.find(function(e){var t=(e.type||'text').toLowerCase();"
+                    + "return e!==p&&!e.disabled&&['text','email'].indexOf(t)>=0;});"
+                    + "if(!u||!p)return 'NO_FIELDS';"
+                    + "function put(e,v){var setter=Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set;"
+                    + "setter.call(e,v);e.dispatchEvent(new Event('input',{bubbles:true}));"
+                    + "e.dispatchEvent(new Event('change',{bubbles:true}));}"
+                    + "put(u," + u + ");put(p," + p + ");return 'OK';})()", result -> {
+                if (result == null || result.contains("NO_FIELDS")) showMessage("Не найдены поля логина и пароля на странице.");
                 else {
                     submittedLogin[0] = username;
                     submittedPassword[0] = password;
@@ -2315,13 +2322,23 @@ public class MainActivity extends Activity {
             }
             String u = org.json.JSONObject.quote(username);
             String p = org.json.JSONObject.quote(password);
-            web.evaluateJavascript("(function(){var f=document.querySelector('form');if(!f)return 'NO_FORM';"
-                    + "var u=f.querySelector('input[type=text],input[type=email],input:not([type])');"
-                    + "var p=f.querySelector('input[type=password]');if(!u||!p)return 'NO_FIELDS';"
-                    + "u.value=" + u + ";p.value=" + p + ";"
-                    + "u.dispatchEvent(new Event('input',{bubbles:true}));"
-                    + "p.dispatchEvent(new Event('input',{bubbles:true}));"
-                    + "if(f.requestSubmit)f.requestSubmit();else f.submit();return 'SUBMITTED';})()", result -> {
+            web.evaluateJavascript("(function(){var p=document.querySelector('input[type=password]');"
+                    + "var all=[].slice.call(document.querySelectorAll('input'));"
+                    + "var u=all.find(function(e){var t=(e.type||'text').toLowerCase();"
+                    + "return e!==p&&!e.disabled&&['text','email'].indexOf(t)>=0;});"
+                    + "if(!u||!p)return 'NO_FIELDS';"
+                    + "function put(e,v){var setter=Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set;"
+                    + "setter.call(e,v);e.dispatchEvent(new Event('input',{bubbles:true}));"
+                    + "e.dispatchEvent(new Event('change',{bubbles:true}));}"
+                    + "put(u," + u + ");put(p," + p + ");"
+                    + "var f=p.closest('form')||u.closest('form');"
+                    + "if(f){if(f.requestSubmit)f.requestSubmit();else f.submit();return 'SUBMITTED';}"
+                    + "var submit=document.querySelector('input[type=submit],button[type=submit],input[value*=Войти],button');"
+                    + "if(submit){submit.click();return 'CLICKED';}return 'NO_SUBMIT';})()", result -> {
+                if (result == null || result.contains("NO_FIELDS") || result.contains("NO_SUBMIT")) {
+                    showMessage("Не удалось определить кнопку или поля входа на странице.");
+                    return;
+                }
                 try { client.saveCredentials(username, password); }
                 catch (Exception e) { showMessage("Не удалось сохранить данные входа: " + safe(e.getMessage())); }
             });
