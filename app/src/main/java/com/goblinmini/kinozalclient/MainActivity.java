@@ -69,6 +69,16 @@ public class MainActivity extends Activity {
         }
     }
 
+    private String safeNetworkUrl(String raw) {
+        try { Uri u = Uri.parse(raw); StringBuilder b = new StringBuilder(); b.append(u.getScheme()).append("://").append(u.getHost());
+            if (u.getPort() > 0) b.append(":").append(u.getPort()); b.append(u.getPath() == null ? "/" : u.getPath());
+            java.util.Set<String> keys = new java.util.TreeSet<>(u.getQueryParameterNames()); boolean first = true;
+            for (String k : keys) { b.append(first ? "?" : "&"); first = false; String z = k.toLowerCase(java.util.Locale.ROOT);
+                String v = ("id".equals(z) || "action".equals(z) || "type".equals(z) || "page".equals(z) || "t".equals(z) || "d".equals(z) || "f".equals(z) || "k".equals(z) || "w".equals(z)) ? u.getQueryParameter(k) : "[redacted]";
+                b.append(k).append("=").append(v == null ? "" : v); } return b.toString();
+        } catch (Exception e) { return "[url]"; }
+    }
+
     private String readMagnetDiagnostics() {
         try (java.io.FileInputStream in = openFileInput(MAGNET_DIAG_FILE)) {
             byte[] bytes = new byte[(int) Math.min(in.available(), 128 * 1024)];
@@ -926,6 +936,16 @@ public class MainActivity extends Activity {
             @Override public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
                 return request.isForMainFrame() && !isMirror(request.getUrl());
             }
+            @Override public android.webkit.WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
+                if (request != null && request.getUrl() != null) {
+                    Uri u = request.getUrl(); String p = u.getPath() == null ? "" : u.getPath().toLowerCase(java.util.Locale.ROOT);
+                    String m = request.getMethod() == null ? "GET" : request.getMethod();
+                    if (!"GET".equalsIgnoreCase(m) || p.endsWith(".php") || p.endsWith(".json") || p.contains("/ajax/") || p.contains("/api/") || p.contains("magnet") || p.contains("torrent")) {
+                        magnetDiag("WEBVIEW_REQUEST", m + " " + safeNetworkUrl(u.toString()) + ", mainFrame=" + request.isForMainFrame());
+                    }
+                }
+                return super.shouldInterceptRequest(view, request);
+            }
             @Override public void onPageStarted(WebView view, String url, android.graphics.Bitmap favicon) {
                 super.onPageStarted(view, url, favicon);
                 if (pendingBrowserCallback != null) {
@@ -952,6 +972,7 @@ public class MainActivity extends Activity {
             }
             @Override public void onPageFinished(WebView view, String url) {
                 super.onPageFinished(view, url);
+                installNetworkProbe(view);
                 // A WebView can finish an older navigation after a newer request
                 // has installed its callback. Never let that stale page consume it.
                 if (pendingBrowserCallback != null
@@ -1063,7 +1084,23 @@ public class MainActivity extends Activity {
                 }
             }
         });
-        web.setWebChromeClient(new WebChromeClient());
+        web.setWebChromeClient(new WebChromeClient() {
+            @Override public boolean onConsoleMessage(android.webkit.ConsoleMessage message) {
+                if (message != null && message.message() != null && message.message().startsWith("KZNET|")) {
+                    magnetDiag("WEBVIEW_XHR_FETCH", safeDiag(message.message().substring(6))); return true;
+                }
+                return super.onConsoleMessage(message);
+            }
+        });
+    }
+
+    private void installNetworkProbe(WebView view) {
+        if (view == null) return;
+        String script = "(function(){if(window.__kzNetProbe)return;window.__kzNetProbe=true;" +
+            "function clean(u){try{var x=new URL(String(u),location.href),q=[];x.searchParams.forEach(function(v,k){q.push(k+'='+(['id','action','type','page','t','d','f','k','w'].indexOf(k.toLowerCase())>=0?v:'[redacted]'));});return x.origin+x.pathname+(q.length?'?'+q.join('&'):'');}catch(e){return '[url]';}}" +
+            "var f=window.fetch;if(f)window.fetch=function(){var a=arguments[0],u=a&&a.url?a.url:a,label=clean(u);return f.apply(this,arguments).then(function(r){console.log('KZNET|FETCH '+r.status+' '+label+' ct='+(r.headers.get('content-type')||''));r.clone().text().then(function(t){var n=(t.match(/magnet:/ig)||[]).length;if(n||/TSA_magnet|get_srv_details|download\\.php/i.test(t))console.log('KZNET|FETCH_BODY '+label+' chars='+t.length+' magnet='+n+' tsa='+(t.indexOf('TSA_magnet')>=0)+' srv='+(t.indexOf('get_srv_details')>=0));}).catch(function(){});return r;},function(e){console.log('KZNET|FETCH_ERROR '+label+' '+String(e));throw e;});};" +
+            "var op=XMLHttpRequest.prototype.open,send=XMLHttpRequest.prototype.send;XMLHttpRequest.prototype.open=function(m,u){this.__kz={m:m,u:clean(u)};return op.apply(this,arguments);};XMLHttpRequest.prototype.send=function(){var x=this,z=x.__kz||{};x.addEventListener('loadend',function(){var ct='';try{ct=x.getResponseHeader('content-type')||'';}catch(e){}console.log('KZNET|XHR '+x.status+' '+(z.m||'')+' '+(z.u||'')+' ct='+ct);try{var t=typeof x.responseText==='string'?x.responseText:'',n=(t.match(/magnet:/ig)||[]).length;if(n||/TSA_magnet|get_srv_details|download\\.php/i.test(t))console.log('KZNET|XHR_BODY '+(z.u||'')+' chars='+t.length+' magnet='+n+' tsa='+(t.indexOf('TSA_magnet')>=0)+' srv='+(t.indexOf('get_srv_details')>=0));}catch(e){}});return send.apply(this,arguments);};console.log('KZNET|PROBE_INSTALLED '+location.pathname);})();";
+        view.evaluateJavascript(script, null);
     }
 
     private boolean isExpectedBrowserPage(String finishedUrl, String targetUrl) {
