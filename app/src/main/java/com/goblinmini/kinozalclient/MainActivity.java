@@ -97,9 +97,62 @@ public class MainActivity extends Activity {
                         showMessage("Не удалось открыть отправку: " + safeDiag(e.getMessage()));
                     }
                 })
-                .setNeutralButton("Сохранить файл", (d, w) -> saveMagnetDiagnostics(log))
+                .setNeutralButton("Сохранить", (d, w) -> {
+                    new AlertDialog.Builder(this)
+                            .setTitle("Что сохранить?")
+                            .setItems(new String[]{"Журнал диагностики", "HTML карточки раздачи"},
+                                    (choiceDialog, which) -> {
+                                        if (which == 0) saveMagnetDiagnostics(log);
+                                        else saveDetailsHtmlDiagnostic();
+                                    })
+                            .setNegativeButton("Отмена", null)
+                            .show();
+                })
                 .setNegativeButton("Закрыть", null)
                 .show();
+    }
+
+    private void saveDetailsHtmlDiagnostic() {
+        String html = lastDetailsHtml;
+        String url = lastDetailsUrl;
+        if (html == null || html.isEmpty()) {
+            showMessage("HTML карточки пока нет. Сначала откройте карточку раздачи.");
+            return;
+        }
+        try {
+            Document doc = Jsoup.parse(html, url);
+            for (Element input : doc.select("input")) input.removeAttr("value");
+            for (Element area : doc.select("textarea")) area.text("");
+            String safeHtml = "<!-- URL: " + safeDiag(url) + " -->\\n" + doc.outerHtml();
+            if (safeHtml.length() > 512 * 1024) {
+                showMessage("HTML слишком большой для экспорта (" + safeHtml.length() + " символов).");
+                return;
+            }
+            if (android.os.Build.VERSION.SDK_INT >= 29) {
+                android.content.ContentValues values = new android.content.ContentValues();
+                values.put(android.provider.MediaStore.Downloads.DISPLAY_NAME, "kinozal-details-diagnostic.html");
+                values.put(android.provider.MediaStore.Downloads.MIME_TYPE, "text/html");
+                values.put(android.provider.MediaStore.Downloads.RELATIVE_PATH,
+                        android.os.Environment.DIRECTORY_DOWNLOADS + "/KinozalClient");
+                android.net.Uri uri = getContentResolver().insert(
+                        android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI, values);
+                if (uri == null) throw new java.io.IOException("Не удалось создать HTML в Downloads");
+                try (java.io.OutputStream out = getContentResolver().openOutputStream(uri)) {
+                    if (out == null) throw new java.io.IOException("Не удалось открыть HTML-файл");
+                    out.write(safeHtml.getBytes(StandardCharsets.UTF_8));
+                }
+            } else {
+                java.io.File dir = getExternalFilesDir(android.os.Environment.DIRECTORY_DOCUMENTS);
+                if (dir == null) throw new java.io.IOException("Папка документов недоступна");
+                try (java.io.FileOutputStream out = new java.io.FileOutputStream(
+                        new java.io.File(dir, "kinozal-details-diagnostic.html"))) {
+                    out.write(safeHtml.getBytes(StandardCharsets.UTF_8));
+                }
+            }
+            showMessage("HTML карточки сохранён в Downloads/KinozalClient.");
+        } catch (Exception e) {
+            showMessage("Ошибка сохранения HTML: " + safeDiag(e.getMessage()));
+        }
     }
 
     private void saveMagnetDiagnostics(String log) {
@@ -145,6 +198,8 @@ public class MainActivity extends Activity {
     private final List<Torrent> torrents = new ArrayList<>();
     private int page = 0;
     private volatile String lastHtml = "";
+    private volatile String lastDetailsHtml = "";
+    private volatile String lastDetailsUrl = "";
     private WebView sessionWebView;
     private BrowserPageCallback pendingBrowserCallback;
     private String pendingBrowserTarget = "";
