@@ -701,13 +701,14 @@ public class MainActivity extends Activity {
         searchParams.rightMargin = dp(8);
         search.setBackgroundColor(Color.TRANSPARENT);
         search.setPadding(dp(4), 0, dp(4), 0);
-        Button voiceSearch = button("🎙");
-        voiceSearch.setTextSize(17);
+        Button voiceSearch = button("Голос");
+        voiceSearch.setTextSize(11);
+        voiceSearch.setTextColor(GOLD);
         voiceSearch.setContentDescription("Голосовой поиск");
         voiceSearch.setFocusable(true);
         voiceSearch.setFocusableInTouchMode(false);
         voiceSearch.setNextFocusRightId(View.NO_ID);
-        LinearLayout.LayoutParams voiceParams = new LinearLayout.LayoutParams(dp(38), dp(40));
+        LinearLayout.LayoutParams voiceParams = new LinearLayout.LayoutParams(dp(52), dp(40));
         voiceParams.rightMargin = dp(3);
         searchField.addView(voiceSearch, voiceParams);
         voiceSearch.setOnClickListener(v -> startVoiceSearch());
