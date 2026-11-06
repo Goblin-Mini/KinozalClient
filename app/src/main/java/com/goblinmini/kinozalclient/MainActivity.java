@@ -1070,6 +1070,7 @@ public class MainActivity extends Activity {
                         Element enclosure = item.selectFirst("enclosure");
                         if (enclosure != null) size = enclosure.attr("length");
                     }
+                    size = formatJackettSize(size);
                     String seeders = jackettAttribute(item, "seeders");
                     String peers = jackettAttribute(item, "peers");
                     String tracker = jackettAttribute(item, "jackettindexer");
@@ -1084,18 +1085,20 @@ public class MainActivity extends Activity {
                     final String resultUrl = target;
                     LinearLayout row = new LinearLayout(this);
                     row.setOrientation(LinearLayout.VERTICAL);
-                    row.setPadding(dp(10), dp(8), dp(10), dp(8));
+                    row.setPadding(dp(14), dp(10), dp(14), dp(10));
                     row.setBackground(shape(PANEL, 0));
                     row.setFocusable(true);
                     row.setFocusableInTouchMode(true);
                     row.setClickable(true);
                     row.setOnFocusChangeListener((view, focused) ->
                             view.setBackground(shape(focused ? Color.rgb(65, 72, 73) : PANEL, focused ? GOLD : 0)));
-                    TextView titleView = text(name, 14, Color.WHITE, true);
+                    TextView titleView = text(name, 15, Color.WHITE, true);
                     row.addView(titleView);
-                    row.addView(text((tracker.isEmpty() ? "" : tracker + " · ")
-                            + "Размер: " + size + " · Сиды: " + seeders + " · Пиры: " + peers,
-                            11, TEAL, false));
+                    TextView meta = text((tracker.isEmpty() ? "" : tracker + "  ·  ")
+                            + "Размер: " + size + "  ·  Сиды: " + seeders + "  ·  Пиры: " + peers,
+                            12, TEAL, false);
+                    meta.setPadding(0, dp(4), 0, 0);
+                    row.addView(meta);
                     if (!resultUrl.isEmpty()) row.setOnClickListener(v -> {
                         try {
                             Intent open = new Intent(Intent.ACTION_VIEW, Uri.parse(resultUrl));
@@ -1121,14 +1124,28 @@ public class MainActivity extends Activity {
         if (item == null) return "—";
         Element direct = item.selectFirst(name);
         if (direct != null && !direct.text().trim().isEmpty()) return direct.text().trim();
-        for (Element attr : item.select("attr")) {
-            if (name.equalsIgnoreCase(attr.attr("name"))) {
-                String value = attr.attr("value").trim();
+        for (Element element : item.getAllElements()) {
+            String tag = element.tagName().toLowerCase(java.util.Locale.ROOT);
+            if (("attr".equals(tag) || tag.endsWith(":attr"))
+                    && name.equalsIgnoreCase(element.attr("name"))) {
+                String value = element.attr("value").trim();
                 if (!value.isEmpty()) return value;
             }
         }
         return "—";
     }
+
+    private String formatJackettSize(String raw) {
+        if (raw == null || raw.trim().isEmpty() || "—".equals(raw)) return "—";
+        try {
+            long bytes = Long.parseLong(raw.replaceAll("[^0-9]", ""));
+            if (bytes <= 0) return "—";
+            double gib = bytes / (1024d * 1024d * 1024d);
+            if (gib >= 1d) return String.format(java.util.Locale.US, "%.2f ГБ", gib);
+            return String.format(java.util.Locale.US, "%.0f МБ", bytes / (1024d * 1024d));
+        } catch (Exception ignored) { return raw; }
+    }
+
     private void addMenu(String icon, String label, Runnable action) {
         Button b = button(icon + "   " + label);
         if ("Недавно смотрели".equals(label)) {
