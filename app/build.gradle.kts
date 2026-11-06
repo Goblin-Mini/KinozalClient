@@ -10,8 +10,8 @@ android {
         applicationId = "com.goblinmini.kinozalclient"
         minSdk = 23
         targetSdk = 28
-        versionCode = 32
-        versionName = "0.5.22-magnet-diagnostic"
+        versionCode = 33
+        versionName = "0.5.23-magnet-only"
     }
 
     lint {
