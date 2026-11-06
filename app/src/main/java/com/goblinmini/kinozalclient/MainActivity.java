@@ -1130,24 +1130,50 @@ public class MainActivity extends Activity {
     private String extractJackettSearchTitle(String fullTitle) {
         if (fullTitle == null) return "";
         String value = fullTitle.trim();
+        if (value.isEmpty()) return "";
+
         java.util.regex.Matcher yearMatcher =
                 java.util.regex.Pattern.compile("(?<!\\d)(?:19|20)\\d{2}(?!\\d)").matcher(value);
         String year = yearMatcher.find() ? yearMatcher.group() : "";
+
+        // Kinozal titles often use slash-separated fields:
+        // Russian title / original title / year / audio / source / codec.
+        // Only the first two title fields are candidates. Never turn release
+        // metadata (WEB-DLRip, HEVC, 1080p, etc.) into the search query.
         String[] parts = value.split("/");
-        String title = "";
-        for (int i = 1; i < parts.length; i++) {
-            String candidate = parts[i].trim();
-            if (candidate.matches(".*[A-Za-z].*")
-                    && candidate.matches(".*[A-Za-z]{2,}.*")) {
-                title = candidate.replaceAll("\\s+", " ").trim();
-                break;
-            }
+        String primaryTitle = parts.length > 0 ? parts[0].trim() : value;
+        String title = primaryTitle;
+
+        for (int i = 1; i < Math.min(parts.length, 3); i++) {
+            String candidate = parts[i].trim().replaceAll("\\s+", " ");
+            if (candidate.isEmpty()) continue;
+            if (!candidate.matches("(?s).*[A-Za-zА-Яа-яЁё]{2,}.*")) continue;
+            if (isJackettReleaseMetadata(candidate)) continue;
+            title = candidate;
+            break;
         }
-        if (title.isEmpty()) title = value;
+
+        if (title.isEmpty()) title = primaryTitle.isEmpty() ? value : primaryTitle;
         if (!year.isEmpty() && !title.matches("(?s).*\\b" + year + "\\b.*")) {
             title = title + " " + year;
         }
-        return title;
+        return title.replaceAll("\\s+", " ").trim();
+    }
+
+    private boolean isJackettReleaseMetadata(String value) {
+        String normalized = value.toLowerCase(java.util.Locale.ROOT)
+                .replaceAll("[^a-z0-9]+", " ").trim();
+        if (normalized.isEmpty()) return true;
+        return normalized.matches(".*\\b(hevc|h264|h265|x264|x265|av1|avc|"
+                + "web dl|webdl|web rip|webrip|web d lrip|webdlrip|"
+                + "bdrip|brrip|bd rip|hdrip|dvdrip|remux|"
+                + "1080p|2160p|720p|480p|4k|8k|"
+                + "hdr|sdr|imax|proper|repack|"
+                + "aac|ac3|dts|ddp|truehd|atmos|"
+                + "dub|sub|rus|eng|multi|"
+                + "webrip|hdtv|pdtv|dsr|"
+                + "ts|telesync|cam|telecine)\\b.*")
+                || normalized.matches("^(ru|rus|eng|ukr|multi|dub|sub|db|ct)$");
     }
 
     private String jackettAttribute(Element item, String name) {
