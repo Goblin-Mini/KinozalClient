@@ -106,8 +106,9 @@ public final class DiskCache {
         Arrays.sort(files, (a, b) -> Long.compare(a.lastModified(), b.lastModified()));
         for (File file : files) {
             if (total <= maxBytes) break;
-            if (file.isFile() && file.getName().endsWith(".cache") && file.delete()) {
-                total -= file.length();
+            if (file.isFile() && file.getName().endsWith(".cache")) {
+                long length = file.length();
+                if (file.delete()) total -= length;
             }
         }
     }
