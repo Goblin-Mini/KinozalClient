@@ -1753,11 +1753,24 @@ public class MainActivity extends Activity {
         playbackLog("TORRENT_FETCH path=" + (web != null ? "webview" : "native")
                 + " webView=" + (web != null) + " urlHost=" + safe(hostOf(data.torrentLink)));
         if (web != null) {
-            // evaluateJavascript does not await a returned Promise. Use a JS bridge
-            // so the response is delivered only after the authenticated fetch finishes.
+            // A stalled WebView fetch must not block playback forever.
+            final java.util.concurrent.atomic.AtomicBoolean fetchFinished =
+                    new java.util.concurrent.atomic.AtomicBoolean(false);
+            final Runnable fetchTimeout = () -> {
+                if (fetchFinished.compareAndSet(false, true)) {
+                    playbackLog("WEB_FETCH_TIMEOUT afterMs=20000 action=native_fallback");
+                    downloadTorrentNative(data);
+                }
+            };
+            browserHandler.postDelayed(fetchTimeout, 20000);
             web.addJavascriptInterface(new Object() {
                 @JavascriptInterface
                 public void onTorrentResult(int statusCode, String base64, String error) {
+                    if (!fetchFinished.compareAndSet(false, true)) {
+                        playbackLog("WEB_FETCH_LATE_CALLBACK ignored=true");
+                        return;
+                    }
+                    browserHandler.removeCallbacks(fetchTimeout);
                     runOnUiThread(() -> {
                         playbackLog("WEB_FETCH_RESULT http=" + statusCode
                                 + " base64Length=" + (base64 == null ? -1 : base64.length())
@@ -1767,11 +1780,11 @@ public class MainActivity extends Activity {
                                 byte[] bytes = android.util.Base64.decode(base64, android.util.Base64.DEFAULT);
                                 deliverTorrentBytes(data, bytes);
                             } catch (Exception e) {
+                                playbackLog("WEB_FETCH_DECODE_ERROR " + e);
                                 showMessage("Не удалось прочитать торрент: " + safe(e.getMessage()));
                             }
                         } else {
-                            // Keep the native retry as a fallback, but do not silently
-                            // treat the unresolved JS Promise as a successful response.
+                            playbackLog("WEB_FETCH_FALLBACK reason=callback_error");
                             downloadTorrentNative(data);
                         }
                     });
@@ -1787,7 +1800,7 @@ public class MainActivity extends Activity {
                     + "reader.onerror=function(){window.KinozalTorrentBridge.onTorrentResult(0,'','FileReader error');};"
                     + "reader.readAsDataURL(blob);});})"
                     + ".catch(function(e){window.KinozalTorrentBridge.onTorrentResult(0,'',String(e));});})()";
-            web.evaluateJavascript(script, null);
+            web.evaluateJavascript(script, value -> playbackLog("WEB_FETCH_SCRIPT_DISPATCH result=" + safe(value)));
         } else {
             downloadTorrentNative(data);
         }
