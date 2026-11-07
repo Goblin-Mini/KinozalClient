@@ -1223,9 +1223,11 @@ public class MainActivity extends Activity {
         Button diagnostics = button("▤   Диагностика / кэш");
         Button socks5 = button("◉   SOCKS5 прокси");
         Button jackett = button("⌕   Поиск Jackett");
+        Button backup = button("⇧   Создать резервную копию");
+        Button restore = button("⇩   Восстановить из копии");
         Button about = button("ⓘ   О приложении");
         Button close = button("Закрыть");
-        for (Button action : new Button[]{login, mirrorButton, updates, diagnostics, socks5, jackett, about, close}) {
+        for (Button action : new Button[]{login, mirrorButton, updates, diagnostics, socks5, jackett, backup, restore, about, close}) {
             action.setTextSize(15);
             action.setGravity(Gravity.CENTER);
             LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-1, dp(48));
@@ -1238,6 +1240,8 @@ public class MainActivity extends Activity {
         diagnostics.setOnClickListener(v -> { settingsDialog.dismiss(); showDiagnostics(); });
         socks5.setOnClickListener(v -> { settingsDialog.dismiss(); showSocks5Settings(); });
         jackett.setOnClickListener(v -> showJackettSettings());
+        backup.setOnClickListener(v -> createBackupFile());
+        restore.setOnClickListener(v -> chooseBackupFile());
         about.setOnClickListener(v -> showAbout());
         close.setOnClickListener(v -> settingsDialog.dismiss());
         settingsDialog = new AlertDialog.Builder(this).setView(panel).create();
@@ -2206,7 +2210,165 @@ public class MainActivity extends Activity {
                 .show();
     }
 
+    private void createBackupFile() {
+        try {
+            org.json.JSONObject root = new org.json.JSONObject();
+            root.put("format", BACKUP_FORMAT);
+            root.put("version", BACKUP_VERSION);
+            root.put("createdAt", System.currentTimeMillis());
+            root.put("kinozal_settings", exportPreferences("kinozal_settings", null));
+            root.put("jackett_settings", exportPreferences("jackett_settings", new String[]{"apikey"}));
+            root.put("kinozal_socks5", exportPreferences("kinozal_socks5", new String[]{"password_enc"}));
+            android.content.Intent intent = new android.content.Intent(android.content.Intent.ACTION_CREATE_DOCUMENT);
+            intent.addCategory(android.content.Intent.CATEGORY_OPENABLE);
+            intent.setType("application/json");
+            intent.putExtra(android.content.Intent.EXTRA_TITLE,
+                    "KinozalClient-backup-" + new java.text.SimpleDateFormat("yyyyMMdd-HHmm", java.util.Locale.ROOT)
+                            .format(new java.util.Date()) + ".json");
+            startActivityForResult(intent, REQUEST_CREATE_BACKUP);
+        } catch (Exception e) {
+            showMessage("Не удалось подготовить резервную копию: " + safe(e.getMessage()));
+        }
+    }
+
+    private org.json.JSONObject exportPreferences(String name, String[] excluded) throws Exception {
+        org.json.JSONObject result = new org.json.JSONObject();
+        java.util.Map<String, ?> values = getSharedPreferences(name, MODE_PRIVATE).getAll();
+        for (java.util.Map.Entry<String, ?> entry : values.entrySet()) {
+            boolean skip = false;
+            if (excluded != null) for (String key : excluded) if (key.equals(entry.getKey())) skip = true;
+            if (skip) continue;
+            Object value = entry.getValue();
+            if (value instanceof java.util.Set) {
+                org.json.JSONArray array = new org.json.JSONArray();
+                for (Object item : (java.util.Set<?>) value) array.put(String.valueOf(item));
+                result.put(entry.getKey(), array);
+                result.put("__set__" + entry.getKey(), true);
+            } else {
+                result.put(entry.getKey(), value);
+            }
+        }
+        return result;
+    }
+
+    private void writeBackupFile(Uri uri) {
+        io.execute(() -> {
+            try {
+                org.json.JSONObject root = new org.json.JSONObject();
+                root.put("format", BACKUP_FORMAT);
+                root.put("version", BACKUP_VERSION);
+                root.put("createdAt", System.currentTimeMillis());
+                root.put("kinozal_settings", exportPreferences("kinozal_settings", null));
+                root.put("jackett_settings", exportPreferences("jackett_settings", new String[]{"apikey"}));
+                root.put("kinozal_socks5", exportPreferences("kinozal_socks5", new String[]{"password_enc"}));
+                try (java.io.OutputStream out = getContentResolver().openOutputStream(uri, "wt")) {
+                    if (out == null) throw new java.io.IOException("Не удалось открыть файл для записи");
+                    out.write(root.toString(2).getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                    out.flush();
+                }
+                runOnUiThread(() -> showMessage("Резервная копия сохранена"));
+            } catch (Exception e) {
+                runOnUiThread(() -> showMessage("Ошибка сохранения копии: " + safe(e.getMessage())));
+            }
+        });
+    }
+
+    private void chooseBackupFile() {
+        android.content.Intent intent = new android.content.Intent(android.content.Intent.ACTION_OPEN_DOCUMENT);
+        intent.addCategory(android.content.Intent.CATEGORY_OPENABLE);
+        intent.setType("*/*");
+        startActivityForResult(intent, REQUEST_RESTORE_BACKUP);
+    }
+
+    private void readBackupFile(Uri uri) {
+        io.execute(() -> {
+            try {
+                byte[] bytes;
+                try (java.io.InputStream in = getContentResolver().openInputStream(uri);
+                     java.io.ByteArrayOutputStream buffer = new java.io.ByteArrayOutputStream()) {
+                    if (in == null) throw new java.io.IOException("Не удалось открыть файл");
+                    byte[] chunk = new byte[8192];
+                    int count;
+                    while ((count = in.read(chunk)) != -1) {
+                        if (buffer.size() + count > 5 * 1024 * 1024)
+                            throw new java.io.IOException("Файл резервной копии слишком большой");
+                        buffer.write(chunk, 0, count);
+                    }
+                    bytes = buffer.toByteArray();
+                }
+                org.json.JSONObject backup = new org.json.JSONObject(
+                        new String(bytes, java.nio.charset.StandardCharsets.UTF_8));
+                if (!BACKUP_FORMAT.equals(backup.optString("format"))
+                        || backup.optInt("version", -1) != BACKUP_VERSION)
+                    throw new java.io.IOException("Неподдерживаемый формат резервной копии");
+                runOnUiThread(() -> new AlertDialog.Builder(this)
+                        .setTitle("Восстановить данные?")
+                        .setMessage("Текущие история просмотров, избранное, история поиска и настройки будут заменены данными из выбранной копии. Продолжить?")
+                        .setNegativeButton("Отмена", null)
+                        .setPositiveButton("Восстановить", (d, which) -> {
+                            try {
+                                importPreferences("kinozal_settings", backup.getJSONObject("kinozal_settings"), null, true);
+                                importPreferences("jackett_settings", backup.optJSONObject("jackett_settings"),
+                                        new String[]{"apikey"}, true);
+                                importPreferences("kinozal_socks5", backup.optJSONObject("kinozal_socks5"),
+                                        new String[]{"password_enc"}, true);
+                                mirror = getSharedPreferences(PREFS, MODE_PRIVATE).getString("mirror", MIRRORS[0]);
+                                client.setMirror(mirror);
+                                showMessage("Данные восстановлены. Проверьте пароль SOCKS5 и API Key Jackett.");
+                            } catch (Exception e) {
+                                showMessage("Не удалось восстановить копию: " + safe(e.getMessage()));
+                            }
+                        }).show());
+            } catch (Exception e) {
+                runOnUiThread(() -> showMessage("Файл резервной копии не прочитан: " + safe(e.getMessage())));
+            }
+        });
+    }
+
+    private void importPreferences(String name, org.json.JSONObject values,
+                                   String[] excluded, boolean replace) throws Exception {
+        if (values == null) return;
+        android.content.SharedPreferences prefs = getSharedPreferences(name, MODE_PRIVATE);
+        android.content.SharedPreferences.Editor editor = prefs.edit();
+        java.util.Map<String, ?> old = prefs.getAll();
+        java.util.HashMap<String, Object> preserved = new java.util.HashMap<>();
+        if (excluded != null) for (String key : excluded) if (old.containsKey(key)) preserved.put(key, old.get(key));
+        if (replace) editor.clear();
+        for (String key : values.keySet()) {
+            if (key.startsWith("__set__")) continue;
+            if (excluded != null && java.util.Arrays.asList(excluded).contains(key)) continue;
+            Object value = values.get(key);
+            if (values.optBoolean("__set__" + key, false) && value instanceof org.json.JSONArray) {
+                java.util.HashSet<String> set = new java.util.HashSet<>();
+                org.json.JSONArray array = (org.json.JSONArray) value;
+                for (int i = 0; i < array.length(); i++) set.add(array.optString(i));
+                editor.putStringSet(key, set);
+            } else if (value instanceof Boolean) editor.putBoolean(key, (Boolean) value);
+            else if (value instanceof Integer) editor.putInt(key, (Integer) value);
+            else if (value instanceof Long) editor.putLong(key, (Long) value);
+            else if (value instanceof Double) editor.putFloat(key, ((Double) value).floatValue());
+            else if (value instanceof String) editor.putString(key, (String) value);
+            else if (value instanceof org.json.JSONArray) {
+                org.json.JSONArray array = (org.json.JSONArray) value;
+                java.util.ArrayList<String> items = new java.util.ArrayList<>();
+                for (int i = 0; i < array.length(); i++) items.add(array.optString(i));
+                editor.putString(key, new org.json.JSONArray(items).toString());
+            }
+        }
+        for (java.util.Map.Entry<String, Object> entry : preserved.entrySet()) {
+            Object value = entry.getValue();
+            if (value instanceof String) editor.putString(entry.getKey(), (String) value);
+            else if (value instanceof Boolean) editor.putBoolean(entry.getKey(), (Boolean) value);
+            else if (value instanceof Integer) editor.putInt(entry.getKey(), (Integer) value);
+        }
+        if (!editor.commit()) throw new java.io.IOException("Не удалось записать настройки " + name);
+    }
+
     private static final int REQUEST_VOICE_SEARCH = 7401;
+    private static final int REQUEST_CREATE_BACKUP = 7402;
+    private static final int REQUEST_RESTORE_BACKUP = 7403;
+    private static final String BACKUP_FORMAT = "kinozal-client-backup";
+    private static final int BACKUP_VERSION = 1;
 
     private void startVoiceSearch() {
         android.content.Intent intent = new android.content.Intent(
@@ -2228,6 +2390,17 @@ public class MainActivity extends Activity {
 
     @Override protected void onActivityResult(int requestCode, int resultCode, android.content.Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
+        if (resultCode != RESULT_OK || data == null) {
+            if (requestCode == REQUEST_CREATE_BACKUP || requestCode == REQUEST_RESTORE_BACKUP) return;
+        }
+        if (requestCode == REQUEST_CREATE_BACKUP && data != null && data.getData() != null) {
+            writeBackupFile(data.getData());
+            return;
+        }
+        if (requestCode == REQUEST_RESTORE_BACKUP && data != null && data.getData() != null) {
+            readBackupFile(data.getData());
+            return;
+        }
         if (requestCode != REQUEST_VOICE_SEARCH || resultCode != RESULT_OK || data == null) return;
         java.util.ArrayList<String> results = data.getStringArrayListExtra(
                 android.speech.RecognizerIntent.EXTRA_RESULTS);
