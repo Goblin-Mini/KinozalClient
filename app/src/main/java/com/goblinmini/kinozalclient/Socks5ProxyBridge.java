@@ -97,6 +97,23 @@ public final class Socks5ProxyBridge {
                 prefs.getString("username", ""), password);
     }
 
+    /** Verify DNS, TCP reachability and SOCKS5 authentication without changing saved settings. */
+    public void testConnection(String host, int port, String username, String password) throws Exception {
+        String h = host == null ? "" : host.trim();
+        String u = username == null ? "" : username.trim();
+        String p = password == null ? "" : password;
+        if (h.isEmpty()) throw new IllegalArgumentException("Укажите адрес SOCKS5-сервера");
+        if (port < 1 || port > 65535) throw new IllegalArgumentException("Некорректный порт SOCKS5");
+        if (u.isEmpty() != p.isEmpty()) throw new IllegalArgumentException("Укажите и логин, и пароль");
+        Settings probe = new Settings(true, h, port, u, p);
+        Socket socket = null;
+        try {
+            socket = openSocks(probe, "ipwho.is", 443);
+        } finally {
+            close(socket);
+        }
+    }
+
     public synchronized Proxy start() throws Exception {
         stop();
         Settings cfg = settings;
