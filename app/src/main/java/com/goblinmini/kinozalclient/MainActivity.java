@@ -73,6 +73,7 @@ public class MainActivity extends Activity {
     private TextView settingsCategoryInfo;
     private TextView settingsCountryInfo;
     private int lastLoadedTorrentCount = 0;
+    private String lastKinozalConnectionStatus = "не проверено";
     private String activeTorrentDetailsHref = "";
     private LinearLayout root, sidebar, content, list, menuItems;
     private TextView heading, status;
@@ -744,8 +745,7 @@ public class MainActivity extends Activity {
 
     private void updateSettingsConnectionInfo() {
         if (settingsConnectionInfo != null) {
-            settingsConnectionInfo.setText("Подключение к Kinozal: "
-                    + (sessionWebView != null ? "браузерная сессия активна" : "прямое подключение"));
+            settingsConnectionInfo.setText("Подключение к Kinozal: " + lastKinozalConnectionStatus);
         }
     }
 
@@ -2002,11 +2002,13 @@ public class MainActivity extends Activity {
         if (sessionWebView != null) {
             fetchBrowserPage(path, postBody, html -> {
                 if (html != null && !html.isEmpty()) {
+                    lastKinozalConnectionStatus = "установлено";
                     updateSettingsConnectionInfo();
                     synchronized (pageCache) { pageCache.put(cacheKey, html); }
                     if (postBody == null) diskCache.put("page|" + scopedCacheKey, html.getBytes(StandardCharsets.UTF_8));
                     showLoadedPage(html);
                 } else {
+                    lastKinozalConnectionStatus = "нет соединения";
                     if (settingsConnectionInfo != null) settingsConnectionInfo.setText("Подключение к Kinozal: нет соединения");
                     progress.setVisibility(View.GONE);
                     status.setText("Нет соединения");
@@ -2020,11 +2022,13 @@ public class MainActivity extends Activity {
                     synchronized (pageCache) { pageCache.put(cacheKey, html); }
                     if (postBody == null) diskCache.put("page|" + scopedCacheKey, html.getBytes(StandardCharsets.UTF_8));
                     runOnUiThread(() -> {
+                        lastKinozalConnectionStatus = "установлено";
                         updateSettingsConnectionInfo();
                         showLoadedPage(html);
                     });
                 } catch (Exception e) {
                     runOnUiThread(() -> {
+                        lastKinozalConnectionStatus = "нет соединения";
                         if (settingsConnectionInfo != null) settingsConnectionInfo.setText("Подключение к Kinozal: нет соединения");
                         progress.setVisibility(View.GONE); status.setText("Нет соединения");
                         addEmpty("Не удалось загрузить каталог. " + safe(e.getMessage())); });
