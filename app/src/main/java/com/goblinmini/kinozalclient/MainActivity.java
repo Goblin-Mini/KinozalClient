@@ -76,6 +76,8 @@ public class MainActivity extends Activity {
     private int lastLoadedTorrentCount = 0;
     private String lastKinozalConnectionStatus = "не проверено";
     private String activeTorrentDetailsHref = "";
+    private String pendingDetailPrefetchHref = "";
+    private final java.util.Set<String> detailPrefetchScheduled = new java.util.HashSet<>();
     private LinearLayout root, sidebar, content, list, menuItems;
     private TextView heading, status;
     private ProgressBar progress;
@@ -2350,7 +2352,16 @@ public class MainActivity extends Activity {
             TextView leeches = text(t.leeches, 13, RED, true);
             leeches.setGravity(Gravity.CENTER);
             row.addView(leeches, new LinearLayout.LayoutParams(dp(55), -2));
-            row.setFocusable(true); row.setOnFocusChangeListener((v, f) -> v.setBackground(shape(f ? Color.rgb(57, 68, 70) : PANEL, f ? GOLD : 0)));
+            row.setFocusable(true);
+            final Runnable[] prefetchTask = {null};
+            row.setOnFocusChangeListener((v, f) -> {
+                v.setBackground(shape(f ? Color.rgb(57, 68, 70) : PANEL, f ? GOLD : 0));
+                if (prefetchTask[0] != null) browserHandler.removeCallbacks(prefetchTask[0]);
+                if (f) {
+                    prefetchTask[0] = () -> prefetchTorrentDetails(t);
+                    browserHandler.postDelayed(prefetchTask[0], 320);
+                }
+            });
             row.setOnClickListener(v -> showTorrent(t)); list.addView(row, rp);
         }
         LinearLayout pages = new LinearLayout(this); pages.setGravity(Gravity.RIGHT);
@@ -3114,6 +3125,41 @@ public class MainActivity extends Activity {
         final java.util.LinkedHashMap<String, String> fields = new java.util.LinkedHashMap<>();
     }
 
+    // Warm the next likely details page while the user navigates the list.
+    // The click handler reuses this in-flight request instead of starting a
+    // second WebView navigation and cancelling the first one.
+    private void prefetchTorrentDetails(Torrent torrent) {
+        if (torrent == null || torrent.href == null || torrent.href.trim().isEmpty()
+                || sessionWebView == null || !pendingDetailPrefetchHref.isEmpty()
+                || pendingBrowserCallback != null) return;
+        final String href = torrent.href;
+        final String key = "details|" + client.getMirror() + "|" + href;
+        synchronized (pageCache) {
+            if (pageCache.containsKey(key)) return;
+        }
+        if (diskCache.get(key, 30L * 60L * 1000L) != null) return;
+        pendingDetailPrefetchHref = href;
+        fetchBrowserPage(href, null, html -> {
+            if (href.equals(pendingDetailPrefetchHref)) pendingDetailPrefetchHref = "";
+            if (html == null || html.trim().isEmpty()) return;
+            try {
+                Document doc = Jsoup.parse(html, href);
+                TorrentDetails parsed = parseTorrentDetails(doc, torrent);
+                boolean valid = !parsed.title.trim().isEmpty()
+                        && (doc.selectFirst("#main .content") != null
+                        || doc.selectFirst("a[href*=download.php]") != null);
+                if (!valid) return;
+                synchronized (pageCache) { pageCache.put(key, html); }
+                diskCache.put(key, html.getBytes(StandardCharsets.UTF_8));
+                if (href.equals(activeTorrentDetailsHref)) {
+                    progress.setVisibility(View.GONE);
+                    saveRecentlyViewed(torrent);
+                    showTorrentDetails(torrent, parsed);
+                }
+            } catch (Exception ignored) { }
+        });
+    }
+
     private void showTorrent(Torrent t) {
         focusedTorrentSource = getCurrentFocus();
         if (t == null || t.href == null || t.href.trim().isEmpty()) {
@@ -3149,7 +3195,12 @@ public class MainActivity extends Activity {
         }
 
         final boolean hasCachedDetails = cachedHtml != null;
-        if (!hasCachedDetails) progress.setVisibility(View.VISIBLE);
+        if (!hasCachedDetails) {
+            progress.setVisibility(View.VISIBLE);
+            // A focused-row prefetch is already loading this exact page.
+            // Wait for it rather than cancelling it with a duplicate request.
+            if (href.equals(pendingDetailPrefetchHref)) return;
+        }
 
         java.util.function.Consumer<String> onFreshHtml = html -> runOnUiThread(() -> {
             if (html == null || html.trim().isEmpty()) {
