@@ -394,8 +394,6 @@ public class MainActivity extends Activity {
     private static class HomePoster {
         Torrent torrent;
         String imageUrl;
-        TextView countryOverlay;
-        TextView ratingOverlay;
     }
 
     private void loadInitialCatalog() {
@@ -709,15 +707,8 @@ public class MainActivity extends Activity {
         if (!combined.items.isEmpty()) sections.add(0, combined);
     }
 
-    private static final String[] TV_CHANNEL_PATHS = {
-            "novinki.php?c=1002",
-            "novinki.php?c=1001",
-            "top.php?c=1002&d=0&f=0&j=&k=0&s=0&t=0",
-            "top.php?c=1001&d=0&f=0&j=&k=0&s=0&t=0",
-    };
-    private static final String[] TV_CHANNEL_TITLES = {
-            "Новинки фильмов", "Новинки сериалов", "Топ фильмов", "Топ сериалов"
-    };
+    private static final String[] TV_CHANNEL_PATHS = HOME_PATHS;
+    private static final String[] TV_CHANNEL_TITLES = HOME_TITLES;
     private boolean tvChannelsRefreshInProgress;
 
     private java.io.File tvChannelModelFile() {
@@ -1229,7 +1220,6 @@ public class MainActivity extends Activity {
                 v.setBackground(shape(focused ? Color.rgb(57, 68, 70) : PANEL, focused ? GOLD : 0));
                 if (focused) {
                     loadHomePosterForCard(card);
-                    browserHandler.postDelayed(() -> prefetchTorrentDetails(item.torrent), 450);
                 }
             });
             FrameLayout posterFrame = new FrameLayout(this);
@@ -1240,24 +1230,6 @@ public class MainActivity extends Activity {
             poster.setImageResource(R.drawable.kinozal_poster_placeholder);
             posterFrame.addView(poster, new FrameLayout.LayoutParams(-1, -1));
 
-            TextView countryOverlay = text("", 10, Color.rgb(255, 238, 0), true);
-            countryOverlay.setGravity(Gravity.CENTER);
-            countryOverlay.setSingleLine(true);
-            countryOverlay.setEllipsize(android.text.TextUtils.TruncateAt.END);
-            countryOverlay.setPadding(dp(3), dp(2), dp(3), dp(2));
-            countryOverlay.setBackgroundColor(Color.argb(185, 0, 0, 0));
-            FrameLayout.LayoutParams countryParams = new FrameLayout.LayoutParams(-1, -2, Gravity.TOP);
-            posterFrame.addView(countryOverlay, countryParams);
-
-            TextView ratingOverlay = text("Кинозал —", 9, Color.rgb(255, 238, 0), true);
-            ratingOverlay.setGravity(Gravity.CENTER);
-            ratingOverlay.setSingleLine(true);
-            ratingOverlay.setPadding(dp(3), dp(2), dp(3), dp(2));
-            ratingOverlay.setBackgroundColor(Color.argb(195, 0, 0, 0));
-            FrameLayout.LayoutParams ratingParams = new FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM);
-            posterFrame.addView(ratingOverlay, ratingParams);
-            item.countryOverlay = countryOverlay;
-            item.ratingOverlay = ratingOverlay;
             card.addView(posterFrame, new LinearLayout.LayoutParams(dp(126), dp(178)));
             TextView name = text(item.torrent.title, 12, Color.WHITE, true);
             name.setMaxLines(2);
@@ -3738,69 +3710,6 @@ public class MainActivity extends Activity {
     // Warm the next likely details page while the user navigates the list.
     // The click handler reuses this in-flight request instead of starting a
     // second WebView navigation and cancelling the first one.
-    private void applyHomeDetailsToCards(Torrent torrent, TorrentDetails details) {
-        if (torrent == null || details == null) return;
-        String country = "";
-        for (String key : new String[]{"Страна", "Страна производства", "Страна выпуска"}) {
-            String value = details.fields.get(key);
-            if (value != null && !value.trim().isEmpty()) {
-                country = value.trim().split("\\s*[,;/|]\\s*")[0].trim();
-                break;
-            }
-        }
-        String rating = details.kinozalRating == null ? "" : details.kinozalRating.trim();
-        if (rating.isEmpty() || "—".equals(rating)) rating = "Кинозал —";
-        else rating = "Кинозал " + rating;
-        for (HomeSection section : homeSectionsMemory) {
-            for (HomePoster poster : section.items) {
-                if (poster == null || poster.torrent == null
-                        || !torrent.href.equals(poster.torrent.href)) continue;
-                final String countryText = country;
-                final String ratingText = rating;
-                runOnUiThread(() -> {
-                    if (poster.countryOverlay != null) {
-                        poster.countryOverlay.setText(countryText);
-                        poster.countryOverlay.setVisibility(countryText.isEmpty() ? View.GONE : View.VISIBLE);
-                    }
-                    if (poster.ratingOverlay != null) poster.ratingOverlay.setText(ratingText);
-                });
-            }
-        }
-    }
-
-    private void prefetchTorrentDetails(Torrent torrent) {
-        if (torrent == null || torrent.href == null || torrent.href.trim().isEmpty()
-                || sessionWebView == null || !pendingDetailPrefetchHref.isEmpty()
-                || pendingBrowserCallback != null) return;
-        final String href = torrent.href;
-        final String key = "details|" + client.getMirror() + "|" + href;
-        synchronized (pageCache) {
-            if (pageCache.containsKey(key)) return;
-        }
-        if (diskCache.get(key, 30L * 60L * 1000L) != null) return;
-        pendingDetailPrefetchHref = href;
-        fetchBrowserPage(href, null, html -> {
-            if (href.equals(pendingDetailPrefetchHref)) pendingDetailPrefetchHref = "";
-            if (html == null || html.trim().isEmpty()) return;
-            try {
-                Document doc = Jsoup.parse(html, href);
-                TorrentDetails parsed = parseTorrentDetails(doc, torrent);
-                applyHomeDetailsToCards(torrent, parsed);
-                boolean valid = !parsed.title.trim().isEmpty()
-                        && (doc.selectFirst("#main .content") != null
-                        || doc.selectFirst("a[href*=download.php]") != null);
-                if (!valid) return;
-                synchronized (pageCache) { pageCache.put(key, html); }
-                diskCache.put(key, html.getBytes(StandardCharsets.UTF_8));
-                if (href.equals(activeTorrentDetailsHref)) {
-                    progress.setVisibility(View.GONE);
-                    saveRecentlyViewed(torrent);
-                    showTorrentDetails(torrent, parsed);
-                }
-            } catch (Exception ignored) { }
-        });
-    }
-
     private void showTorrent(Torrent t) {
         focusedTorrentSource = getCurrentFocus();
         if (t == null || t.href == null || t.href.trim().isEmpty()) {
