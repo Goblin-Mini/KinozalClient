@@ -394,6 +394,8 @@ public class MainActivity extends Activity {
     private static class HomePoster {
         Torrent torrent;
         String imageUrl;
+        TextView countryOverlay;
+        TextView ratingOverlay;
     }
 
     private void loadInitialCatalog() {
@@ -1212,13 +1214,38 @@ public class MainActivity extends Activity {
             card.setClickable(true);
             card.setOnFocusChangeListener((v, focused) -> {
                 v.setBackground(shape(focused ? Color.rgb(57, 68, 70) : PANEL, focused ? GOLD : 0));
-                if (focused) loadHomePosterForCard(card);
+                if (focused) {
+                    loadHomePosterForCard(card);
+                    browserHandler.postDelayed(() -> prefetchTorrentDetails(item.torrent), 450);
+                }
             });
+            FrameLayout posterFrame = new FrameLayout(this);
+            posterFrame.setBackground(shape(Color.rgb(40, 45, 49), 0));
             ImageView poster = new ImageView(this);
             poster.setScaleType(ImageView.ScaleType.CENTER_CROP);
             poster.setBackground(shape(Color.rgb(40, 45, 49), 0));
             poster.setImageResource(R.drawable.kinozal_poster_placeholder);
-            card.addView(poster, new LinearLayout.LayoutParams(dp(126), dp(178)));
+            posterFrame.addView(poster, new FrameLayout.LayoutParams(-1, -1));
+
+            TextView countryOverlay = text("", 10, Color.rgb(255, 238, 0), true);
+            countryOverlay.setGravity(Gravity.CENTER);
+            countryOverlay.setSingleLine(true);
+            countryOverlay.setEllipsize(android.text.TextUtils.TruncateAt.END);
+            countryOverlay.setPadding(dp(3), dp(2), dp(3), dp(2));
+            countryOverlay.setBackgroundColor(Color.argb(185, 0, 0, 0));
+            FrameLayout.LayoutParams countryParams = new FrameLayout.LayoutParams(-1, -2, Gravity.TOP);
+            posterFrame.addView(countryOverlay, countryParams);
+
+            TextView ratingOverlay = text("Кинозал —", 9, Color.rgb(255, 238, 0), true);
+            ratingOverlay.setGravity(Gravity.CENTER);
+            ratingOverlay.setSingleLine(true);
+            ratingOverlay.setPadding(dp(3), dp(2), dp(3), dp(2));
+            ratingOverlay.setBackgroundColor(Color.argb(195, 0, 0, 0));
+            FrameLayout.LayoutParams ratingParams = new FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM);
+            posterFrame.addView(ratingOverlay, ratingParams);
+            item.countryOverlay = countryOverlay;
+            item.ratingOverlay = ratingOverlay;
+            card.addView(posterFrame, new LinearLayout.LayoutParams(dp(126), dp(178)));
             TextView name = text(item.torrent.title, 12, Color.WHITE, true);
             name.setMaxLines(2);
             name.setEllipsize(android.text.TextUtils.TruncateAt.END);
@@ -1292,8 +1319,12 @@ public class MainActivity extends Activity {
     private void loadHomePosterForCard(View card) {
         if (!(card instanceof ViewGroup) || ((ViewGroup) card).getChildCount() == 0) return;
         View first = ((ViewGroup) card).getChildAt(0);
-        if (!(first instanceof ImageView)) return;
-        ImageView poster = (ImageView) first;
+        ImageView poster;
+        if (first instanceof ImageView) poster = (ImageView) first;
+        else if (first instanceof ViewGroup && ((ViewGroup) first).getChildCount() > 0
+                && ((ViewGroup) first).getChildAt(0) instanceof ImageView) {
+            poster = (ImageView) ((ViewGroup) first).getChildAt(0);
+        } else return;
         Object tag = poster.getTag();
         if (!(tag instanceof HomeImageRequest)) return;
         HomeImageRequest request = (HomeImageRequest) tag;
@@ -3153,7 +3184,7 @@ public class MainActivity extends Activity {
         passParams.leftMargin = dp(6);
         credentials.addView(passwordField, passParams);
 
-        Button cursorToggle = button("Курсор: вкл");
+        Button cursorToggle = button("Курсор");
         Button insert = button("Вставить");
         Button signIn = button("Вход");
         Button done = button("Готово");
@@ -3193,7 +3224,7 @@ public class MainActivity extends Activity {
         cursorToggle.setOnClickListener(v -> {
             boolean enabled = tvCursor.getVisibility() != View.VISIBLE;
             tvCursor.setVisibility(enabled ? View.VISIBLE : View.GONE);
-            cursorToggle.setText(enabled ? "Курсор: вкл" : "Курсор: выкл");
+            cursorToggle.setText("Курсор");
             if (enabled) {
                 tvCursor.requestFocus();
                 showMessage("Курсор включён: перемещай стрелками, нажми OK для клика.");
@@ -3694,6 +3725,36 @@ public class MainActivity extends Activity {
     // Warm the next likely details page while the user navigates the list.
     // The click handler reuses this in-flight request instead of starting a
     // second WebView navigation and cancelling the first one.
+    private void applyHomeDetailsToCards(Torrent torrent, TorrentDetails details) {
+        if (torrent == null || details == null) return;
+        String country = "";
+        for (String key : new String[]{"Страна", "Страна производства", "Страна выпуска"}) {
+            String value = details.fields.get(key);
+            if (value != null && !value.trim().isEmpty()) {
+                country = value.trim().split("\\s*[,;/|]\\s*")[0].trim();
+                break;
+            }
+        }
+        String rating = details.kinozalRating == null ? "" : details.kinozalRating.trim();
+        if (rating.isEmpty() || "—".equals(rating)) rating = "Кинозал —";
+        else rating = "Кинозал " + rating;
+        for (HomeSection section : homeSectionsMemory) {
+            for (HomePoster poster : section.items) {
+                if (poster == null || poster.torrent == null
+                        || !torrent.href.equals(poster.torrent.href)) continue;
+                final String countryText = country;
+                final String ratingText = rating;
+                runOnUiThread(() -> {
+                    if (poster.countryOverlay != null) {
+                        poster.countryOverlay.setText(countryText);
+                        poster.countryOverlay.setVisibility(countryText.isEmpty() ? View.GONE : View.VISIBLE);
+                    }
+                    if (poster.ratingOverlay != null) poster.ratingOverlay.setText(ratingText);
+                });
+            }
+        }
+    }
+
     private void prefetchTorrentDetails(Torrent torrent) {
         if (torrent == null || torrent.href == null || torrent.href.trim().isEmpty()
                 || sessionWebView == null || !pendingDetailPrefetchHref.isEmpty()
@@ -3711,6 +3772,7 @@ public class MainActivity extends Activity {
             try {
                 Document doc = Jsoup.parse(html, href);
                 TorrentDetails parsed = parseTorrentDetails(doc, torrent);
+                applyHomeDetailsToCards(torrent, parsed);
                 boolean valid = !parsed.title.trim().isEmpty()
                         && (doc.selectFirst("#main .content") != null
                         || doc.selectFirst("a[href*=download.php]") != null);
@@ -3780,6 +3842,7 @@ public class MainActivity extends Activity {
             try {
                 Document doc = Jsoup.parse(html, href);
                 TorrentDetails details = parseTorrentDetails(doc, t);
+                applyHomeDetailsToCards(t, details);
                 // Do not let a challenge/login/empty document replace a good entry.
                 boolean validDetails = !details.title.trim().isEmpty()
                         && (doc.selectFirst("#main .content") != null
