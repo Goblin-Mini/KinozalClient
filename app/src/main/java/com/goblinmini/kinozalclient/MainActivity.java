@@ -1465,7 +1465,13 @@ public class MainActivity extends Activity {
             }
             org.json.JSONObject socks = root.optJSONObject("socks5");
             if (socks != null) {
-                showMessage("Данные восстановлены. Повторно введите пароль SOCKS5 в настройках прокси.");
+                // The SOCKS password is intentionally not exported. Restore the
+                // endpoint disabled; the user re-enters the password before enabling.
+                String host = socks.optString("host", "");
+                int port = socks.optInt("port", 1080);
+                String user = socks.optString("username", "");
+                socks5Bridge.saveSettings(false, host, port, user, "");
+                showMessage("Данные восстановлены. Введите пароль SOCKS5 и включите прокси в настройках.");
             } else showMessage("Резервная копия восстановлена");
         } catch (Exception e) { showMessage("Не удалось восстановить копию: " + safe(e.getMessage())); }
     }
