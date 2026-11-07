@@ -296,7 +296,11 @@ final class TvHomeChannels {
             if (item == null) continue;
             String title = item.optString("title").trim();
             String href = item.optString("href").trim();
-            if (title.isEmpty() || href.isEmpty()) continue;
+            String image = item.optString("image", "").trim();
+            // Android TV launchers display a large broken placeholder when a
+            // PreviewProgram has no usable poster. Publish only complete cards.
+            if (title.isEmpty() || href.isEmpty()
+                    || !(image.startsWith("https://") || image.startsWith("http://"))) continue;
 
             Intent openIntent = new Intent(activity, MainActivity.class);
             openIntent.setAction(Intent.ACTION_VIEW);
@@ -321,11 +325,8 @@ final class TvHomeChannels {
                     .setWeight(limit - i)
                     .setIntentUri(Uri.parse(openIntent.toUri(Intent.URI_INTENT_SCHEME)))
                     .setInternalProviderId("kinozal:" + channelKey + ":" + href);
-            String image = item.optString("image", "").trim();
-            if (image.startsWith("https://") || image.startsWith("http://")) {
-                program.setPosterArtUri(Uri.parse(image));
-                program.setPosterArtAspectRatio(TvContractCompat.PreviewPrograms.ASPECT_RATIO_2_3);
-            }
+            program.setPosterArtUri(Uri.parse(image));
+            program.setPosterArtAspectRatio(TvContractCompat.PreviewPrograms.ASPECT_RATIO_2_3);
             try {
                 helper.publishPreviewProgram(program.build());
             } catch (Exception e) {
