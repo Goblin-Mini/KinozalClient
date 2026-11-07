@@ -10,8 +10,8 @@ android {
         applicationId = "ru.gm.ktv"
         minSdk = 23
         targetSdk = 28
-        versionCode = 19
-        versionName = "0.5.14"
+        versionCode = 1
+        versionName = "1.0.0"
     }
 
     lint {
