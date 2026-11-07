@@ -32,22 +32,29 @@ final class TvHomeChannels {
     private static final String PREFS = "kinozal_settings";
     private static final String RECENT_KEY = "recently_viewed";
     private static final String[] CHANNEL_KEYS = {
-            "new_movies", "new_series", "top_movies", "top_series", "top_all", "continue"
+            "new_releases", "top_month", "top_ru_series", "top_foreign_series",
+            "top_movies", "top_cartoons", "top_music", "top_games", "continue"
     };
     private static final String[] CHANNEL_NAMES = {
-            "Kinozal — Новинки фильмов",
-            "Kinozal — Новинки сериалов",
-            "Kinozal — Топ фильмов",
-            "Kinozal — Топ сериалов",
-            "Kinozal — Общий топ",
+            "Kinozal — Новинки кино",
+            "Kinozal — Топ раздач месяца",
+            "Kinozal — Топ русские сериалы",
+            "Kinozal — Топ иностранные сериалы",
+            "Kinozal — Топ фильмы",
+            "Kinozal — Топ мульты",
+            "Kinozal — Топ музыка",
+            "Kinozal — Топ игр",
             "Kinozal — Продолжить просмотр"
     };
     private static final String[] FEED_PATHS = {
-            "novinki.php?c=1002",
-            "novinki.php?c=1001",
-            "top.php?c=1002&d=0&f=0&j=&k=0&s=0&t=0",
-            "top.php?c=1001&d=0&f=0&j=&k=0&s=0&t=0",
-            "top.php?c=0&d=0&f=0&j=&k=0&s=0&t=0",
+            "novinki.php",
+            "top.php?j=&t=0&d=0&k=0&f=0&w=2&s=0",
+            "top.php?j=&t=31&d=0&k=0&f=0&w=2&s=0",
+            "top.php?j=&t=32&d=0&k=0&f=0&w=2&s=0",
+            "top.php?j=&t=1&d=0&k=0&f=0&w=2&s=0",
+            "top.php?t=2&d=0&f=0&k=0&j=&s=0&w=2",
+            "top.php?j=&t=4&d=0&k=0&f=0&w=2&s=0",
+            "top.php?j=&t=7&d=0&k=0&f=0&w=2&s=0",
             "local:recently-viewed"
     };
     private static final int REQUEST_BROWSABLE = 7410;
@@ -72,6 +79,14 @@ final class TvHomeChannels {
 
                 PreviewChannelHelper helper = new PreviewChannelHelper(activity);
                 boolean hadChannels = !helper.getAllChannels().isEmpty();
+                String[] obsoleteIds = {"new_movies", "new_series", "top_series", "top_all"};
+                for (String key : obsoleteIds) {
+                    PreviewChannel old = findChannel(helper, "kinozal:" + key);
+                    if (old != null) {
+                        helper.deletePreviewChannel(old.getId());
+                        Log.i(TAG, "Deleted replaced legacy channel " + key);
+                    }
+                }
                 PreviewChannel obsoleteArrivals = findChannel(helper, "kinozal:new_arrivals");
                 if (obsoleteArrivals != null) {
                     helper.deletePreviewChannel(obsoleteArrivals.getId());
@@ -106,7 +121,7 @@ final class TvHomeChannels {
                         channelIds[i] = channel.getId();
                     }
 
-                    JSONArray programs = i == 5 ? readRecentPrograms(activity) : findFeedItems(feeds, FEED_PATHS[i]);
+                    JSONArray programs = i == CHANNEL_KEYS.length - 1 ? readRecentPrograms(activity) : findFeedItems(feeds, FEED_PATHS[i]);
                     replacePrograms(activity, helper, channelIds[i], CHANNEL_KEYS[i], programs);
                 }
 
