@@ -4591,7 +4591,8 @@ public class MainActivity extends Activity {
         onLoaded.run();
 
         String detailsUrl = data.sourcePage;
-        if (detailsUrl == null || detailsUrl.trim().isEmpty()) {
+        String releaseId = getReleaseId(data);
+        if (detailsUrl == null || detailsUrl.trim().isEmpty() || releaseId == null) {
             finishScreenshotLoad(data, onLoaded, null);
             return;
         }
@@ -4604,9 +4605,9 @@ public class MainActivity extends Activity {
             data.screenshotsLoaded = true;
             runOnUiThread(onLoaded);
         };
-        // Never leave the TV screen in a permanent loading state if the shared
-        // WebView request is replaced by another background operation.
-        browserHandler.postDelayed(timeout, 35000);
+        // The Kinozal screenshots tab is populated asynchronously by showtab().
+        // Allow the site's request time to finish, but always release the UI.
+        browserHandler.postDelayed(timeout, 40000);
 
         fetchBrowserPage(detailsUrl, null, html -> {
             if (completed[0]) return;
@@ -4625,7 +4626,7 @@ public class MainActivity extends Activity {
                 return;
             }
 
-            String bridgeName = "KinozalScreenshotBridge";
+            final String bridgeName = "KinozalScreenshotBridge";
             web.removeJavascriptInterface(bridgeName);
             web.addJavascriptInterface(new Object() {
                 @JavascriptInterface
@@ -4654,24 +4655,30 @@ public class MainActivity extends Activity {
 
             String script = "(function(){"
                     + "var box=document.querySelector('#tabs');"
-                    + "var tab=document.querySelector('#tbch1 a[onclick*=\\\"showtab\\\"]');"
                     + "var bridge=window." + bridgeName + ";"
-                    + "if(!box||!tab||!bridge){if(bridge)bridge.onThumbnails('[]');return;}"
-                    + "var done=false,observer=null;"
+                    + "var id=" + releaseId + ";"
+                    + "if(!box||!bridge){if(bridge)bridge.onThumbnails('[]');return;}"
+                    + "var done=false,attempts=0;"
                     + "function collect(){if(done)return;"
-                    + "var imgs=Array.prototype.slice.call(box.querySelectorAll('img'));"
-                    + "var urls=[];imgs.forEach(function(img){"
-                    + "var raw=img.getAttribute('src')||img.getAttribute('data-src')||"
-                    + "img.getAttribute('data-original')||'';"
+                    + "var urls=[];"
+                    + "var imgs=box.querySelectorAll('img');"
+                    + "for(var i=0;i<imgs.length;i++){"
+                    + "var img=imgs[i];"
+                    + "var raw=img.getAttribute('data-src')||img.getAttribute('data-original')||img.getAttribute('src')||'';"
                     + "var u=img.currentSrc||img.src||raw;"
-                    + "if(/^https?:\\/\\//i.test(u)&&urls.indexOf(u)<0)urls.push(u);});"
-                    + "if(urls.length){done=true;if(observer)observer.disconnect();"
-                    + "bridge.onThumbnails(JSON.stringify(urls));}}"
-                    + "observer=new MutationObserver(collect);"
+                    + "if(u&&/^https?:\\/\\//i.test(u)&&urls.indexOf(u)<0)urls.push(u);"
+                    + "}"
+                    + "if(urls.length){done=true;bridge.onThumbnails(JSON.stringify(urls));}"
+                    + "}"
+                    + "var observer=new MutationObserver(collect);"
                     + "observer.observe(box,{childList:true,subtree:true,attributes:true});"
-                    + "tab.click();setTimeout(collect,500);"
-                    + "setTimeout(function(){if(!done){collect();if(!done){done=true;"
-                    + "if(observer)observer.disconnect();bridge.onThumbnails('[]');}}},10000);"
+                    + "try{if(typeof window.showtab==='function'){window.showtab(id,1);}else{"
+                    + "var tab=document.querySelector('#tbch1 a');if(tab)tab.click();}}catch(e){}"
+                    + "var poll=setInterval(function(){attempts++;collect();"
+                    + "if(done||attempts>=50){clearInterval(poll);observer.disconnect();"
+                    + "if(!done){done=true;bridge.onThumbnails('[]');}}"
+                    + "},500);"
+                    + "setTimeout(collect,100);"
                     + "})()";
             web.evaluateJavascript(script, null);
         });
