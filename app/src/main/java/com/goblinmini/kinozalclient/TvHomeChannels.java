@@ -297,10 +297,7 @@ final class TvHomeChannels {
             String title = item.optString("title").trim();
             String href = item.optString("href").trim();
             String image = item.optString("image", "").trim();
-            // Android TV launchers display a large broken placeholder when a
-            // PreviewProgram has no usable poster. Publish only complete cards.
-            if (title.isEmpty() || href.isEmpty()
-                    || !(image.startsWith("https://") || image.startsWith("http://"))) continue;
+            if (title.isEmpty() || href.isEmpty()) continue;
 
             Intent openIntent = new Intent(activity, MainActivity.class);
             openIntent.setAction(Intent.ACTION_VIEW);
@@ -325,7 +322,11 @@ final class TvHomeChannels {
                     .setWeight(limit - i)
                     .setIntentUri(Uri.parse(openIntent.toUri(Intent.URI_INTENT_SCHEME)))
                     .setInternalProviderId("kinozal:" + channelKey + ":" + href);
-            program.setPosterArtUri(Uri.parse(image));
+            Uri posterUri = (image.startsWith("https://") || image.startsWith("http://"))
+                    ? Uri.parse(image)
+                    : Uri.parse("android.resource://" + activity.getPackageName()
+                            + "/" + R.drawable.kinozal_poster_placeholder);
+            program.setPosterArtUri(posterUri);
             program.setPosterArtAspectRatio(TvContractCompat.PreviewPrograms.ASPECT_RATIO_2_3);
             try {
                 helper.publishPreviewProgram(program.build());
