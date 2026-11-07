@@ -1507,11 +1507,6 @@ public class MainActivity extends Activity {
         addSubMenu(categoryGroup, "▧  Российские мульты", "browse.php?c=22");
         addSubMenu(categoryGroup, "▧  Зарубежные мульты", "browse.php?c=21");
         addSubMenu(categoryGroup, "✧  Аниме", "browse.php?c=20");
-        addSubMenu(categoryGroup, "⚑  Спортивные передачи", "browse.php?c=37");
-        addSubMenu(categoryGroup, "▣  Российское ТВ", "browse.php?c=49");
-        addSubMenu(categoryGroup, "▣  Зарубежное ТВ", "browse.php?c=50");
-        addSubMenu(categoryGroup, "♫  Концерты", "browse.php?c=48");
-        addSubMenu(categoryGroup, "▸  Видеоклипы", "browse.php?c=1");
         categoriesButton.setOnClickListener(v -> {
             boolean expand = categoryGroup.getVisibility() != View.VISIBLE;
             categoryGroup.setVisibility(expand ? View.VISIBLE : View.GONE);
