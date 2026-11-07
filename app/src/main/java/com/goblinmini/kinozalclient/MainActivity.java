@@ -196,6 +196,42 @@ public class MainActivity extends Activity {
                 12, TEAL, false);
         note.setPadding(0, dp(8), 0, dp(4));
         panel.addView(note);
+        Button test = button("Проверить подключение");
+        test.setGravity(Gravity.CENTER);
+        LinearLayout.LayoutParams testParams = new LinearLayout.LayoutParams(-1, dp(44));
+        testParams.topMargin = dp(8);
+        panel.addView(test, testParams);
+        TextView testResult = text("Проверка ещё не выполнялась", 12, TEAL, false);
+        testResult.setPadding(0, dp(5), 0, 0);
+        panel.addView(testResult);
+        test.setOnClickListener(v -> {
+            final String testHost = host.getText().toString().trim();
+            final String testUser = username.getText().toString().trim();
+            final String testPassword = password.getText().toString();
+            final int testPort;
+            try { testPort = Integer.parseInt(port.getText().toString().trim()); }
+            catch (Exception e) { testResult.setTextColor(RED); testResult.setText("Укажите корректный порт"); return; }
+            test.setEnabled(false);
+            testResult.setTextColor(TEAL);
+            testResult.setText("Проверка SOCKS5 и авторизации…");
+            io.execute(() -> {
+                try {
+                    socks5Bridge.testConnection(testHost, testPort, testUser, testPassword);
+                    runOnUiThread(() -> {
+                        test.setEnabled(true);
+                        testResult.setTextColor(GOLD);
+                        testResult.setText("✓ SOCKS5 отвечает, авторизация успешна. Для определения страны сохраните настройки и откройте Диагностику.");
+                    });
+                } catch (Exception e) {
+                    String error = safe(e.getMessage());
+                    runOnUiThread(() -> {
+                        test.setEnabled(true);
+                        testResult.setTextColor(RED);
+                        testResult.setText("✕ Ошибка подключения: " + error);
+                    });
+                }
+            });
+        });
         AlertDialog dialog = new AlertDialog.Builder(this).setTitle("SOCKS5").setView(panel)
                 .setNegativeButton("Отмена", null).setPositiveButton("Сохранить", null).create();
         dialog.setOnShowListener(ignored -> {
