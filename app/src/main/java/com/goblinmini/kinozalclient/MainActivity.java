@@ -4019,6 +4019,8 @@ public class MainActivity extends Activity {
         String imdbRating = "—", kinopoiskRating = "—", kinozalRating = "—", kinozalStars = "☆☆☆☆☆☆☆☆☆☆", kinozalVotes = "";
         final java.util.LinkedHashMap<String, String> fields = new java.util.LinkedHashMap<>();
         final java.util.List<String> screenshotThumbs = new java.util.ArrayList<>();
+        boolean screenshotsLoading = false;
+        boolean screenshotsLoaded = false;
     }
 
     // Warm the next likely details page while the user navigates the list.
@@ -4428,7 +4430,11 @@ public class MainActivity extends Activity {
             detailContent.removeAllViews();
             if (active[0] == 2) {
                 if (data.screenshotThumbs.isEmpty()) {
-                    detailContent.addView(text("Скриншоты на странице раздачи не найдены.",
+                    detailContent.addView(text(data.screenshotsLoading
+                            ? "Загрузка скриншотов…"
+                            : data.screenshotsLoaded
+                                ? "Скриншоты на странице раздачи не найдены."
+                                : "Выберите вкладку для загрузки скриншотов.",
                             15, Color.LTGRAY, false));
                 } else {
                     detailContent.addView(text("Скриншоты (" + data.screenshotThumbs.size() + ")",
@@ -4454,7 +4460,8 @@ public class MainActivity extends Activity {
                                     new LinearLayout.LayoutParams(0, dp(190), 1);
                             if (col == 1) imageParams.leftMargin = dp(8);
                             shotRow.addView(preview, imageParams);
-                            loadImageIntoView(data.screenshotThumbs.get(shotIndex), preview);
+                            loadImageIntoView(data.screenshotThumbs.get(shotIndex), preview,
+                                    data.sourcePage == null ? client.getMirror() + "/" : data.sourcePage);
                         }
                         detailContent.addView(shotRow,
                                 new LinearLayout.LayoutParams(-1, dp(198)));
@@ -4518,7 +4525,13 @@ public class MainActivity extends Activity {
                 v.setBackground(shape(focused ? Color.rgb(65, 72, 73) : PANEL, focused ? GOLD : 0)));
         descriptionTab.setOnClickListener(v -> { active[0] = 0; render.run(); });
         technicalTab.setOnClickListener(v -> { active[0] = 1; render.run(); });
-        screenshotsTab.setOnClickListener(v -> { active[0] = 2; render.run(); });
+        screenshotsTab.setOnClickListener(v -> {
+            active[0] = 2;
+            render.run();
+            if (!data.screenshotsLoaded && !data.screenshotsLoading) {
+                loadScreenshotThumbnails(data, render);
+            }
+        });
         jackettTab.setOnClickListener(v -> searchJackett(torrent.title, data.poster));
         render.run();
 
@@ -4558,6 +4571,69 @@ public class MainActivity extends Activity {
         if (data.poster != null && !data.poster.isEmpty()) loadImageIntoView(data.poster, poster);
         watch.requestFocus();
         prefetchInfoHash(data);
+    }
+
+    /**
+     * Kinozal loads the screenshots panel only after showtab(id, 1) is invoked.
+     * Read thumbnail img.src values from the authenticated WebView DOM; do not
+     * store or open the surrounding full-size links.
+     */
+    private void loadScreenshotThumbnails(TorrentDetails data, Runnable onLoaded) {
+        WebView web = sessionWebView;
+        if (web == null) {
+            data.screenshotsLoaded = true;
+            data.screenshotsLoading = false;
+            onLoaded.run();
+            return;
+        }
+        data.screenshotsLoading = true;
+        String bridgeName = "KinozalScreenshotBridge";
+        web.removeJavascriptInterface(bridgeName);
+        web.addJavascriptInterface(new Object() {
+            @JavascriptInterface
+            public void onThumbnails(String json) {
+                runOnUiThread(() -> {
+                    if (!data.screenshotsLoading) return;
+                    data.screenshotThumbs.clear();
+                    try {
+                        org.json.JSONArray urls = new org.json.JSONArray(json == null ? "[]" : json);
+                        for (int i = 0; i < urls.length(); i++) {
+                            String url = resolveDetailImageUrl(urls.optString(i), data.sourcePage);
+                            if (!url.isEmpty() && !data.screenshotThumbs.contains(url)) {
+                                data.screenshotThumbs.add(url);
+                            }
+                        }
+                    } catch (Exception ignored) { }
+                    data.screenshotsLoading = false;
+                    data.screenshotsLoaded = true;
+                    web.removeJavascriptInterface(bridgeName);
+                    onLoaded.run();
+                });
+            }
+        }, bridgeName);
+
+        String script = "(function(){"
+                + "var box=document.querySelector('#tabs');"
+                + "var tab=document.querySelector('#tbch1 a');"
+                + "var bridge=window." + bridgeName + ";"
+                + "if(!box||!tab||!bridge){if(bridge)bridge.onThumbnails('[]');return;}"
+                + "var done=false,observer=null;"
+                + "function collect(){if(done)return;"
+                + "var imgs=Array.prototype.slice.call(box.querySelectorAll("
+                + "'a[href*=\\"fullview\\"] img,a[href*=\\"fastpic\\"] img,"
+                + "img[src*=\\"fastpic\\"],img[data-src*=\\"fastpic\\"]'));"
+                + "var urls=[];imgs.forEach(function(img){var u=img.currentSrc||img.src||"
+                + "img.getAttribute('data-src')||img.getAttribute('data-original')||'';"
+                + "if(/^https?:\\/\\//i.test(u)&&urls.indexOf(u)<0)urls.push(u);});"
+                + "if(urls.length){done=true;if(observer)observer.disconnect();"
+                + "bridge.onThumbnails(JSON.stringify(urls));}}"
+                + "observer=new MutationObserver(collect);"
+                + "observer.observe(box,{childList:true,subtree:true,attributes:true});"
+                + "tab.click();setTimeout(collect,500);"
+                + "setTimeout(function(){if(!done){collect();if(!done){done=true;"
+                + "if(observer)observer.disconnect();bridge.onThumbnails('[]');}}},8000);"
+                + "})()";
+        web.evaluateJavascript(script, null);
     }
 
     private void addDetailField(LinearLayout parent, String key, String value, int column) {
