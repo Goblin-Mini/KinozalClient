@@ -93,6 +93,7 @@ public class MainActivity extends Activity {
     private boolean automaticUpdateCheckScheduled = false;
     private boolean homeCacheDisplayed = false;
     private String homeCacheDiagnostic = "Кэш главной ещё не проверялся";
+    private volatile String exitCountryStatus = "Страна выхода: проверка…";
 
     private volatile String lastBrowserError = "Причина пока не определена";
     private interface BrowserPageCallback { void onPage(String html, String error); }
@@ -152,6 +153,7 @@ public class MainActivity extends Activity {
     }
 
     private void continueStartup(String savedBrowserCookies) {
+        loadExternalIpInfo(null);
         if (savedBrowserCookies != null) restoreBrowserSession(savedBrowserCookies);
         else markStartupCatalogReady();
     }
@@ -712,12 +714,22 @@ public class MainActivity extends Activity {
     private void setHomeProgress(int processed, int total, int displayed) {
         status.setText("Главная · Запросов: " + processed + "/" + total
                 + " · Лент отображено: " + displayed + "/" + total
-                + "\nВерсия: " + getAppVersionName());
+                + "\nВерсия: " + getAppVersionName()
+                + "\n" + exitCountryStatus);
     }
 
     private void setCatalogStatus(String itemType, int count) {
         status.setText(currentTitle + " · Загружено: " + count + " " + itemType
-                + "\nВерсия: " + getAppVersionName());
+                + "\nВерсия: " + getAppVersionName()
+                + "\n" + exitCountryStatus);
+    }
+
+    private void updateSidebarExitCountry() {
+        if (status == null) return;
+        String current = status.getText().toString();
+        int previous = current.lastIndexOf("\nСтрана выхода:");
+        if (previous >= 0) current = current.substring(0, previous);
+        status.setText(current + "\n" + exitCountryStatus);
     }
 
     private String getAppVersionName() {
@@ -1316,7 +1328,7 @@ public class MainActivity extends Activity {
     }
 
     private void loadExternalIpInfo(TextView target) {
-        target.setText("Внешний IP и страна: проверка…");
+        if (target != null) target.setText("Внешний IP и страна: проверка…");
         io.execute(() -> {
             HttpURLConnection connection = null;
             try {
@@ -1348,15 +1360,25 @@ public class MainActivity extends Activity {
                 String codeCountry = json.optString("country_code", "");
                 org.json.JSONObject connectionInfo = json.optJSONObject("connection");
                 String isp = connectionInfo == null ? "" : connectionInfo.optString("isp", "");
+                String countryLine = "Страна выхода: " + country
+                        + (codeCountry.isEmpty() ? "" : " (" + codeCountry + ")");
                 String result = "Маршрут: " + (cfg.enabled ? "SOCKS5" : "напрямую")
                         + (cfg.enabled ? "\\nSOCKS5: подключение активно (" + cfg.host + ":" + cfg.port + ")" : "")
                         + "\\nВнешний IP: " + ip
-                        + "\\nСтрана выхода: " + country + (codeCountry.isEmpty() ? "" : " (" + codeCountry + ")")
+                        + "\\n" + countryLine
                         + (isp.isEmpty() ? "" : "\\nПровайдер: " + isp);
-                runOnUiThread(() -> target.setText(result));
+                runOnUiThread(() -> {
+                    exitCountryStatus = countryLine;
+                    if (target != null) target.setText(result);
+                    updateSidebarExitCountry();
+                });
             } catch (Exception e) {
                 String message = "Не удалось определить внешний IP/страну: " + safe(e.getMessage());
-                runOnUiThread(() -> target.setText(message));
+                runOnUiThread(() -> {
+                    exitCountryStatus = "Страна выхода: не определена";
+                    if (target != null) target.setText(message);
+                    updateSidebarExitCountry();
+                });
             } finally {
                 if (connection != null) connection.disconnect();
             }
