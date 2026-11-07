@@ -4577,7 +4577,9 @@ public class MainActivity extends Activity {
         }
         if (data.poster != null && !data.poster.isEmpty()) loadImageIntoView(data.poster, poster);
         watch.requestFocus();
-        prefetchInfoHash(data);
+        // Keep the authenticated WebView on details.php. InfoHash is fetched
+        // on demand when playback starts; prefetching it here navigates away
+        // from the details DOM and races the screenshots tab loader.
     }
 
     /**
@@ -4590,98 +4592,81 @@ public class MainActivity extends Activity {
         data.screenshotsLoading = true;
         onLoaded.run();
 
-        String detailsUrl = data.sourcePage;
+        WebView web = sessionWebView;
         String releaseId = getReleaseId(data);
-        if (detailsUrl == null || detailsUrl.trim().isEmpty() || releaseId == null) {
+        if (web == null || releaseId == null) {
             finishScreenshotLoad(data, onLoaded, null);
             return;
         }
 
+        final String bridgeName = "KinozalScreenshotBridge";
         final boolean[] completed = {false};
         final Runnable timeout = () -> {
             if (completed[0]) return;
             completed[0] = true;
             data.screenshotsLoading = false;
             data.screenshotsLoaded = true;
+            web.removeJavascriptInterface(bridgeName);
             runOnUiThread(onLoaded);
         };
-        // The Kinozal screenshots tab is populated asynchronously by showtab().
-        // Allow the site's request time to finish, but always release the UI.
-        browserHandler.postDelayed(timeout, 40000);
+        // Poll quickly; ten seconds is a hard ceiling, not a fixed wait.
+        browserHandler.postDelayed(timeout, 10000);
 
-        fetchBrowserPage(detailsUrl, null, html -> {
-            if (completed[0]) return;
-            if (html == null || html.trim().isEmpty()) {
-                completed[0] = true;
-                browserHandler.removeCallbacks(timeout);
-                finishScreenshotLoad(data, onLoaded, null);
-                return;
-            }
-
-            WebView web = sessionWebView;
-            if (web == null) {
-                completed[0] = true;
-                browserHandler.removeCallbacks(timeout);
-                finishScreenshotLoad(data, onLoaded, null);
-                return;
-            }
-
-            final String bridgeName = "KinozalScreenshotBridge";
-            web.removeJavascriptInterface(bridgeName);
-            web.addJavascriptInterface(new Object() {
-                @JavascriptInterface
-                public void onThumbnails(String json) {
-                    runOnUiThread(() -> {
-                        if (completed[0]) return;
-                        completed[0] = true;
-                        browserHandler.removeCallbacks(timeout);
-                        data.screenshotThumbs.clear();
-                        try {
-                            org.json.JSONArray urls = new org.json.JSONArray(json == null ? "[]" : json);
-                            for (int i = 0; i < urls.length(); i++) {
-                                String url = resolveDetailImageUrl(urls.optString(i), data.sourcePage);
-                                if (!url.isEmpty() && !data.screenshotThumbs.contains(url)) {
-                                    data.screenshotThumbs.add(url);
-                                }
+        web.removeJavascriptInterface(bridgeName);
+        web.addJavascriptInterface(new Object() {
+            @JavascriptInterface
+            public void onThumbnails(String json) {
+                runOnUiThread(() -> {
+                    if (completed[0]) return;
+                    completed[0] = true;
+                    browserHandler.removeCallbacks(timeout);
+                    data.screenshotThumbs.clear();
+                    try {
+                        org.json.JSONArray urls = new org.json.JSONArray(json == null ? "[]" : json);
+                        for (int i = 0; i < urls.length(); i++) {
+                            String url = resolveDetailImageUrl(urls.optString(i), data.sourcePage);
+                            if (!url.isEmpty() && !data.screenshotThumbs.contains(url)) {
+                                data.screenshotThumbs.add(url);
                             }
-                        } catch (Exception ignored) { }
-                        data.screenshotsLoading = false;
-                        data.screenshotsLoaded = true;
-                        web.removeJavascriptInterface(bridgeName);
-                        onLoaded.run();
-                    });
-                }
-            }, bridgeName);
+                        }
+                    } catch (Exception ignored) { }
+                    data.screenshotsLoading = false;
+                    data.screenshotsLoaded = true;
+                    web.removeJavascriptInterface(bridgeName);
+                    onLoaded.run();
+                });
+            }
+        }, bridgeName);
 
-            String script = "(function(){"
-                    + "var box=document.querySelector('#tabs');"
-                    + "var bridge=window." + bridgeName + ";"
-                    + "var id=" + releaseId + ";"
-                    + "if(!box||!bridge){if(bridge)bridge.onThumbnails('[]');return;}"
-                    + "var done=false,attempts=0;"
-                    + "function collect(){if(done)return;"
-                    + "var urls=[];"
-                    + "var imgs=box.querySelectorAll('img');"
-                    + "for(var i=0;i<imgs.length;i++){"
-                    + "var img=imgs[i];"
-                    + "var raw=img.getAttribute('data-src')||img.getAttribute('data-original')||img.getAttribute('src')||'';"
-                    + "var u=img.currentSrc||img.src||raw;"
-                    + "if(u&&/^https?:\\/\\//i.test(u)&&urls.indexOf(u)<0)urls.push(u);"
-                    + "}"
-                    + "if(urls.length){done=true;bridge.onThumbnails(JSON.stringify(urls));}"
-                    + "}"
-                    + "var observer=new MutationObserver(collect);"
-                    + "observer.observe(box,{childList:true,subtree:true,attributes:true});"
-                    + "try{if(typeof window.showtab==='function'){window.showtab(id,1);}else{"
-                    + "var tab=document.querySelector('#tbch1 a');if(tab)tab.click();}}catch(e){}"
-                    + "var poll=setInterval(function(){attempts++;collect();"
-                    + "if(done||attempts>=50){clearInterval(poll);observer.disconnect();"
-                    + "if(!done){done=true;bridge.onThumbnails('[]');}}"
-                    + "},500);"
-                    + "setTimeout(collect,100);"
-                    + "})()";
-            web.evaluateJavascript(script, null);
-        });
+        String script = "(function(){"
+                + "var bridge=window." + bridgeName + ";"
+                + "var id=" + releaseId + ";"
+                + "var box=document.querySelector('#tabs');"
+                + "var tab=document.querySelector('#tbch1 a[onclick*=showtab]');"
+                + "if(!bridge||!box||!tab){if(bridge)bridge.onThumbnails('[]');return;}"
+                + "var done=false,tries=0;"
+                + "function collect(){if(done)return;"
+                + "var imgs=box.querySelectorAll('img'),urls=[];"
+                + "for(var i=0;i<imgs.length;i++){"
+                + "var im=imgs[i],raw=im.getAttribute('data-src')||"
+                + "im.getAttribute('data-original')||im.getAttribute('src')||'';"
+                + "if(!raw||raw.indexOf('data:')===0)continue;"
+                + "try{var u=new URL(raw,document.location.href).href;"
+                + "if(/^https?:\\/\\//i.test(u)&&urls.indexOf(u)<0)urls.push(u);}catch(e){}"
+                + "}"
+                + "if(urls.length){done=true;clearInterval(timer);"
+                + "observer.disconnect();bridge.onThumbnails(JSON.stringify(urls));}"
+                + "}"
+                + "var observer=new MutationObserver(collect);"
+                + "observer.observe(box,{childList:true,subtree:true,attributes:true});"
+                + "var timer=setInterval(function(){tries++;collect();"
+                + "if(!done&&tries>=40){done=true;clearInterval(timer);"
+                + "observer.disconnect();bridge.onThumbnails('[]');}},250);"
+                + "try{if(typeof window.showtab==='function')window.showtab(id,1);"
+                + "else tab.click();}catch(e){}"
+                + "collect();"
+                + "})()";
+        web.evaluateJavascript(script, null);
     }
 
     private void finishScreenshotLoad(TorrentDetails data, Runnable onLoaded, String error) {
