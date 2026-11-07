@@ -2850,6 +2850,7 @@ public class MainActivity extends Activity {
         String title = "", poster = "", torrentLink = "", sourcePage = "";
         String imdbRating = "—", kinopoiskRating = "—", kinozalRating = "—", kinozalStars = "☆☆☆☆☆☆☆☆☆☆", kinozalVotes = "";
         final java.util.LinkedHashMap<String, String> fields = new java.util.LinkedHashMap<>();
+        final java.util.List<String> screenshotThumbs = new java.util.ArrayList<>();
     }
 
     private void showTorrent(Torrent t) {
@@ -3140,11 +3141,15 @@ public class MainActivity extends Activity {
         tabs.setOrientation(LinearLayout.HORIZONTAL);
         Button descriptionTab = button("Описание");
         Button technicalTab = button("Техданные");
+        Button screenshotsTab = button("Скриншоты");
         Button jackettTab = button("Другие раздачи");
         tabs.addView(descriptionTab, new LinearLayout.LayoutParams(0, dp(44), 1));
         LinearLayout.LayoutParams technicalParams = new LinearLayout.LayoutParams(0, dp(44), 1);
         technicalParams.leftMargin = dp(6);
         tabs.addView(technicalTab, technicalParams);
+        LinearLayout.LayoutParams screenshotsParams = new LinearLayout.LayoutParams(0, dp(44), 1);
+        screenshotsParams.leftMargin = dp(6);
+        tabs.addView(screenshotsTab, screenshotsParams);
         LinearLayout.LayoutParams jackettParams = new LinearLayout.LayoutParams(0, dp(44), 1);
         jackettParams.leftMargin = dp(6);
         tabs.addView(jackettTab, jackettParams);
@@ -3167,7 +3172,33 @@ public class MainActivity extends Activity {
         final int[] active = {0};
         Runnable render = () -> {
             detailContent.removeAllViews();
-            String[] keys = groups[active[0]];
+            if (active[0] == 2) {
+                if (data.screenshotThumbs.isEmpty()) {
+                    detailContent.addView(text("Загрузка скриншотов…", 15, Color.LTGRAY, false));
+                } else {
+                    for (int i = 0; i < data.screenshotThumbs.size(); i += 2) {
+                        LinearLayout row = new LinearLayout(this);
+                        row.setOrientation(LinearLayout.HORIZONTAL);
+                        for (int j = i; j < Math.min(i + 2, data.screenshotThumbs.size()); j++) {
+                            ImageView shot = new ImageView(this);
+                            shot.setScaleType(ImageView.ScaleType.FIT_CENTER);
+                            shot.setFocusable(false);
+                            shot.setClickable(false);
+                            shot.setBackground(shape(PANEL, 0));
+                            LinearLayout.LayoutParams shotParams = new LinearLayout.LayoutParams(0, dp(142), 1f);
+                            if (j > i) shotParams.leftMargin = dp(8);
+                            shotParams.bottomMargin = dp(8);
+                            row.addView(shot, shotParams);
+                            loadImageIntoView(data.screenshotThumbs.get(j), shot);
+                        }
+                        detailContent.addView(row, new LinearLayout.LayoutParams(-1, -2));
+                    }
+                }
+                screenshotsTab.setBackground(shape(screenshotsTab.hasFocus() ? Color.rgb(65, 72, 73) : PANEL, screenshotsTab.hasFocus() ? GOLD : 0));
+                detailsScroll.scrollTo(0, 0);
+                return;
+            }
+            String[] keys = groups[active[0] == 1 ? 1 : 0];
             boolean any = false;
             int index = 0;
             while (index < keys.length) {
@@ -3208,14 +3239,18 @@ public class MainActivity extends Activity {
             // while the default focus is on Просмотр.
             descriptionTab.setBackground(shape(descriptionTab.hasFocus() ? Color.rgb(65, 72, 73) : PANEL, descriptionTab.hasFocus() ? GOLD : 0));
             technicalTab.setBackground(shape(technicalTab.hasFocus() ? Color.rgb(65, 72, 73) : PANEL, technicalTab.hasFocus() ? GOLD : 0));
+            screenshotsTab.setBackground(shape(screenshotsTab.hasFocus() ? Color.rgb(65, 72, 73) : PANEL, screenshotsTab.hasFocus() ? GOLD : 0));
             detailsScroll.scrollTo(0, 0);
         };
         descriptionTab.setOnFocusChangeListener((v, focused) ->
                 v.setBackground(shape(focused ? Color.rgb(65, 72, 73) : PANEL, focused ? GOLD : 0)));
         technicalTab.setOnFocusChangeListener((v, focused) ->
                 v.setBackground(shape(focused ? Color.rgb(65, 72, 73) : PANEL, focused ? GOLD : 0)));
+        screenshotsTab.setOnFocusChangeListener((v, focused) ->
+                v.setBackground(shape(focused ? Color.rgb(65, 72, 73) : PANEL, focused ? GOLD : 0)));
         descriptionTab.setOnClickListener(v -> { active[0] = 0; render.run(); });
         technicalTab.setOnClickListener(v -> { active[0] = 1; render.run(); });
+        screenshotsTab.setOnClickListener(v -> { active[0] = 2; render.run(); });
         jackettTab.setOnClickListener(v -> searchJackett(torrent.title, data.poster));
         render.run();
 
@@ -3254,6 +3289,74 @@ public class MainActivity extends Activity {
         }
         if (!data.poster.isEmpty()) loadImageIntoView(data.poster, poster);
         watch.requestFocus();
+        loadScreenshotThumbnails(data.sourcePage, data, () -> {
+            if (active[0] == 2 && detailContent.isAttachedToWindow()) render.run();
+        });
+    }
+
+    /**
+     * Ask the authenticated WebView to activate Kinozal's own Screenshots tab.
+     * The site fills #tabs asynchronously; we collect only thumbnail img src
+     * values and never open the linked full-size pages.
+     */
+    private void loadScreenshotThumbnails(String detailsUrl, TorrentDetails data, Runnable onLoaded) {
+        if (detailsUrl == null || detailsUrl.trim().isEmpty() || sessionWebView == null) return;
+        fetchBrowserPage(detailsUrl, null, html -> {
+            WebView web = sessionWebView;
+            if (html == null || html.isEmpty() || web == null) {
+                runOnUiThread(onLoaded);
+                return;
+            }
+            final boolean[] completed = {false};
+            final Runnable timeout = () -> {
+                if (completed[0]) return;
+                completed[0] = true;
+                web.removeJavascriptInterface("KinozalScreenshotsBridge");
+                runOnUiThread(onLoaded);
+            };
+            web.addJavascriptInterface(new Object() {
+                @JavascriptInterface
+                public void onScreenshotsHtml(String fragment) {
+                    runOnUiThread(() -> {
+                        if (completed[0]) return;
+                        completed[0] = true;
+                        browserHandler.removeCallbacks(timeout);
+                        web.removeJavascriptInterface("KinozalScreenshotsBridge");
+                        try {
+                            Document part = Jsoup.parseBodyFragment(fragment == null ? "" : fragment, detailsUrl);
+                            java.util.LinkedHashSet<String> unique = new java.util.LinkedHashSet<>();
+                            for (Element image : part.select("#tabs img, img")) {
+                                String src = image.absUrl("src");
+                                if (src == null || src.trim().isEmpty()) {
+                                    String raw = image.attr("src").trim();
+                                    if (!raw.isEmpty()) src = mirrorUrl(raw, raw);
+                                }
+                                if (src != null && !src.trim().isEmpty()
+                                        && !src.toLowerCase(java.util.Locale.ROOT).contains("poster")) {
+                                    unique.add(src);
+                                }
+                            }
+                            data.screenshotThumbs.clear();
+                            data.screenshotThumbs.addAll(unique);
+                        } catch (Exception ignored) { }
+                        onLoaded.run();
+                    });
+                }
+            }, "KinozalScreenshotsBridge");
+            browserHandler.postDelayed(timeout, 18000);
+            String script = "(function(){try{var box=document.querySelector('#tabs');"
+                    + "var tab=document.querySelector('#tbch1 a');"
+                    + "if(!box||!tab){window.KinozalScreenshotsBridge.onScreenshotsHtml('');return;}"
+                    + "var done=false;var observer=new MutationObserver(function(){"
+                    + "if(done)return;var imgs=box.querySelectorAll('img');"
+                    + "if(imgs.length){done=true;observer.disconnect();"
+                    + "window.KinozalScreenshotsBridge.onScreenshotsHtml(box.innerHTML);}});"
+                    + "observer.observe(box,{childList:true,subtree:true,attributes:true});"
+                    + "tab.click();setTimeout(function(){if(!done){done=true;observer.disconnect();"
+                    + "window.KinozalScreenshotsBridge.onScreenshotsHtml(box.innerHTML);}},2500);"
+                    + "}catch(e){window.KinozalScreenshotsBridge.onScreenshotsHtml('');}})()";
+            web.evaluateJavascript(script, null);
+        });
     }
 
     private void addDetailField(LinearLayout parent, String key, String value, int column) {
