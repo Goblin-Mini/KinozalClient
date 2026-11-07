@@ -4590,22 +4590,38 @@ public class MainActivity extends Activity {
         data.screenshotsLoading = true;
         onLoaded.run();
 
-        // Other features (for example info-hash prefetch) may have navigated the
-        // shared hidden WebView away from details.php. Always restore this
-        // torrent's actual details page before invoking Kinozal's showtab().
         String detailsUrl = data.sourcePage;
         if (detailsUrl == null || detailsUrl.trim().isEmpty()) {
-            data.screenshotsLoading = false;
-            data.screenshotsLoaded = true;
-            onLoaded.run();
+            finishScreenshotLoad(data, onLoaded, null);
             return;
         }
+
+        final boolean[] completed = {false};
+        final Runnable timeout = () -> {
+            if (completed[0]) return;
+            completed[0] = true;
+            data.screenshotsLoading = false;
+            data.screenshotsLoaded = true;
+            runOnUiThread(onLoaded);
+        };
+        // Never leave the TV screen in a permanent loading state if the shared
+        // WebView request is replaced by another background operation.
+        browserHandler.postDelayed(timeout, 35000);
+
         fetchBrowserPage(detailsUrl, null, html -> {
+            if (completed[0]) return;
+            if (html == null || html.trim().isEmpty()) {
+                completed[0] = true;
+                browserHandler.removeCallbacks(timeout);
+                finishScreenshotLoad(data, onLoaded, null);
+                return;
+            }
+
             WebView web = sessionWebView;
-            if (html == null || html.trim().isEmpty() || web == null) {
-                data.screenshotsLoading = false;
-                data.screenshotsLoaded = true;
-                onLoaded.run();
+            if (web == null) {
+                completed[0] = true;
+                browserHandler.removeCallbacks(timeout);
+                finishScreenshotLoad(data, onLoaded, null);
                 return;
             }
 
@@ -4615,7 +4631,9 @@ public class MainActivity extends Activity {
                 @JavascriptInterface
                 public void onThumbnails(String json) {
                     runOnUiThread(() -> {
-                        if (!data.screenshotsLoading) return;
+                        if (completed[0]) return;
+                        completed[0] = true;
+                        browserHandler.removeCallbacks(timeout);
                         data.screenshotThumbs.clear();
                         try {
                             org.json.JSONArray urls = new org.json.JSONArray(json == null ? "[]" : json);
@@ -4657,6 +4675,13 @@ public class MainActivity extends Activity {
                     + "})()";
             web.evaluateJavascript(script, null);
         });
+    }
+
+    private void finishScreenshotLoad(TorrentDetails data, Runnable onLoaded, String error) {
+        data.screenshotsLoading = false;
+        data.screenshotsLoaded = true;
+        if (error != null) lastBrowserError = error;
+        runOnUiThread(onLoaded);
     }
 
     private void addDetailField(LinearLayout parent, String key, String value, int column) {
