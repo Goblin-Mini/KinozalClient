@@ -3115,10 +3115,11 @@ public class MainActivity extends Activity {
 
         TextView externalRatings = text(
                 "IMDb  " + data.imdbRating + "     Кинопоиск  " + data.kinopoiskRating,
-                10, Color.LTGRAY, false);
+                12, Color.LTGRAY, true);
         externalRatings.setGravity(Gravity.CENTER);
         externalRatings.setSingleLine(true);
         externalRatings.setIncludeFontPadding(false);
+        externalRatings.setPadding(0, dp(2), 0, dp(1));
         ratings.addView(externalRatings, new LinearLayout.LayoutParams(-1, -2));
 
         TextView kinozalRating = text("Kinozal  " + data.kinozalRating, 12, TEAL, true);
@@ -3306,7 +3307,22 @@ public class MainActivity extends Activity {
         if (detailsUrl == null || detailsUrl.trim().isEmpty() || sessionWebView == null) return;
         fetchBrowserPage(detailsUrl, null, html -> {
             WebView web = sessionWebView;
-            if (html == null || html.isEmpty() || web == null) {
+            if (html == null || html.isEmpty()) {
+                data.screenshotsLoaded = true;
+                runOnUiThread(onLoaded);
+                return;
+            }
+
+            // Some Kinozal pages already contain the selected screenshots tab
+            // in the HTML response. Parse that response first: the hidden
+            // WebView may have moved on by the time this callback is delivered.
+            if (collectScreenshotUrls(html, detailsUrl, data)) {
+                data.screenshotsLoaded = true;
+                runOnUiThread(onLoaded);
+                return;
+            }
+            if (web == null) {
+                data.screenshotsLoaded = true;
                 runOnUiThread(onLoaded);
                 return;
             }
@@ -3327,21 +3343,7 @@ public class MainActivity extends Activity {
                         browserHandler.removeCallbacks(timeout);
                         web.removeJavascriptInterface("KinozalScreenshotsBridge");
                         try {
-                            Document part = Jsoup.parseBodyFragment(fragment == null ? "" : fragment, detailsUrl);
-                            java.util.LinkedHashSet<String> unique = new java.util.LinkedHashSet<>();
-                            for (Element image : part.select("#tabs img, img")) {
-                                String src = image.absUrl("src");
-                                if (src == null || src.trim().isEmpty()) {
-                                    String raw = image.attr("src").trim();
-                                    if (!raw.isEmpty()) src = mirrorUrl(raw, raw);
-                                }
-                                if (src != null && !src.trim().isEmpty()
-                                        && !src.toLowerCase(java.util.Locale.ROOT).contains("poster")) {
-                                    unique.add(src);
-                                }
-                            }
-                            data.screenshotThumbs.clear();
-                            data.screenshotThumbs.addAll(unique);
+                            collectScreenshotUrls(fragment == null ? "" : fragment, detailsUrl, data);
                         } catch (Exception ignored) { }
                         data.screenshotsLoaded = true;
                         onLoaded.run();
@@ -3362,6 +3364,34 @@ public class MainActivity extends Activity {
                     + "}catch(e){window.KinozalScreenshotsBridge.onScreenshotsHtml('');}})()";
             web.evaluateJavascript(script, null);
         });
+    }
+
+    private boolean collectScreenshotUrls(String html, String pageUrl, TorrentDetails data) {
+        try {
+            Document doc = Jsoup.parse(html == null ? "" : html, pageUrl);
+            Element tabs = doc.selectFirst("#tabs");
+            if (tabs == null) return false;
+            java.util.LinkedHashSet<String> unique = new java.util.LinkedHashSet<>();
+            for (Element image : tabs.select("a:has(img) img, img")) {
+                String raw = image.hasAttr("data-src") ? image.attr("data-src").trim() : image.attr("src").trim();
+                if (raw.isEmpty() || raw.startsWith("data:")) continue;
+                String src = image.absUrl(image.hasAttr("data-src") ? "data-src" : "src");
+                if (src == null || src.trim().isEmpty()) {
+                    try { src = java.net.URI.create(pageUrl).resolve(raw).toString(); }
+                    catch (Exception ignored) { src = ""; }
+                }
+                String lower = src.toLowerCase(java.util.Locale.ROOT);
+                if (!src.isEmpty() && !lower.contains("/poster/") && !lower.endsWith(".gif")) {
+                    unique.add(src);
+                }
+            }
+            if (!unique.isEmpty()) {
+                data.screenshotThumbs.clear();
+                data.screenshotThumbs.addAll(unique);
+                return true;
+            }
+        } catch (Exception ignored) { }
+        return false;
     }
 
     private void addDetailField(LinearLayout parent, String key, String value, int column) {
