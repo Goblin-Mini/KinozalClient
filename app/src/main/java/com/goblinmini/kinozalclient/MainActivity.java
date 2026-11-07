@@ -63,6 +63,10 @@ public class MainActivity extends Activity {
     };
 
     private final ExecutorService io = Executors.newSingleThreadExecutor();
+    // Image cache reads/downloads must not block catalogue parsing or other app I/O.
+    private final ExecutorService imageIo = Executors.newFixedThreadPool(3);
+    // Home refresh is isolated so nine feed requests cannot starve poster loading.
+    private final ExecutorService homeRefreshIo = Executors.newSingleThreadExecutor();
     private KinozalHttpClient client;
     private Socks5ProxyBridge socks5Bridge;
     private DiskCache diskCache;
@@ -474,7 +478,7 @@ public class MainActivity extends Activity {
         final String browserCookies = CookieManager.getInstance().getCookie(client.getMirror());
         // Let the cached screen settle first. Refresh uses native HTTP on the
         // I/O executor; it must never navigate the shared WebView.
-        browserHandler.postDelayed(() -> io.execute(() -> {
+        browserHandler.postDelayed(() -> homeRefreshIo.execute(() -> {
             try {
                 if (browserCookies != null && !browserCookies.isEmpty()) {
                     client.importBrowserCookies(browserCookies);
@@ -960,42 +964,47 @@ public class MainActivity extends Activity {
     }
 
     private void loadImageIntoView(String imageUrl, ImageView target, String referer) {
-        if (imageUrl == null || imageUrl.isEmpty()) return;
-        byte[] cachedImage = diskCache.get("image|" + imageUrl, 0L);
-        if (cachedImage != null) {
-            Bitmap cachedBitmap = BitmapFactory.decodeByteArray(cachedImage, 0, cachedImage.length);
-            if (cachedBitmap != null) { target.setImageBitmap(cachedBitmap); return; }
-        }
-        WebView web = sessionWebView;
-        if (web == null) {
-            loadImageWithHttp(imageUrl, target, referer);
-            return;
-        }
-        String quotedUrl = org.json.JSONObject.quote(imageUrl);
-        String script = "(function(){return fetch(" + quotedUrl + ",{credentials:'include'})"
-                + ".then(function(r){if(!r.ok)throw new Error('HTTP '+r.status);return r.blob();})"
-                + ".then(function(b){return new Promise(function(resolve,reject){var f=new FileReader();"
-                + "f.onloadend=function(){var v=String(f.result||'');resolve(v.substring(v.indexOf(',')+1));};"
-                + "f.onerror=reject;f.readAsDataURL(b);});});})()";
-        web.evaluateJavascript(script, result -> {
-            String encoded = null;
-            try { encoded = new org.json.JSONArray("[" + result + "]").getString(0); }
-            catch (Exception ignored) { }
-            if (encoded == null || encoded.isEmpty() || "null".equals(encoded)) {
-                loadImageWithHttp(imageUrl, target, referer);
-                return;
+        if (imageUrl == null || imageUrl.isEmpty() || target == null) return;
+        // DiskCache.get() performs file I/O. Never call it while building home rows.
+        imageIo.execute(() -> {
+            byte[] cachedImage = diskCache.get("image|" + imageUrl, 0L);
+            if (cachedImage != null && cachedImage.length > 0) {
+                Bitmap cachedBitmap = BitmapFactory.decodeByteArray(cachedImage, 0, cachedImage.length);
+                if (cachedBitmap != null) {
+                    runOnUiThread(() -> { if (target.getParent() != null) target.setImageBitmap(cachedBitmap); });
+                    return;
+                }
             }
-            final String base64 = encoded;
-            io.execute(() -> {
-                try {
-                    byte[] bytes = android.util.Base64.decode(base64, android.util.Base64.DEFAULT);
-                    diskCache.put("image|" + imageUrl, bytes);
-                    Bitmap bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.length);
-                    if (bitmap != null) runOnUiThread(() -> {
-                        if (target.getParent() != null) target.setImageBitmap(bitmap);
+            runOnUiThread(() -> {
+                if (target.getParent() == null) return;
+                WebView web = sessionWebView;
+                if (web == null) { loadImageWithHttp(imageUrl, target, referer); return; }
+                String quotedUrl = org.json.JSONObject.quote(imageUrl);
+                String script = "(function(){return fetch(" + quotedUrl + ",{credentials:'include'})"
+                        + ".then(function(r){if(!r.ok)throw new Error('HTTP '+r.status);return r.blob();})"
+                        + ".then(function(b){return new Promise(function(resolve,reject){var f=new FileReader();"
+                        + "f.onloadend=function(){var v=String(f.result||'');resolve(v.substring(v.indexOf(',')+1));};"
+                        + "f.onerror=reject;f.readAsDataURL(b);});});})()";
+                web.evaluateJavascript(script, result -> {
+                    String encoded = null;
+                    try { encoded = new org.json.JSONArray("[" + result + "]").getString(0); }
+                    catch (Exception ignored) { }
+                    if (encoded == null || encoded.isEmpty() || "null".equals(encoded)) {
+                        loadImageWithHttp(imageUrl, target, referer); return;
+                    }
+                    final String base64 = encoded;
+                    imageIo.execute(() -> {
+                        try {
+                            byte[] bytes = android.util.Base64.decode(base64, android.util.Base64.DEFAULT);
+                            diskCache.put("image|" + imageUrl, bytes);
+                            Bitmap bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.length);
+                            if (bitmap != null) runOnUiThread(() -> {
+                                if (target.getParent() != null) target.setImageBitmap(bitmap);
+                            });
+                            else loadImageWithHttp(imageUrl, target, referer);
+                        } catch (Exception ignored) { loadImageWithHttp(imageUrl, target, referer); }
                     });
-                    else loadImageWithHttp(imageUrl, target, referer);
-                } catch (Exception ignored) { loadImageWithHttp(imageUrl, target, referer); }
+                });
             });
         });
     }
@@ -1005,11 +1014,13 @@ public class MainActivity extends Activity {
     }
 
     private void loadImageWithHttp(String imageUrl, ImageView target, String referer) {
-        io.execute(() -> {
+        if (imageUrl == null || imageUrl.isEmpty() || target == null) return;
+        imageIo.execute(() -> {
             try {
                 byte[] bytes = diskCache.get("image|" + imageUrl, 0L);
-                if (bytes == null) {
+                if (bytes == null || bytes.length == 0) {
                     bytes = client.fetchBytes(imageUrl, "image/*", referer);
+                    if (bytes == null || bytes.length == 0) return;
                     diskCache.put("image|" + imageUrl, bytes);
                 }
                 Bitmap bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.length);
@@ -4074,5 +4085,5 @@ public class MainActivity extends Activity {
     private String safe(String s) { return s == null ? "Ошибка сети" : s; }
 
     @Override public void onBackPressed() { finish(); }
-    @Override protected void onDestroy() { if (socks5Bridge != null) socks5Bridge.stop(); io.shutdownNow(); super.onDestroy(); }
+    @Override protected void onDestroy() { if (socks5Bridge != null) socks5Bridge.stop(); io.shutdownNow(); imageIo.shutdownNow(); homeRefreshIo.shutdownNow(); super.onDestroy(); }
 }
