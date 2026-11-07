@@ -399,12 +399,12 @@ public class MainActivity extends Activity {
         loadInitialCatalog(0);
     }
 
-    private static final String[] HOME_PATHS = {"", "?page=1", "novinki.php", "top.php?c=0&d=0&f=0&j=&k=0&s=0&t=0",
+    private static final String[] HOME_PATHS = {"novinki.php", "top.php?c=0&d=0&f=0&j=&k=0&s=0&t=0",
             "top.php?c=0&d=0&f=0&j=&k=0&s=0&t=0&w=1",
             "top.php?c=0&d=0&f=0&j=&k=0&s=0&t=0&w=2",
             "top.php?j=%D0%BB%D1%83%D1%87%D1%88%D0%B8%D0%B9%20%D1%84%D0%B8%D0%BB%D1%8C%D0%BC%20%D0%9E%D1%81%D0%BA%D0%B0%D1%80",
             "top.php?j=Netflix", "top.php?j=HBO", "top.php?j=Walt%20Disney%20Pictures", "top.php?j=Marvel"};
-    private static final String[] HOME_TITLES = {"Новые поступления", "Новые поступления", "Новинки", "Топ раздач", "Топ недели", "Топ месяца",
+    private static final String[] HOME_TITLES = {"Новинки", "Топ раздач", "Топ недели", "Топ месяца",
             "Топ Оскар", "Топ Netflix", "Топ HBO", "Топ Walt Disney", "Топ Marvel"};
 
     private void loadInitialCatalog(int startupRetry) {
@@ -610,7 +610,6 @@ public class MainActivity extends Activity {
     private void loadHomeSectionsInBrowser(String[] paths, String[] titles, int index,
             List<HomeSection> sections, int retry) {
         if (index >= paths.length) {
-            mergeNewArrivalsHomePages(sections);
             removeHomeDuplicates(sections);
             List<HomeSection> channelSnapshot = new ArrayList<>(sections);
             io.execute(() -> saveHomeModel(channelSnapshot));
@@ -696,11 +695,9 @@ public class MainActivity extends Activity {
             "novinki.php?c=1001",
             "top.php?c=1002&d=0&f=0&j=&k=0&s=0&t=0",
             "top.php?c=1001&d=0&f=0&j=&k=0&s=0&t=0",
-            "",
-            "?page=1"
     };
     private static final String[] TV_CHANNEL_TITLES = {
-            "Новинки фильмов", "Новинки сериалов", "Топ фильмов", "Топ сериалов", "Новые поступления", "Новые поступления"
+            "Новинки фильмов", "Новинки сериалов", "Топ фильмов", "Топ сериалов"
     };
     private boolean tvChannelsRefreshInProgress;
 
