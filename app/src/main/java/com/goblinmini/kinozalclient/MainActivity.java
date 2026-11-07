@@ -3896,55 +3896,27 @@ public class MainActivity extends Activity {
 
 
     private void addMagnetToExternalTorrServer(String baseUrl, String magnet, TorrentDetails data) {
-        io.execute(() -> {
-            HttpURLConnection connection = null;
+        // TorrServer's /stream endpoint accepts the magnet itself and starts the stream.
+        // Merely POSTing action=add to /torrents only queues the torrent; it does not play it.
+        try {
+            Uri streamUri = Uri.parse(baseUrl + "/stream").buildUpon()
+                    .appendQueryParameter("link", magnet)
+                    .appendQueryParameter("play", "true")
+                    .appendQueryParameter("save", "true")
+                    .appendQueryParameter("title", data.title == null ? "" : data.title)
+                    .appendQueryParameter("poster", data.poster == null ? "" : data.poster)
+                    .build();
+            Intent intent = new Intent(Intent.ACTION_VIEW);
+            intent.setDataAndType(streamUri, "video/*");
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
             try {
-                URL endpoint = new URL(baseUrl + "/torrents");
-                connection = (HttpURLConnection) endpoint.openConnection();
-                connection.setRequestMethod("POST");
-                connection.setConnectTimeout(10000);
-                connection.setReadTimeout(20000);
-                connection.setDoOutput(true);
-                connection.setRequestProperty("Content-Type", "application/json; charset=utf-8");
-                connection.setRequestProperty("Accept", "application/json");
-                org.json.JSONObject body = new org.json.JSONObject();
-                body.put("action", "add");
-                body.put("link", magnet);
-                body.put("title", data.title == null ? "" : data.title);
-                body.put("poster", data.poster == null ? "" : data.poster);
-                body.put("save_to_db", true);
-                byte[] payload = body.toString().getBytes(StandardCharsets.UTF_8);
-                connection.setFixedLengthStreamingMode(payload.length);
-                try (java.io.OutputStream out = connection.getOutputStream()) {
-                    out.write(payload);
-                    out.flush();
-                }
-                int code = connection.getResponseCode();
-                java.io.InputStream stream = code >= 200 && code < 300
-                        ? connection.getInputStream() : connection.getErrorStream();
-                StringBuilder response = new StringBuilder();
-                if (stream != null) {
-                    try (java.io.BufferedReader reader = new java.io.BufferedReader(
-                            new java.io.InputStreamReader(stream, StandardCharsets.UTF_8))) {
-                        String line;
-                        while ((line = reader.readLine()) != null) response.append(line);
-                    }
-                }
-                if (code < 200 || code >= 300) throw new java.io.IOException("HTTP " + code);
-                String answer = response.toString().trim();
-                if (answer.startsWith("{")) {
-                    org.json.JSONObject json = new org.json.JSONObject(answer);
-                    if (json.has("error") && !json.isNull("error"))
-                        throw new java.io.IOException(json.optString("error"));
-                }
-                runOnUiThread(() -> showMessage("Magnet отправлен на внешний TorrServe"));
+                startActivity(intent);
             } catch (Exception e) {
-                String error = safe(e.getMessage());
-                runOnUiThread(() -> showMessage("Не удалось добавить раздачу на внешний TorrServe: " + error));
-            } finally {
-                if (connection != null) connection.disconnect();
+                showMessage("Не найден видеоплеер для потока TorrServer. Установите VLC или другой плеер.");
             }
-        });
+        } catch (Exception e) {
+            showMessage("Не удалось открыть поток удалённого TorrServer: " + safe(e.getMessage()));
+        }
     }
 
     private void startMagnetWebViewFetch(TorrentDetails data, WebView web, int retry) {
