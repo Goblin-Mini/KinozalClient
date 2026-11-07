@@ -1095,24 +1095,36 @@ public class MainActivity extends Activity {
         addMenu("★", "Избранное", () -> showFavorites());
         addMenu("◷", "Недавно смотрели", () -> showRecentlyViewed());
         addMenu("⚙", "Настройки", () -> showSettings());
+        LinearLayout diagnosticsCard = new LinearLayout(this);
+        diagnosticsCard.setOrientation(LinearLayout.VERTICAL);
+        diagnosticsCard.setGravity(Gravity.CENTER);
+        android.graphics.drawable.GradientDrawable diagnosticsBackground =
+                new android.graphics.drawable.GradientDrawable();
+        diagnosticsBackground.setColor(Color.rgb(28, 34, 39));
+        diagnosticsBackground.setCornerRadius(dp(12));
+        diagnosticsCard.setBackground(diagnosticsBackground);
+        diagnosticsCard.setPadding(dp(10), dp(10), dp(10), dp(10));
+        LinearLayout.LayoutParams diagnosticsCardParams =
+                new LinearLayout.LayoutParams(-1, ViewGroup.LayoutParams.WRAP_CONTENT);
+        diagnosticsCardParams.topMargin = dp(8);
+        diagnosticsCardParams.leftMargin = dp(2);
+        diagnosticsCardParams.rightMargin = dp(2);
         status = text("Подключение…", 11, TEAL, false);
         status.setGravity(Gravity.CENTER);
         status.setLineSpacing(dp(2), 1f);
-        LinearLayout.LayoutParams statusParams = new LinearLayout.LayoutParams(-1, dp(44));
-        statusParams.topMargin = dp(6);
-        sidebar.addView(status, statusParams);
-        exitCountryView = text(exitCountryStatus, 12, TEAL, true);
+        status.setMaxLines(2);
+        diagnosticsCard.addView(status, new LinearLayout.LayoutParams(-1, ViewGroup.LayoutParams.WRAP_CONTENT));
+        exitCountryView = text(exitCountryStatus, 11, TEAL, true);
         exitCountryView.setGravity(Gravity.CENTER);
         exitCountryView.setMaxLines(2);
-        exitCountryView.setPadding(dp(4), dp(4), dp(4), dp(4));
-        LinearLayout.LayoutParams countryParams = new LinearLayout.LayoutParams(-1, dp(42));
-        countryParams.topMargin = dp(2);
-        sidebar.addView(exitCountryView, countryParams);
-        TextView appVersionView = text("Версия 0.5.14", 10, TEAL, true);
+        exitCountryView.setPadding(dp(2), dp(2), dp(2), dp(2));
+        diagnosticsCard.addView(exitCountryView, new LinearLayout.LayoutParams(-1, ViewGroup.LayoutParams.WRAP_CONTENT));
+        TextView appVersionView = text("Версия " + getAppVersionName(), 10, TEAL, true);
         appVersionView.setGravity(Gravity.CENTER);
         appVersionView.setSingleLine(true);
-        appVersionView.setPadding(dp(2), dp(2), dp(2), dp(2));
-        sidebar.addView(appVersionView, new LinearLayout.LayoutParams(-1, dp(22)));
+        appVersionView.setPadding(dp(2), dp(3), dp(2), 0);
+        diagnosticsCard.addView(appVersionView, new LinearLayout.LayoutParams(-1, ViewGroup.LayoutParams.WRAP_CONTENT));
+        sidebar.addView(diagnosticsCard, diagnosticsCardParams);
 
         heading = text("Главная", 25, GOLD, true);
         LinearLayout.LayoutParams headingParams = new LinearLayout.LayoutParams(-1, dp(42));
@@ -1256,12 +1268,14 @@ public class MainActivity extends Activity {
         restore.setTextSize(13);
         backup.setGravity(Gravity.CENTER);
         restore.setGravity(Gravity.CENTER);
-        backupRow.addView(backup, new LinearLayout.LayoutParams(0, -1, 1f));
+        LinearLayout.LayoutParams backupParams = new LinearLayout.LayoutParams(0, -1, 1f);
+        backupParams.rightMargin = dp(4);
+        backupRow.addView(backup, backupParams);
         LinearLayout.LayoutParams restoreParams = new LinearLayout.LayoutParams(0, -1, 1f);
-        restoreParams.leftMargin = dp(8);
+        restoreParams.leftMargin = dp(4);
         backupRow.addView(restore, restoreParams);
-        // Keep backup actions immediately below the Jackett search, in the same two-column row.
-        panel.addView(backupRow);
+        // Keep backup actions evenly spaced in one two-column row.
+        panel.addView(backupRow, backupRowParams);
         for (Button action : new Button[]{about, close}) {
             action.setTextSize(15);
             action.setGravity(Gravity.CENTER);
