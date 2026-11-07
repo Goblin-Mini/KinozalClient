@@ -72,6 +72,7 @@ public class MainActivity extends Activity {
     private TextView settingsConnectionInfo;
     private TextView settingsCategoryInfo;
     private TextView settingsCountryInfo;
+    private int lastLoadedTorrentCount = 0;
     private String activeTorrentDetailsHref = "";
     private LinearLayout root, sidebar, content, list, menuItems;
     private TextView heading, status;
@@ -229,7 +230,7 @@ public class MainActivity extends Activity {
                     runOnUiThread(() -> {
                         test.setEnabled(true);
                         testResult.setTextColor(GOLD);
-                        testResult.setText("✓ SOCKS5 отвечает, авторизация успешна. Для определения страны сохраните настройки и откройте Диагностику.");
+                        testResult.setText("✓ SOCKS5 отвечает, авторизация успешна. Страна подключения отображается в настройках.");
                     });
                 } catch (Exception e) {
                     String error = safe(e.getMessage());
@@ -735,6 +736,7 @@ public class MainActivity extends Activity {
     }
 
     private void updateSettingsCategoryInfo(int count) {
+        lastLoadedTorrentCount = count;
         if (settingsCategoryInfo != null) {
             settingsCategoryInfo.setText(currentTitle + " — загружено " + count + " раздач");
         }
@@ -1265,7 +1267,7 @@ public class MainActivity extends Activity {
         settingsConnectionInfo = text("Подключение к Kinozal…", 12, TEAL, false);
         settingsConnectionInfo.setPadding(dp(4), dp(3), dp(4), dp(3));
         left.addView(settingsConnectionInfo);
-        settingsCategoryInfo = text(currentTitle + " — загружено 0 раздач", 12, TEAL, false);
+        settingsCategoryInfo = text(currentTitle + " — загружено " + lastLoadedTorrentCount + " раздач", 12, TEAL, false);
         settingsCategoryInfo.setPadding(dp(4), dp(3), dp(4), dp(3));
         left.addView(settingsCategoryInfo);
         settingsCountryInfo = text("Страна подключения: определяется…", 12, TEAL, false);
