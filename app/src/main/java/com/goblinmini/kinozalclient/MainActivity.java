@@ -1056,6 +1056,7 @@ public class MainActivity extends Activity {
         horizontal.setHorizontalScrollBarEnabled(false);
         horizontal.setFillViewport(false);
         horizontal.setTag("home-row:" + section.path);
+        horizontal.setOnScrollChangeListener((View v, int x, int y, int oldX, int oldY) -> scheduleVisibleHomePosterLoad());
         LinearLayout strip = new LinearLayout(this);
         strip.setOrientation(LinearLayout.HORIZONTAL);
 
@@ -1107,7 +1108,6 @@ public class MainActivity extends Activity {
         }
         list.addView(sectionTitle, titleParams);
         list.addView(horizontal, rowParams);
-        horizontal.setOnScrollChangeListener((View v, int x, int y, int oldX, int oldY) -> scheduleVisibleHomePosterLoad());
         horizontal.post(this::scheduleVisibleHomePosterLoad);
     }
 
