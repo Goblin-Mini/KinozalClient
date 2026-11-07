@@ -712,7 +712,7 @@ public class MainActivity extends Activity {
 
     private void setHomeProgress(int processed, int total, int displayed) {
         status.setText("Главная · Запросов: " + processed + "/" + total
-                + " · Лент отображено: " + displayed + "/" + total
+                + "\nЛент отображено: " + displayed + "/" + total
                 + "\nВерсия: " + getAppVersionName());
     }
 
@@ -1112,7 +1112,7 @@ public class MainActivity extends Activity {
         status = text("Подключение…", 11, TEAL, false);
         status.setGravity(Gravity.CENTER);
         status.setLineSpacing(dp(2), 1f);
-        status.setMaxLines(2);
+        status.setMaxLines(3);
         diagnosticsCard.addView(status, new LinearLayout.LayoutParams(-1, ViewGroup.LayoutParams.WRAP_CONTENT));
         exitCountryView = text(exitCountryStatus, 11, TEAL, true);
         exitCountryView.setGravity(Gravity.CENTER);
