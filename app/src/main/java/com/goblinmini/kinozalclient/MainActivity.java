@@ -3305,14 +3305,13 @@ public class MainActivity extends Activity {
                         if (statusCode >= 200 && statusCode < 300 && base64 != null && !base64.isEmpty()) {
                             try {
                                 byte[] bytes = android.util.Base64.decode(base64, android.util.Base64.DEFAULT);
-                                deliverTorrentBytes(data, bytes);
+                                deliverMagnetFromTorrentBytes(data, bytes);
                             } catch (Exception e) {
-                                showMessage("Не удалось прочитать торрент: " + safe(e.getMessage()));
+                                showMessage("Не удалось сформировать magnet: " + safe(e.getMessage()));
                             }
                         } else {
-                            // Keep the native retry as a fallback, but do not silently
-                            // treat the unresolved JS Promise as a successful response.
-                            downloadTorrentNative(data);
+                            // Retry the authenticated download natively, then build the magnet.
+                            downloadTorrentNativeForPlayback(data);
                         }
                     });
                 }
@@ -3329,7 +3328,7 @@ public class MainActivity extends Activity {
                     + ".catch(function(e){window.KinozalTorrentBridge.onTorrentResult(0,'',String(e));});})()";
             web.evaluateJavascript(script, null);
         } else {
-            downloadTorrentNative(data);
+            downloadTorrentNativeForPlayback(data);
         }
     }
 
@@ -3415,6 +3414,39 @@ public class MainActivity extends Activity {
                 + ".catch(function(e){window.KinozalDownloadBridge.onTorrentDownloadResult(0,'',String(e));});"
                 + "}catch(e){window.KinozalDownloadBridge.onTorrentDownloadResult(0,'',String(e));}})()";
         web.evaluateJavascript(script, null);
+    }
+
+    private void downloadTorrentNativeForPlayback(TorrentDetails data) {
+        io.execute(() -> {
+            try {
+                String browserCookies = CookieManager.getInstance().getCookie(client.getMirror());
+                if (browserCookies != null && !browserCookies.isEmpty()) {
+                    client.importBrowserCookies(browserCookies);
+                }
+                byte[] bytes = client.fetchBytes(data.torrentLink,
+                        "application/x-bittorrent,application/octet-stream,*/*",
+                        data.sourcePage == null || data.sourcePage.isEmpty()
+                                ? client.getMirror() + "/" : data.sourcePage);
+                deliverMagnetFromTorrentBytes(data, bytes);
+            } catch (Exception e) {
+                runOnUiThread(() -> showMessage("Не удалось получить magnet: " + safe(e.getMessage())));
+            }
+        });
+    }
+
+    private void deliverMagnetFromTorrentBytes(TorrentDetails data, byte[] bytes) throws Exception {
+        String magnet = TorrentMagnetBuilder.build(bytes, data.title);
+        Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(magnet));
+        intent.setPackage("ru.yourok.torrserve");
+        intent.putExtra("poster", data.poster == null ? "" : data.poster);
+        intent.putExtra("title", data.title == null ? "" : data.title);
+        runOnUiThread(() -> {
+            try {
+                startActivity(intent);
+            } catch (Exception e) {
+                showMessage("Не удалось открыть magnet в TorrServe: " + safe(e.getMessage()));
+            }
+        });
     }
 
     private void downloadTorrentNative(TorrentDetails data) {
