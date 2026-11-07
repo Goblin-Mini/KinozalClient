@@ -3292,44 +3292,79 @@ public class MainActivity extends Activity {
             return;
         }
 
-        // Download through the same WebView session that opened the details page.
-        // This preserves Cloudflare/session cookies and the real details-page Referer.
         WebView web = sessionWebView;
-        if (web != null) {
-            // evaluateJavascript does not await a returned Promise. Use a JS bridge
-            // so the response is delivered only after the authenticated fetch finishes.
-            web.addJavascriptInterface(new Object() {
-                @JavascriptInterface
-                public void onTorrentResult(int statusCode, String base64, String error) {
-                    runOnUiThread(() -> {
-                        if (statusCode >= 200 && statusCode < 300 && base64 != null && !base64.isEmpty()) {
-                            try {
-                                byte[] bytes = android.util.Base64.decode(base64, android.util.Base64.DEFAULT);
-                                deliverMagnetFromTorrentBytes(data, bytes);
-                            } catch (Exception e) {
-                                showMessage("Не удалось сформировать magnet: " + safe(e.getMessage()));
-                            }
-                        } else {
-                            // Retry the authenticated download natively, then build the magnet.
-                            downloadTorrentNativeForPlayback(data);
-                        }
-                    });
-                }
-            }, "KinozalTorrentBridge");
-            String url = org.json.JSONObject.quote(data.torrentLink);
-            String script = "(function(){fetch(" + url
-                    + ",{credentials:'include',redirect:'follow',cache:'no-store'})"
-                    + ".then(function(r){if(!r.ok){window.KinozalTorrentBridge.onTorrentResult(r.status,'','HTTP '+r.status);return;}"
-                    + "return r.blob().then(function(blob){var reader=new FileReader();"
-                    + "reader.onloadend=function(){var value=String(reader.result||'');"
-                    + "window.KinozalTorrentBridge.onTorrentResult(r.status,value.substring(value.indexOf(',')+1),'');};"
-                    + "reader.onerror=function(){window.KinozalTorrentBridge.onTorrentResult(0,'','FileReader error');};"
-                    + "reader.readAsDataURL(blob);});})"
-                    + ".catch(function(e){window.KinozalTorrentBridge.onTorrentResult(0,'',String(e));});})()";
-            web.evaluateJavascript(script, null);
-        } else {
+        if (web == null) {
             downloadTorrentNativeForPlayback(data);
+            return;
         }
+
+        // On the first visit the hidden WebView can still be finishing a
+        // catalogue/details navigation. Explicitly establish the detail-page
+        // context before fetching download.php, just as the file-download path does.
+        String detailsPage = data.sourcePage;
+        if (detailsPage == null || detailsPage.trim().isEmpty()) {
+            detailsPage = data.torrentLink;
+        }
+        fetchBrowserPage(detailsPage, null, html -> {
+            if (html == null || html.isEmpty()) {
+                downloadTorrentNativeForPlayback(data);
+                return;
+            }
+            startMagnetWebViewFetch(data, web, 0);
+        });
+    }
+
+    private void startMagnetWebViewFetch(TorrentDetails data, WebView web, int retry) {
+        final boolean[] completed = {false};
+        final Runnable fallback = () -> {
+            if (completed[0]) return;
+            completed[0] = true;
+            downloadTorrentNativeForPlayback(data);
+        };
+        final Runnable timeout = fallback;
+        browserHandler.postDelayed(timeout, 20000);
+
+        web.addJavascriptInterface(new Object() {
+            @JavascriptInterface
+            public void onMagnetTorrentResult(int statusCode, String base64, String error) {
+                runOnUiThread(() -> {
+                    if (completed[0]) return;
+                    if (statusCode >= 200 && statusCode < 300
+                            && base64 != null && !base64.isEmpty()) {
+                        try {
+                            byte[] bytes = android.util.Base64.decode(
+                                    base64, android.util.Base64.DEFAULT);
+                            if (bytes.length >= 20 && bytes[0] == 'd') {
+                                completed[0] = true;
+                                browserHandler.removeCallbacks(timeout);
+                                deliverMagnetFromTorrentBytes(data, bytes);
+                                return;
+                            }
+                        } catch (Exception ignored) { }
+                    }
+                    browserHandler.removeCallbacks(timeout);
+                    if (retry == 0) {
+                        // Retry once after a transient first-request/session race.
+                        startMagnetWebViewFetch(data, web, 1);
+                    } else {
+                        fallback.run();
+                    }
+                });
+            }
+        }, "KinozalMagnetBridge");
+
+        String url = org.json.JSONObject.quote(data.torrentLink);
+        String script = "(function(){try{fetch(" + url
+                + ",{credentials:'include',redirect:'follow',cache:'no-store'})"
+                + ".then(function(r){if(!r.ok){window.KinozalMagnetBridge.onMagnetTorrentResult(r.status,'','HTTP '+r.status);return;}"
+                + "return r.blob().then(function(blob){var reader=new FileReader();"
+                + "reader.onloadend=function(){var value=String(reader.result||'');"
+                + "window.KinozalMagnetBridge.onMagnetTorrentResult(r.status,value.substring(value.indexOf(',')+1),'');};"
+                + "reader.onerror=function(){window.KinozalMagnetBridge.onMagnetTorrentResult(0,'','FileReader error');};"
+                + "reader.readAsDataURL(blob);});})"
+                + ".catch(function(e){window.KinozalMagnetBridge.onMagnetTorrentResult(0,'',String(e));});"
+                + "}catch(e){window.KinozalMagnetBridge.onMagnetTorrentResult(0,'',String(e));}})()";
+        web.evaluateJavascript(script, null);
     }
 
     private void downloadTorrentFile(TorrentDetails data) {
