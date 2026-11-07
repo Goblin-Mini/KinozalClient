@@ -1239,11 +1239,8 @@ public class MainActivity extends Activity {
     }
 
     private void showDiagnostics() {
-        long used = diskCache.getSizeBytes();
         long limit = diskCache.getMaxBytes();
-        double usedMb = used / (1024d * 1024d);
         double limitMb = limit / (1024d * 1024d);
-        double percent = limit > 0 ? used * 100d / limit : 0d;
 
         LinearLayout panel = new LinearLayout(this);
         panel.setOrientation(LinearLayout.VERTICAL);
@@ -1253,39 +1250,59 @@ public class MainActivity extends Activity {
         TextView networkInfo = text("Внешний IP и страна: проверка…", 14, GOLD, false);
         networkInfo.setLineSpacing(dp(4), 1f);
         panel.addView(networkInfo);
-        TextView cacheInfo = text(
-                "Дисковый кэш Kinozal\\n"
-                + String.format(java.util.Locale.ROOT, "Занято: %.2f МБ из %.0f МБ (%.1f%%)\\n",
-                        usedMb, limitMb, percent)
-                + String.format(java.util.Locale.ROOT, "Файлов в кэше: %d\\n", diskCache.getEntryCount())
-                + "Расположение: cache/kinozal_cache\\n"
-                + homeCacheDiagnostic,
-                15, Color.WHITE, false);
+        TextView cacheInfo = text("", 15, Color.WHITE, false);
         cacheInfo.setLineSpacing(dp(5), 1f);
         LinearLayout.LayoutParams cacheParams = new LinearLayout.LayoutParams(-1, -2);
         cacheParams.topMargin = dp(12);
         panel.addView(cacheInfo, cacheParams);
+
+        Runnable updateCacheInfo = () -> {
+            long current = diskCache.getSizeBytes();
+            cacheInfo.setText("Дисковый кэш Kinozal\n"
+                    + String.format(java.util.Locale.ROOT, "Занято: %.2f МБ из %.0f МБ (%.1f%%)\n",
+                            current / (1024d * 1024d), limitMb,
+                            limit > 0 ? current * 100d / limit : 0d)
+                    + String.format(java.util.Locale.ROOT, "Файлов в кэше: %d\n", diskCache.getEntryCount())
+                    + "Расположение: cache/kinozal_cache\n"
+                    + homeCacheDiagnostic);
+        };
+        updateCacheInfo.run();
 
         Button refresh = button("Обновить данные");
         refresh.setGravity(Gravity.CENTER);
         LinearLayout.LayoutParams refreshParams = new LinearLayout.LayoutParams(-1, dp(44));
         refreshParams.topMargin = dp(14);
         panel.addView(refresh, refreshParams);
+
+        Button clearCache = button("Очистить кэш");
+        clearCache.setGravity(Gravity.CENTER);
+        LinearLayout.LayoutParams clearParams = new LinearLayout.LayoutParams(-1, dp(44));
+        clearParams.topMargin = dp(8);
+        panel.addView(clearCache, clearParams);
+
         AlertDialog dialog = new AlertDialog.Builder(this)
                 .setTitle("Диагностика")
                 .setView(panel)
                 .setPositiveButton("Закрыть", null)
                 .create();
         refresh.setOnClickListener(v -> {
-            long current = diskCache.getSizeBytes();
-            cacheInfo.setText("Дисковый кэш Kinozal\\n"
-                    + String.format(java.util.Locale.ROOT, "Занято: %.2f МБ из %.0f МБ (%.1f%%)\\n",
-                            current / (1024d * 1024d), limitMb, limit > 0 ? current * 100d / limit : 0d)
-                    + String.format(java.util.Locale.ROOT, "Файлов в кэше: %d\\n", diskCache.getEntryCount())
-                    + "Расположение: cache/kinozal_cache\\n"
-                    + homeCacheDiagnostic);
+            updateCacheInfo.run();
             loadExternalIpInfo(networkInfo);
-        });;
+        });
+        clearCache.setOnClickListener(v -> new AlertDialog.Builder(this)
+                .setTitle("Очистить кэш?")
+                .setMessage("Будут удалены сохранённые страницы и постеры Kinozal. Авторизация, cookies и настройки SOCKS5 останутся без изменений.")
+                .setNegativeButton("Отмена", null)
+                .setPositiveButton("Очистить", (confirm, which) -> {
+                    int deleted = diskCache.clear();
+                    pageCache.clear();
+                    if (sessionWebView != null) sessionWebView.clearCache(true);
+                    homeCacheDisplayed = false;
+                    homeCacheDiagnostic = "Главная: кэш очищен";
+                    updateCacheInfo.run();
+                    showMessage("Кэш очищен. Удалено файлов: " + deleted);
+                })
+                .show());
         dialog.show();
         if (dialog.getWindow() != null) {
             dialog.getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(BG));
