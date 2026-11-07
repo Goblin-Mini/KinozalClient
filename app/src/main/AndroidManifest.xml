@@ -12,7 +12,7 @@
         android:icon="@mipmap/ic_launcher"
         android:banner="@drawable/kinozal_banner"
         android:theme="@style/AppTheme"
-        android:usesCleartextTraffic="false">
+        android:usesCleartextTraffic="true">
         <provider
             android:name=".TorrentFileProvider"
             android:authorities="com.goblinmini.kinozalclient.torrentprovider"
