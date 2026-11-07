@@ -913,11 +913,9 @@ public class MainActivity extends Activity {
             } else {
                 item.torrent.size = item.torrent.seeds = item.torrent.leeches = "—";
             }
-            // Home poster rows must never contain blank poster tiles. Some Kinozal
-            // home-page links are text-only or carry lazy placeholders; ignore them
-            // instead of rendering empty cards in the app and Android TV channels.
-            if (image == null || image.trim().isEmpty()
-                    || !(image.startsWith("http://") || image.startsWith("https://"))) continue;
+            // Keep releases even when Kinozal has no poster or lazy loading has not
+            // produced a usable URL. The supplied Kinozal logo is shown as fallback.
+            if (image == null || !(image.startsWith("http://") || image.startsWith("https://"))) image = "";
             item.imageUrl = image;
             item.torrent.poster = image;
             boolean duplicate = false;
@@ -1218,6 +1216,7 @@ public class MainActivity extends Activity {
             ImageView poster = new ImageView(this);
             poster.setScaleType(ImageView.ScaleType.CENTER_CROP);
             poster.setBackground(shape(Color.rgb(40, 45, 49), 0));
+            poster.setImageResource(R.drawable.kinozal_poster_placeholder);
             card.addView(poster, new LinearLayout.LayoutParams(dp(126), dp(178)));
             TextView name = text(item.torrent.title, 12, Color.WHITE, true);
             name.setMaxLines(2);
