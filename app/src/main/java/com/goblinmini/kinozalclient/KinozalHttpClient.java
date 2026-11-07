@@ -229,6 +229,59 @@ public final class KinozalHttpClient {
         return html;
     }
 
+
+    /**
+     * Fetch a text endpoint using the native authenticated cookie jar.
+     * The details page is sent as Referer, matching Kinozal TV's native
+     * request flow while avoiding WebView fetch stalls.
+     */
+    public synchronized String fetchTextWithReferer(String target, String referer) throws Exception {
+        String current = target.startsWith("http") ? target
+                : baseUrl + "/" + target.replaceFirst("^/+", "");
+        for (int redirect = 0; redirect < 9; redirect++) {
+            URL url = new URL(current);
+            HttpURLConnection connection = (HttpURLConnection) url.openConnection(networkProxy);
+            connection.setConnectTimeout(15000);
+            connection.setReadTimeout(20000);
+            connection.setInstanceFollowRedirects(false);
+            connection.setRequestMethod("GET");
+            connection.setRequestProperty("User-Agent",
+                    "Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 Chrome/120.0 Mobile Safari/537.36");
+            connection.setRequestProperty("Accept",
+                    "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8");
+            connection.setRequestProperty("Accept-Language", "ru-RU,ru;q=0.9,en;q=0.7");
+            connection.setRequestProperty("Cache-Control", "no-cache");
+            connection.setRequestProperty("Referer",
+                    referer == null || referer.trim().isEmpty() ? baseUrl + "/" : referer);
+            URI uri = URI.create(current);
+            List<String> cookieHeaders = cookies.get(uri, new java.util.HashMap<>()).get("Cookie");
+            if (cookieHeaders != null && !cookieHeaders.isEmpty()) {
+                connection.setRequestProperty("Cookie", cookieHeaders.get(0));
+            }
+            int code = connection.getResponseCode();
+            cookies.put(uri, connection.getHeaderFields());
+            String location = connection.getHeaderField("Location");
+            if (code == 301 || code == 302 || code == 303 || code == 307 || code == 308) {
+                connection.disconnect();
+                if (location == null || redirect == 8) {
+                    throw new java.io.IOException("Слишком много перенаправлений");
+                }
+                current = new URL(url, location).toString();
+                continue;
+            }
+            InputStream input = code >= 400 ? connection.getErrorStream() : connection.getInputStream();
+            String body = input == null ? "" : readAll(input, connection.getContentType());
+            connection.disconnect();
+            if (code < 200 || code >= 300) {
+                throw new java.io.IOException("HTTP " + code + ": "
+                        + body.replaceAll("\\s+", " ").trim().substring(0,
+                        Math.min(160, body.replaceAll("\\s+", " ").trim().length())));
+            }
+            return body;
+        }
+        throw new java.io.IOException("Не удалось выполнить запрос к Kinozal");
+    }
+
     /** Submit a site category/filter form while preserving its original fields. */
     public synchronized String fetchPost(String url, String body) throws Exception {
         String target = url.startsWith("http") ? url : baseUrl + "/" + url.replaceFirst("^/+", "");
