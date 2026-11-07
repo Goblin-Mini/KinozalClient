@@ -93,3 +93,12 @@ jobs:
           overwrite_files: true
           make_latest: true
           generate_release_notes: true
+
+      - name: Upload release APK as workflow artifact
+        if: always() && github.event_name != 'pull_request' && success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: KinozalClient-release
+          path: dist/KinozalClient.apk
+          if-no-files-found: error
+          retention-days: 14
