@@ -3926,6 +3926,11 @@ public class MainActivity extends Activity {
         io.execute(() -> {
             HttpURLConnection connection = null;
             try {
+                java.util.regex.Matcher hashMatcher = java.util.regex.Pattern
+                        .compile("(?i)btih:([0-9a-f]{40})").matcher(magnet);
+                if (!hashMatcher.find()) throw new java.io.IOException("В magnet-ссылке нет корректного InfoHash");
+                String expectedHash = hashMatcher.group(1).toLowerCase(java.util.Locale.ROOT);
+
                 URL endpoint = new URL(baseUrl + "/torrents");
                 connection = (HttpURLConnection) endpoint.openConnection();
                 connection.setRequestMethod("POST");
@@ -3957,17 +3962,70 @@ public class MainActivity extends Activity {
                         while ((line = reader.readLine()) != null) response.append(line);
                     }
                 }
-                if (code < 200 || code >= 300) throw new java.io.IOException("HTTP " + code);
+                if (code < 200 || code >= 300) {
+                    throw new java.io.IOException("TorrServer HTTP " + code + ": " + response);
+                }
+
                 String answer = response.toString().trim();
                 if (answer.startsWith("{")) {
                     org.json.JSONObject json = new org.json.JSONObject(answer);
-                    if (json.has("error") && !json.isNull("error"))
-                        throw new java.io.IOException(json.optString("error"));
+                    if (json.has("error") && !json.isNull("error")) {
+                        throw new java.io.IOException("TorrServer: " + json.optString("error"));
+                    }
+                    String returnedHash = json.optString("hash", "")
+                            .toLowerCase(java.util.Locale.ROOT);
+                    if (!returnedHash.isEmpty() && returnedHash.equals(expectedHash)) {
+                        runOnUiThread(() -> showMessage("Раздача подтверждена TorrServer: " + data.title));
+                        return;
+                    }
                 }
-                runOnUiThread(() -> showMessage("Magnet отправлен на внешний TorrServe"));
+
+                // A 200 response alone is not proof that the torrent was added.
+                // Verify the exact InfoHash in the server's live torrent list.
+                HttpURLConnection verify = null;
+                try {
+                    verify = (HttpURLConnection) new URL(baseUrl + "/torrents").openConnection();
+                    verify.setRequestMethod("POST");
+                    verify.setConnectTimeout(10000);
+                    verify.setReadTimeout(15000);
+                    verify.setDoOutput(true);
+                    verify.setRequestProperty("Content-Type", "application/json; charset=utf-8");
+                    byte[] listPayload = "{\"action\":\"list\"}".getBytes(StandardCharsets.UTF_8);
+                    verify.setFixedLengthStreamingMode(listPayload.length);
+                    try (java.io.OutputStream out = verify.getOutputStream()) {
+                        out.write(listPayload);
+                    }
+                    int listCode = verify.getResponseCode();
+                    java.io.InputStream listStream = listCode >= 200 && listCode < 300
+                            ? verify.getInputStream() : verify.getErrorStream();
+                    StringBuilder listResponse = new StringBuilder();
+                    if (listStream != null) {
+                        try (java.io.BufferedReader reader = new java.io.BufferedReader(
+                                new java.io.InputStreamReader(listStream, StandardCharsets.UTF_8))) {
+                            String line;
+                            while ((line = reader.readLine()) != null) listResponse.append(line);
+                        }
+                    }
+                    if (listCode < 200 || listCode >= 300) {
+                        throw new java.io.IOException("проверка списка HTTP " + listCode + ": " + listResponse);
+                    }
+                    org.json.JSONArray torrents = new org.json.JSONArray(listResponse.toString());
+                    for (int i = 0; i < torrents.length(); i++) {
+                        org.json.JSONObject item = torrents.optJSONObject(i);
+                        if (item != null && expectedHash.equalsIgnoreCase(item.optString("hash", ""))) {
+                            runOnUiThread(() -> showMessage("Раздача найдена в TorrServer: " + data.title));
+                            return;
+                        }
+                    }
+                    throw new java.io.IOException("HTTP 200 получен, но InfoHash " + expectedHash
+                            + " отсутствует в списке TorrServer. Ответ add: "
+                            + (answer.isEmpty() ? "<пусто>" : answer));
+                } finally {
+                    if (verify != null) verify.disconnect();
+                }
             } catch (Exception e) {
                 String error = safe(e.getMessage());
-                runOnUiThread(() -> showMessage("Не удалось добавить раздачу на внешний TorrServe: " + error));
+                runOnUiThread(() -> showMessage("TorrServer не подтвердил добавление: " + error));
             } finally {
                 if (connection != null) connection.disconnect();
             }
