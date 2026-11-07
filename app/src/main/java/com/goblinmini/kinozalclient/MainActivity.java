@@ -1260,6 +1260,49 @@ public class MainActivity extends Activity {
         } catch (Exception ignored) { return value; }
     }
 
+    private List<String> extractHomeBadges(String title, String sectionTitle) {
+        List<String> badges = new ArrayList<>();
+        if (title == null) return badges;
+        String value = title.toUpperCase(java.util.Locale.ROOT);
+        String section = sectionTitle == null ? "" : sectionTitle.toLowerCase(java.util.Locale.ROOT);
+        boolean music = section.contains("музык") || section.contains("music")
+                || value.matches("(?s).*\\b(FLAC|MP3|WAV|ALAC|APE|AAC|DSD)\\b.*");
+        boolean game = section.contains("игр") || section.contains("game")
+                || value.matches("(?s).*\\b(PC|PS[345]|PS[345]\s*\\b|XBOX|NINTENDO|SWITCH|REPACK|REPACK|PORTABLE)\\b.*");
+
+        if (music) {
+            addBadge(badges, value, "FLAC|ALAC|APE|WAV|DSD|MP3|AAC|OGG|OPUS");
+            addBadge(badges, value, "24\\s*BIT|24BIT|16\\s*BIT|16BIT");
+            addBadge(badges, value, "192\\s*KHZ|96\\s*KHZ|48\\s*KHZ|44[,.]1\\s*KHZ");
+            addBadge(badges, value, "LOSSLESS|HI-RES|HIRES");
+        } else if (game) {
+            addBadge(badges, value, "PC|WINDOWS|STEAM|GOG|PS5|PS4|PS3|XBOX|SWITCH");
+            addBadge(badges, value, "REPACK|PORTABLE|ISO|RIP");
+            java.util.regex.Matcher version = java.util.regex.Pattern.compile(
+                    "(?i)\\b(?:v(?:ersion)?\\s*)?([0-9]+\\.[0-9]+(?:\\.[0-9]+){0,2})\\b").matcher(title);
+            if (version.find()) badges.add("v" + version.group(1));
+            addBadge(badges, value, "RUS|РУССКИЙ|MULTI[0-9]*|ENG|АНГЛ");
+        } else {
+            addBadge(badges, value, "4320P|2160P|4K|1080P|720P|576P|480P");
+            addBadge(badges, value, "BLU[- .]?RAY REMUX|BDREMUX|REMUX|BLU[- .]?RAY|BDRIP|BRRIP|WEB[- .]?DL|WEBRIP|HDRIP|HDTV|DVDRIP|CAM|TS");
+            addBadge(badges, value, "HEVC|H\\.?265|X265|AV1|AVC|H\\.?264|X264");
+            addBadge(badges, value, "DOLBY VISION|DV|HDR10\\+?|HDR");
+            addBadge(badges, value, "3D");
+        }
+        if (badges.size() > 3) return new ArrayList<>(badges.subList(0, 3));
+        return badges;
+    }
+
+    private void addBadge(List<String> badges, String title, String alternatives) {
+        if (badges.size() >= 3) return;
+        java.util.regex.Matcher matcher = java.util.regex.Pattern.compile(
+                "(?i)(?<![A-Z0-9])(?:" + alternatives + ")(?![A-Z0-9])").matcher(title);
+        if (matcher.find()) {
+            String badge = matcher.group().replaceAll("\\s+", " ").replaceAll("[- ]+", " ").trim();
+            if (!badges.contains(badge)) badges.add(badge);
+        }
+    }
+
     private void renderHome(List<HomeSection> sections) {
         list.removeAllViews();
         for (HomeSection section : sections) renderHomeSection(section);
@@ -1306,6 +1349,23 @@ public class MainActivity extends Activity {
             posterFrame.addView(poster, new FrameLayout.LayoutParams(-1, -1));
 
             card.addView(posterFrame, new LinearLayout.LayoutParams(dp(126), dp(178)));
+            List<String> badges = extractHomeBadges(item.torrent.title, section.title);
+            if (!badges.isEmpty()) {
+                LinearLayout badgeRow = new LinearLayout(this);
+                badgeRow.setOrientation(LinearLayout.HORIZONTAL);
+                badgeRow.setGravity(Gravity.CENTER_VERTICAL);
+                badgeRow.setPadding(0, dp(4), 0, dp(1));
+                for (String badge : badges) {
+                    TextView chip = text(badge, 9, BG, true);
+                    chip.setSingleLine(true);
+                    chip.setPadding(dp(4), dp(2), dp(4), dp(2));
+                    chip.setBackground(shape(TEAL, 0));
+                    LinearLayout.LayoutParams chipParams = new LinearLayout.LayoutParams(-2, dp(17));
+                    chipParams.rightMargin = dp(3);
+                    badgeRow.addView(chip, chipParams);
+                }
+                card.addView(badgeRow, new LinearLayout.LayoutParams(dp(126), dp(21)));
+            }
             TextView name = text(item.torrent.title, 12, Color.WHITE, true);
             name.setMaxLines(2);
             name.setEllipsize(android.text.TextUtils.TruncateAt.END);
@@ -1321,7 +1381,7 @@ public class MainActivity extends Activity {
             card.setOnClickListener(v -> showTorrent(item.torrent));
         }
         horizontal.addView(strip);
-        LinearLayout.LayoutParams rowParams = new LinearLayout.LayoutParams(-1, dp(238));
+        LinearLayout.LayoutParams rowParams = new LinearLayout.LayoutParams(-1, dp(260));
 
         // If this feed was already shown from cache, replace only its own pair
         // of views in place. Other feeds and DPAD focus remain untouched.
