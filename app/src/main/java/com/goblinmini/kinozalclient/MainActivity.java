@@ -3155,6 +3155,7 @@ public class MainActivity extends Activity {
         Button insert = button("Вставить");
         Button signIn = button("Вход");
         Button done = button("Готово");
+        Button challenge = button("Я не робот");
         LinearLayout.LayoutParams smallAction = new LinearLayout.LayoutParams(dp(112), dp(44));
         smallAction.leftMargin = dp(6);
         credentials.addView(insert, smallAction);
@@ -3164,7 +3165,34 @@ public class MainActivity extends Activity {
         LinearLayout.LayoutParams doneTopParams = new LinearLayout.LayoutParams(dp(112), dp(44));
         doneTopParams.leftMargin = dp(6);
         credentials.addView(done, doneTopParams);
+        LinearLayout.LayoutParams challengeParams = new LinearLayout.LayoutParams(dp(132), dp(44));
+        challengeParams.leftMargin = dp(6);
+        credentials.addView(challenge, challengeParams);
         panel.addView(credentials, new LinearLayout.LayoutParams(-1, -2));
+
+        // Cloudflare's checkbox lives inside a cross-origin challenge iframe, so
+        // JavaScript in the parent page cannot reliably click it. The TV button
+        // moves focus to the challenge frame and sends the same DPAD_CENTER/ENTER
+        // activation a remote would send after focusing the widget.
+        challenge.setOnClickListener(v -> {
+            web.evaluateJavascript("(function(){"
+                    + "var c=document.querySelector('input[type=checkbox]');"
+                    + "if(c){c.focus();try{c.click();}catch(e){}}"
+                    + "var f=document.querySelector('iframe[title*=Widget],iframe[title*=challenge],#challenge-form iframe');"
+                    + "if(f){f.setAttribute('tabindex','0');f.focus();}"
+                    + "return !!(c||f);})()", result -> {
+                web.requestFocus();
+                web.dispatchKeyEvent(new android.view.KeyEvent(android.view.KeyEvent.ACTION_DOWN,
+                        android.view.KeyEvent.KEYCODE_DPAD_CENTER));
+                web.dispatchKeyEvent(new android.view.KeyEvent(android.view.KeyEvent.ACTION_UP,
+                        android.view.KeyEvent.KEYCODE_DPAD_CENTER));
+                web.dispatchKeyEvent(new android.view.KeyEvent(android.view.KeyEvent.ACTION_DOWN,
+                        android.view.KeyEvent.KEYCODE_ENTER));
+                web.dispatchKeyEvent(new android.view.KeyEvent(android.view.KeyEvent.ACTION_UP,
+                        android.view.KeyEvent.KEYCODE_ENTER));
+                showMessage("Передана команда активации проверки. Если галочка не появилась, попробуй нажать кнопку ещё раз после загрузки Cloudflare.");
+            });
+        });
 
         LinearLayout actions = new LinearLayout(this);
         actions.setGravity(Gravity.CENTER_VERTICAL);
