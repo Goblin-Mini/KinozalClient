@@ -14,12 +14,12 @@
         android:theme="@style/AppTheme"
         android:usesCleartextTraffic="false">
         <provider
-            android:name=".TorrentFileProvider"
+            android:name="com.goblinmini.kinozalclient.TorrentFileProvider"
             android:authorities="com.goblinmini.kinozalclient.torrentprovider"
             android:exported="false"
             android:grantUriPermissions="true" />
         <activity
-            android:name=".MainActivity"
+            android:name="com.goblinmini.kinozalclient.MainActivity"
             android:configChanges="keyboard|keyboardHidden|orientation|screenSize"
             android:exported="true">
             <intent-filter>
