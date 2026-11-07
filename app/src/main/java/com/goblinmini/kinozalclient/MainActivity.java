@@ -1284,7 +1284,7 @@ public class MainActivity extends Activity {
             addBadge(badges, value, "RUS|РУССКИЙ|MULTI[0-9]*|ENG|АНГЛ");
         } else {
             addBadge(badges, value, "4320P|2160P|4K|1080P|720P|576P|480P");
-            addBadge(badges, value, "BLU[- .]?RAY REMUX|BDREMUX|REMUX|BLU[- .]?RAY|BDRIP|BRRIP|WEB[- .]?DL|WEBRIP|HDRIP|HDTV|DVDRIP|CAM|TS");
+            addBadge(badges, value, "BLU[- .]?RAY REMUX|BDREMUX|REMUX|BLU[- .]?RAY|BDRIP|BRRIP|WEB[- .]?DL[- .]?RIP|WEB[- .]?DL|WEBRIP|HDRIP|HDTV|DVDRIP|CAM|TS");
             addBadge(badges, value, "HEVC|H\\.?265|X265|AV1|AVC|H\\.?264|X264");
             addBadge(badges, value, "DOLBY VISION|DV|HDR10\\+?|HDR");
             addBadge(badges, value, "3D");
@@ -1299,6 +1299,7 @@ public class MainActivity extends Activity {
                 "(?i)(?<![A-Z0-9])(?:" + alternatives + ")(?![A-Z0-9])").matcher(title);
         if (matcher.find()) {
             String badge = matcher.group().replaceAll("\\s+", " ").replaceAll("[- ]+", " ").trim();
+            if ("WEB DL RIP".equals(badge)) badge = "WEB-DLRip";
             if (!badges.contains(badge)) badges.add(badge);
         }
     }
