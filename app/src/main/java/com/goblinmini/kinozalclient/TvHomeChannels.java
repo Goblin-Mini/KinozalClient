@@ -32,7 +32,7 @@ final class TvHomeChannels {
     private static final String PREFS = "kinozal_settings";
     private static final String RECENT_KEY = "recently_viewed";
     private static final String[] CHANNEL_KEYS = {
-            "new_movies", "new_series", "top_movies", "top_series", "top_all", "new_arrivals", "continue"
+            "new_movies", "new_series", "top_movies", "top_series", "top_all", "continue"
     };
     private static final String[] CHANNEL_NAMES = {
             "Kinozal — Новинки фильмов",
@@ -40,7 +40,6 @@ final class TvHomeChannels {
             "Kinozal — Топ фильмов",
             "Kinozal — Топ сериалов",
             "Kinozal — Общий топ",
-            "Kinozal — Новые поступления",
             "Kinozal — Продолжить просмотр"
     };
     private static final String[] FEED_PATHS = {
@@ -49,7 +48,6 @@ final class TvHomeChannels {
             "top.php?c=1002&d=0&f=0&j=&k=0&s=0&t=0",
             "top.php?c=1001&d=0&f=0&j=&k=0&s=0&t=0",
             "top.php?c=0&d=0&f=0&j=&k=0&s=0&t=0",
-            "",
             "local:recently-viewed"
     };
     private static final int REQUEST_BROWSABLE = 7410;
@@ -74,6 +72,13 @@ final class TvHomeChannels {
 
                 PreviewChannelHelper helper = new PreviewChannelHelper(activity);
                 boolean hadChannels = !helper.getAllChannels().isEmpty();
+                PreviewChannel obsoleteArrivals = findChannel(helper, "kinozal:new_arrivals");
+                if (obsoleteArrivals != null) {
+                    helper.deletePreviewChannel(obsoleteArrivals.getId());
+                    Log.i(TAG, "Deleted obsolete new-arrivals channel");
+                }
+
+
                 long[] channelIds = new long[CHANNEL_KEYS.length];
                 boolean[] created = new boolean[CHANNEL_KEYS.length];
                 Bitmap logo = loadAppLogo(activity);
@@ -101,9 +106,7 @@ final class TvHomeChannels {
                         channelIds[i] = channel.getId();
                     }
 
-                    JSONArray programs = i == 6 ? readRecentPrograms(activity)
-                            : i == 5 ? findCombinedFeedItems(feeds, "", "?page=1")
-                            : findFeedItems(feeds, FEED_PATHS[i]);
+                    JSONArray programs = i == 5 ? readRecentPrograms(activity) : findFeedItems(feeds, FEED_PATHS[i]);
                     replacePrograms(activity, helper, channelIds[i], CHANNEL_KEYS[i], programs);
                 }
 
