@@ -377,7 +377,8 @@ public class MainActivity extends Activity {
             return;
         }
         String source = getSharedPreferences(PREFS, MODE_PRIVATE).getString("startup_source", "home");
-        if ("browse.php".equals(source)) load("browse.php", "Все раздачи");
+        if ("collections".equals(source)) loadCollections();
+        else if ("browse.php".equals(source)) load("browse.php", "Все раздачи");
         else if ("browse.php?c=1002".equals(source)) load(source, "Все фильмы");
         else if ("browse.php?c=1001".equals(source)) load(source, "Все сериалы");
         else if ("browse.php?c=46".equals(source)) load(source, "Зарубежные сериалы");
@@ -420,6 +421,36 @@ public class MainActivity extends Activity {
             "Топ музыка",
             "Топ игр"
     };
+
+    private static final String[] COLLECTION_PATHS = {
+            "top.php?j=Netflix",
+            "top.php?j=HBO",
+            "top.php?j=Marvel",
+            "top.php?j=Walt%20Disney%20Pictures",
+            "top.php?j=Pixar",
+            "top.php?j=%D0%9F%D1%81%D0%B8%D1%85%D0%BE%D0%BB%D0%BE%D0%B3%D0%B8%D1%87%D0%B5%D1%81%D0%BA%D0%B8%D0%B9%20%D1%82%D1%80%D0%B8%D0%BB%D0%BB%D0%B5%D1%80",
+            "top.php?j=%D0%9D%D0%BE%D0%B2%D0%BE%D0%B3%D0%BE%D0%B4%D0%BD%D0%B8%D0%B9",
+            "top.php?j=%D0%A0%D0%B5%D0%B0%D0%BB%D1%8C%D0%BD%D1%8B%D0%B5%20%D1%81%D0%BE%D0%B1%D1%8B%D1%82%D0%B8%D1%8F",
+            "top.php?j=%D0%BB%D1%83%D1%87%D1%88%D0%B8%D0%B9%20%D1%84%D0%B8%D0%BB%D1%8C%D0%BC%20%D0%9E%D1%81%D0%BA%D0%B0%D1%80",
+            "top.php?j=%D1%8D%D0%BA%D1%80%D0%B0%D0%BD%D0%B8%D0%B7%D0%B0%D1%86%D0%B8%D1%8F",
+            "top.php?j=%D1%84%D0%B8%D0%BB%D1%8C%D0%BC%D1%8B%20%D0%BE%20%D1%81%D0%BF%D0%BE%D1%80%D1%82%D0%B5"
+    };
+    private static final String[] COLLECTION_TITLES = {
+            "Netflix", "HBO", "Marvel", "Walt Disney", "Pixar",
+            "Триллер", "Новый год", "Реальные события", "Оскар",
+            "Экранизации", "Спорт"
+    };
+
+    private void loadCollections() {
+        currentPath = "collections";
+        currentTitle = "Подборки";
+        heading.setText("Подборки");
+        showPageLoading("Загрузка подборок через WebView…");
+        if (sessionWebView == null) restoreBrowserSession("");
+        browserHandler.postDelayed(() -> loadHomeSectionsInBrowser(
+                COLLECTION_PATHS, COLLECTION_TITLES, 0, new ArrayList<>(), 0),
+                sessionWebView == null ? 350 : 100);
+    }
 
     private void loadInitialCatalog(int startupRetry) {
         currentPath = "";
@@ -628,15 +659,17 @@ public class MainActivity extends Activity {
             List<HomeSection> sections, int retry) {
         if (index >= paths.length) {
             removeHomeDuplicates(sections);
-            List<HomeSection> channelSnapshot = new ArrayList<>(sections);
-            io.execute(() -> saveHomeModel(channelSnapshot));
+            if (paths == HOME_PATHS) {
+                List<HomeSection> channelSnapshot = new ArrayList<>(sections);
+                io.execute(() -> saveHomeModel(channelSnapshot));
+            }
             // Re-render the final de-duplicated model. This replaces each row
             // in place, so cards discarded by final normalization disappear too.
             for (HomeSection section : sections) renderHomeSection(section);
             int total = countHomeCards(sections);
-            if (!sections.isEmpty()) homeSectionsMemory = new ArrayList<>(sections);
+            if (!sections.isEmpty() && paths == HOME_PATHS) homeSectionsMemory = new ArrayList<>(sections);
             progress.setVisibility(View.GONE);
-            browserHandler.postDelayed(this::loadTvChannelFeedsInBrowser, 350);
+            if (paths == HOME_PATHS) browserHandler.postDelayed(this::loadTvChannelFeedsInBrowser, 350);
             if (total == 0) {
                 status.setText("Нет соединения");
                 addEmpty("Не удалось получить постеры Kinozal. Проверьте авторизацию и выбранное зеркало.");
@@ -1398,6 +1431,7 @@ public class MainActivity extends Activity {
         menuScroll.addView(menuItems, new ScrollView.LayoutParams(-1, -2));
         sidebar.addView(menuScroll, new LinearLayout.LayoutParams(-1, 0, 1));
         addMenu("⌂", "Главная", () -> loadInitialCatalog());
+        addMenu("▤", "Подборки", () -> loadCollections());
         addMenu("⇩", "Все раздачи", () -> load("browse.php", "Все раздачи"));
 
         Button categoriesButton = button("▦   Категории  ▾");
@@ -1772,9 +1806,9 @@ public class MainActivity extends Activity {
     }
 
     private void chooseStartupSource() {
-        String[] labels = {"Главная (Новинки и топы)", "Все раздачи", "Все фильмы",
+        String[] labels = {"Главная (Новинки и топы)", "Подборки", "Все раздачи", "Все фильмы",
                 "Все сериалы", "Зарубежные сериалы", "Российские сериалы"};
-        String[] values = {"home", "browse.php", "browse.php?c=1002", "browse.php?c=1001",
+        String[] values = {"home", "collections", "browse.php", "browse.php?c=1002", "browse.php?c=1001",
                 "browse.php?c=46", "browse.php?c=45"};
         String saved = getSharedPreferences(PREFS, MODE_PRIVATE).getString("startup_source", "home");
         int selected = 0;
