@@ -21,6 +21,7 @@ import android.widget.Button;
 import android.widget.CheckBox;
 import android.widget.EditText;
 import android.widget.LinearLayout;
+import android.widget.FrameLayout;
 import android.widget.ProgressBar;
 import android.widget.ScrollView;
 import android.widget.TextView;
@@ -3231,14 +3232,36 @@ public class MainActivity extends Activity {
         actions.setGravity(Gravity.CENTER_VERTICAL);
         actions.setPadding(0, dp(6), 0, dp(6));
         Button refresh = button("Обновить");
+        Button cursorToggle = button("Курсор: выкл");
         Button close = button("Закрыть");
         LinearLayout.LayoutParams actionParams = new LinearLayout.LayoutParams(0, dp(46), 1f);
         actions.addView(refresh, actionParams);
+        LinearLayout.LayoutParams cursorParams = new LinearLayout.LayoutParams(0, dp(46), 1f);
+        cursorParams.leftMargin = dp(6);
+        actions.addView(cursorToggle, cursorParams);
         LinearLayout.LayoutParams closeParams = new LinearLayout.LayoutParams(0, dp(46), 1f);
         closeParams.leftMargin = dp(6);
         actions.addView(close, closeParams);
         panel.addView(actions, new LinearLayout.LayoutParams(-1, -2));
-        panel.addView(web, new LinearLayout.LayoutParams(-1, 0, 1f));
+
+        FrameLayout webContainer = new FrameLayout(this);
+        webContainer.setFocusable(false);
+        TvWebCursorView tvCursor = new TvWebCursorView(this, web);
+        tvCursor.setVisibility(View.GONE);
+        webContainer.addView(web, new FrameLayout.LayoutParams(-1, -1));
+        webContainer.addView(tvCursor, new FrameLayout.LayoutParams(-1, -1));
+        panel.addView(webContainer, new LinearLayout.LayoutParams(-1, 0, 1f));
+        cursorToggle.setOnClickListener(v -> {
+            boolean enabled = tvCursor.getVisibility() != View.VISIBLE;
+            tvCursor.setVisibility(enabled ? View.VISIBLE : View.GONE);
+            cursorToggle.setText(enabled ? "Курсор: вкл" : "Курсор: выкл");
+            if (enabled) {
+                tvCursor.requestFocus();
+                showMessage("Курсор включён: перемещай стрелками, нажми OK для клика.");
+            } else {
+                web.requestFocus();
+            }
+        });
 
         AlertDialog dialog = new AlertDialog.Builder(this)
                 .setView(panel)
@@ -3356,6 +3379,82 @@ public class MainActivity extends Activity {
             web.requestFocus();
             web.loadUrl(base + "/login.php?m=5");
         });
+    }
+
+    /**
+     * On-screen pointer for Android TV WebView pages that require mouse-like
+     * interaction (for example Cloudflare Turnstile). DPAD moves the pointer;
+     * OK/ENTER sends a real touch sequence to the underlying WebView.
+     */
+    private final class TvWebCursorView extends View {
+        private final WebView target;
+        private final android.graphics.Paint paint = new android.graphics.Paint(
+                android.graphics.Paint.ANTI_ALIAS_FLAG);
+        private float cursorX = dp(45);
+        private float cursorY = dp(45);
+        private final float step = dp(22);
+
+        TvWebCursorView(android.content.Context context, WebView target) {
+            super(context);
+            this.target = target;
+            setFocusable(true);
+            setFocusableInTouchMode(true);
+            setClickable(true);
+        }
+
+        @Override protected void onDraw(android.graphics.Canvas canvas) {
+            super.onDraw(canvas);
+            if (getVisibility() != View.VISIBLE) return;
+            paint.setStyle(android.graphics.Paint.Style.STROKE);
+            paint.setStrokeWidth(dp(2));
+            paint.setColor(Color.BLACK);
+            canvas.drawCircle(cursorX, cursorY, dp(13), paint);
+            paint.setColor(GOLD);
+            paint.setStrokeWidth(dp(3));
+            canvas.drawCircle(cursorX, cursorY, dp(11), paint);
+            paint.setStyle(android.graphics.Paint.Style.FILL);
+            paint.setColor(Color.WHITE);
+            android.graphics.Path pointer = new android.graphics.Path();
+            pointer.moveTo(cursorX - dp(5), cursorY - dp(9));
+            pointer.lineTo(cursorX - dp(5), cursorY + dp(10));
+            pointer.lineTo(cursorX, cursorY + dp(5));
+            pointer.lineTo(cursorX + dp(5), cursorY + dp(13));
+            pointer.lineTo(cursorX + dp(9), cursorY + dp(11));
+            pointer.lineTo(cursorX + dp(4), cursorY + dp(3));
+            pointer.lineTo(cursorX + dp(11), cursorY + dp(3));
+            pointer.close();
+            canvas.drawPath(pointer, paint);
+        }
+
+        @Override public boolean onKeyDown(int keyCode, KeyEvent event) {
+            float maxX = Math.max(dp(12), getWidth() - dp(12));
+            float maxY = Math.max(dp(12), getHeight() - dp(12));
+            switch (keyCode) {
+                case KeyEvent.KEYCODE_DPAD_LEFT: cursorX = Math.max(dp(12), cursorX - step); break;
+                case KeyEvent.KEYCODE_DPAD_RIGHT: cursorX = Math.min(maxX, cursorX + step); break;
+                case KeyEvent.KEYCODE_DPAD_UP: cursorY = Math.max(dp(12), cursorY - step); break;
+                case KeyEvent.KEYCODE_DPAD_DOWN: cursorY = Math.min(maxY, cursorY + step); break;
+                case KeyEvent.KEYCODE_DPAD_CENTER:
+                case KeyEvent.KEYCODE_ENTER:
+                case KeyEvent.KEYCODE_NUMPAD_ENTER:
+                    long now = android.os.SystemClock.uptimeMillis();
+                    android.view.MotionEvent down = android.view.MotionEvent.obtain(now, now,
+                            android.view.MotionEvent.ACTION_DOWN, cursorX, cursorY, 0);
+                    android.view.MotionEvent up = android.view.MotionEvent.obtain(now, now + 90,
+                            android.view.MotionEvent.ACTION_UP, cursorX, cursorY, 0);
+                    target.dispatchTouchEvent(down);
+                    target.dispatchTouchEvent(up);
+                    down.recycle();
+                    up.recycle();
+                    return true;
+                case KeyEvent.KEYCODE_BACK:
+                    return super.onKeyDown(keyCode, event);
+                default:
+                    return super.onKeyDown(keyCode, event);
+            }
+            invalidate();
+            return true;
+        }
     }
 
     private void styleCompactCredentialField(EditText field, String hint) {
