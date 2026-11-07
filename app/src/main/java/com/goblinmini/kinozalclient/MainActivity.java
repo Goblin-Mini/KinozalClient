@@ -128,9 +128,9 @@ public class MainActivity extends Activity {
         diskCache = new DiskCache(this, 200L * 1024L * 1024L);
         buildShell();
         socks5Bridge = new Socks5ProxyBridge(this);
-        loadExternalCountryInfo(sidebarCountryInfo);
         String savedBrowserCookies = client.getSavedBrowserCookies();
         initializeNetwork(savedBrowserCookies);
+        loadExternalCountryInfo(sidebarCountryInfo);
     }
 
 
