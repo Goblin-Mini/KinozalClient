@@ -2435,7 +2435,8 @@ public class MainActivity extends Activity {
                         metaText.setSpan(new android.text.style.ForegroundColorSpan(RED),
                                 peersStart, metaValue.length(), android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
                     }
-                    TextView meta = text(metaText, 12, TEAL, false);
+                    TextView meta = text("", 12, TEAL, false);
+                    meta.setText(metaText);
                     meta.setPadding(0, dp(4), 0, 0);
                     row.addView(meta);
                     if (!resultUrl.isEmpty()) row.setOnClickListener(v -> {
