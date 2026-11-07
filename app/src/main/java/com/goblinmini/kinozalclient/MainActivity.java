@@ -110,6 +110,10 @@ public class MainActivity extends Activity {
     private boolean automaticUpdateCheckScheduled = false;
     private boolean homeCacheDisplayed = false;
     private boolean homeRefreshInProgress = false;
+    // Home/collection and Android TV feed refreshes share one WebView. Queue
+    // interactive navigation until the background sequence releases it.
+    private boolean browserFeedLoading = false;
+    private Runnable pendingBrowserNavigation;
     private List<HomeSection> homeSectionsMemory = new ArrayList<>();
     private String homeCacheDiagnostic = "Кэш главной ещё не проверялся";
 
@@ -399,6 +403,7 @@ public class MainActivity extends Activity {
     }
 
     private void loadInitialCatalog() {
+        if (deferBrowserNavigationIfBusy(this::loadInitialCatalog)) return;
         loadInitialCatalog(0);
     }
 
@@ -442,7 +447,26 @@ public class MainActivity extends Activity {
             "Экранизации", "Спорт"
     };
 
+    private boolean deferBrowserNavigationIfBusy(Runnable navigation) {
+        if (!browserFeedLoading && !tvChannelsRefreshInProgress) return false;
+        // Keep the latest explicit user choice; it will open as soon as the
+        // background WebView sequence finishes instead of cancelling it.
+        pendingBrowserNavigation = navigation;
+        progress.setVisibility(View.VISIBLE);
+        status.setText("Завершаем обновление каталога…");
+        return true;
+    }
+
+    private void runPendingBrowserNavigation() {
+        if (browserFeedLoading || tvChannelsRefreshInProgress || pendingBrowserNavigation == null) return;
+        Runnable navigation = pendingBrowserNavigation;
+        pendingBrowserNavigation = null;
+        browserHandler.post(navigation);
+    }
+
     private void loadCollections() {
+        if (deferBrowserNavigationIfBusy(this::loadCollections)) return;
+        browserFeedLoading = true;
         currentPath = "collections";
         currentTitle = "Подборки";
         heading.setText("Подборки");
@@ -454,6 +478,7 @@ public class MainActivity extends Activity {
     }
 
     private void loadInitialCatalog(int startupRetry) {
+        browserFeedLoading = true;
         currentPath = "";
         currentTitle = "Главная";
         heading.setText("Главная");
@@ -670,7 +695,14 @@ public class MainActivity extends Activity {
             int total = countHomeCards(sections);
             if (!sections.isEmpty() && paths == HOME_PATHS) homeSectionsMemory = new ArrayList<>(sections);
             progress.setVisibility(View.GONE);
-            if (paths == HOME_PATHS) browserHandler.postDelayed(this::loadTvChannelFeedsInBrowser, 350);
+            browserFeedLoading = false;
+            if (paths == HOME_PATHS && pendingBrowserNavigation == null) {
+                browserHandler.postDelayed(() -> {
+                    if (currentPath == null || currentPath.isEmpty()) loadTvChannelFeedsInBrowser();
+                }, 350);
+            } else {
+                runPendingBrowserNavigation();
+            }
             if (total == 0) {
                 status.setText("Нет соединения");
                 addEmpty("Не удалось получить постеры Kinozal. Проверьте авторизацию и выбранное зеркало.");
@@ -808,9 +840,13 @@ public class MainActivity extends Activity {
                     runOnUiThread(() -> {
                         tvChannelsRefreshInProgress = false;
                         TvHomeChannels.sync(this, target);
+                        runPendingBrowserNavigation();
                     });
                 } catch (Exception e) {
-                    runOnUiThread(() -> tvChannelsRefreshInProgress = false);
+                    runOnUiThread(() -> {
+                        tvChannelsRefreshInProgress = false;
+                        runPendingBrowserNavigation();
+                    });
                 }
             });
             return;
@@ -2569,6 +2605,7 @@ public class MainActivity extends Activity {
     private void load(String path, String title) { load(path, title, null); }
 
     private void load(String path, String title, String postBody) {
+        if (deferBrowserNavigationIfBusy(() -> load(path, title, postBody))) return;
         currentPath = path; currentTitle = title; heading.setText(title);
 
         // Browse/category pages change frequently. Always request the current
