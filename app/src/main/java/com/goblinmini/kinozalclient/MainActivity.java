@@ -3175,22 +3175,41 @@ public class MainActivity extends Activity {
         // moves focus to the challenge frame and sends the same DPAD_CENTER/ENTER
         // activation a remote would send after focusing the widget.
         challenge.setOnClickListener(v -> {
+            // The challenge checkbox is inside a cross-origin iframe. DOM click()
+            // in the parent page cannot activate it. Ask the frame to scroll into
+            // view, obtain its viewport rectangle, then send a real WebView touch
+            // sequence at the checkbox's visible position.
             web.evaluateJavascript("(function(){"
-                    + "var c=document.querySelector('input[type=checkbox]');"
-                    + "if(c){c.focus();try{c.click();}catch(e){}}"
                     + "var f=document.querySelector('iframe[title*=Widget],iframe[title*=challenge],#challenge-form iframe');"
-                    + "if(f){f.setAttribute('tabindex','0');f.focus();}"
-                    + "return !!(c||f);})()", result -> {
-                web.requestFocus();
-                web.dispatchKeyEvent(new android.view.KeyEvent(android.view.KeyEvent.ACTION_DOWN,
-                        android.view.KeyEvent.KEYCODE_DPAD_CENTER));
-                web.dispatchKeyEvent(new android.view.KeyEvent(android.view.KeyEvent.ACTION_UP,
-                        android.view.KeyEvent.KEYCODE_DPAD_CENTER));
-                web.dispatchKeyEvent(new android.view.KeyEvent(android.view.KeyEvent.ACTION_DOWN,
-                        android.view.KeyEvent.KEYCODE_ENTER));
-                web.dispatchKeyEvent(new android.view.KeyEvent(android.view.KeyEvent.ACTION_UP,
-                        android.view.KeyEvent.KEYCODE_ENTER));
-                showMessage("Передана команда активации проверки. Если галочка не появилась, попробуй нажать кнопку ещё раз после загрузки Cloudflare.");
+                    + "if(!f)return 'NO_FRAME';"
+                    + "f.scrollIntoView({block:'center',inline:'center'});"
+                    + "var r=f.getBoundingClientRect();"
+                    + "return JSON.stringify({x:r.left+36,y:r.top+55,d:window.devicePixelRatio||1,"
+                    + "w:r.width,h:r.height});})()", result -> {
+                try {
+                    String raw = result == null ? "" : result;
+                    org.json.JSONObject pos = new org.json.JSONObject(
+                            new org.json.JSONArray("[" + raw + "]").getString(0));
+                    float density = getResources().getDisplayMetrics().density;
+                    float x = (float) (pos.getDouble("x") * density);
+                    float y = (float) (pos.getDouble("y") * density);
+                    if (x < 0 || y < 0 || x >= web.getWidth() || y >= web.getHeight()) {
+                        showMessage("Cloudflare виджет не помещается в окно. Нажми «Обновить» и попробуй снова.");
+                        return;
+                    }
+                    long now = android.os.SystemClock.uptimeMillis();
+                    android.view.MotionEvent down = android.view.MotionEvent.obtain(now, now,
+                            android.view.MotionEvent.ACTION_DOWN, x, y, 0);
+                    android.view.MotionEvent up = android.view.MotionEvent.obtain(now, now + 90,
+                            android.view.MotionEvent.ACTION_UP, x, y, 0);
+                    web.dispatchTouchEvent(down);
+                    web.dispatchTouchEvent(up);
+                    down.recycle();
+                    up.recycle();
+                    showMessage("Отправлено нажатие по чекбоксу Cloudflare. Подожди несколько секунд и проверь галочку.");
+                } catch (Exception e) {
+                    showMessage("Не удалось определить положение чекбокса Cloudflare. Обнови страницу и попробуй снова.");
+                }
             });
         });
 
