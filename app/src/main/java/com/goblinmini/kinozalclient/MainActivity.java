@@ -481,7 +481,10 @@ public class MainActivity extends Activity {
             for (int i = 0; i < feeds.length(); i++) {
                 org.json.JSONObject feed = feeds.optJSONObject(i);
                 if (feed == null) continue;
-                HomeSection section = new HomeSection(feed.optString("title"), feed.optString("path"));
+                String cachedPath = feed.optString("path");
+                // Drop legacy "new arrivals" sections saved by older builds.
+                if (cachedPath.isEmpty() || "?page=1".equals(cachedPath)) continue;
+                HomeSection section = new HomeSection(feed.optString("title"), cachedPath);
                 org.json.JSONArray items = feed.optJSONArray("items");
                 if (items == null) continue;
                 for (int j = 0; j < items.length(); j++) {
