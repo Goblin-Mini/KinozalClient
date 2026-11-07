@@ -683,10 +683,11 @@ public class MainActivity extends Activity {
             "novinki.php?c=1001",
             "top.php?c=1002&d=0&f=0&j=&k=0&s=0&t=0",
             "top.php?c=1001&d=0&f=0&j=&k=0&s=0&t=0",
+            "",
             "?page=1"
     };
     private static final String[] TV_CHANNEL_TITLES = {
-            "Новинки фильмов", "Новинки сериалов", "Топ фильмов", "Топ сериалов", "Новые поступления"
+            "Новинки фильмов", "Новинки сериалов", "Топ фильмов", "Топ сериалов", "Новые поступления", "Новые поступления"
     };
     private boolean tvChannelsRefreshInProgress;
 
