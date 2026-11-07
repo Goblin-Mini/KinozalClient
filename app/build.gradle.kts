@@ -7,7 +7,7 @@ android {
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "com.goblinmini.kinozalclient"
+        applicationId = "ru.gm.ktv"
         minSdk = 23
         targetSdk = 28
         versionCode = 19
