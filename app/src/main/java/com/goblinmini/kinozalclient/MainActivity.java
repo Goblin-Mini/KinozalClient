@@ -1356,11 +1356,12 @@ public class MainActivity extends Activity {
                 badgeRow.setGravity(Gravity.CENTER_VERTICAL);
                 badgeRow.setPadding(0, dp(4), 0, dp(1));
                 for (String badge : badges) {
-                    TextView chip = text(badge, 9, BG, true);
+                    TextView chip = text(badge, 10, GOLD, true);
                     chip.setSingleLine(true);
-                    chip.setPadding(dp(4), dp(2), dp(4), dp(2));
-                    chip.setBackground(shape(TEAL, 0));
-                    LinearLayout.LayoutParams chipParams = new LinearLayout.LayoutParams(-2, dp(17));
+                    chip.setGravity(Gravity.CENTER);
+                    chip.setPadding(dp(6), dp(2), dp(6), dp(2));
+                    chip.setBackground(shape(Color.rgb(39, 57, 61), TEAL));
+                    LinearLayout.LayoutParams chipParams = new LinearLayout.LayoutParams(-2, dp(20));
                     chipParams.rightMargin = dp(3);
                     badgeRow.addView(chip, chipParams);
                 }
