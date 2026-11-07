@@ -7,7 +7,9 @@ import android.security.keystore.KeyProperties;
 import android.util.Base64;
 
 import java.io.ByteArrayOutputStream;
+import java.io.BufferedReader;
 import java.io.InputStream;
+import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
@@ -20,6 +22,8 @@ import java.security.KeyStore;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import javax.net.ssl.SSLSocket;
+import javax.net.ssl.SSLSocketFactory;
 import javax.crypto.Cipher;
 import javax.crypto.KeyGenerator;
 import javax.crypto.SecretKey;
@@ -97,7 +101,7 @@ public final class Socks5ProxyBridge {
                 prefs.getString("username", ""), password);
     }
 
-    /** Verify DNS, TCP reachability and SOCKS5 authentication without changing saved settings. */
+    /** Verify SOCKS5 negotiation, authentication, TLS and a real HTTPS response. */
     public void testConnection(String host, int port, String username, String password) throws Exception {
         String h = host == null ? "" : host.trim();
         String u = username == null ? "" : username.trim();
@@ -106,11 +110,33 @@ public final class Socks5ProxyBridge {
         if (port < 1 || port > 65535) throw new IllegalArgumentException("Некорректный порт SOCKS5");
         if (u.isEmpty() != p.isEmpty()) throw new IllegalArgumentException("Укажите и логин, и пароль");
         Settings probe = new Settings(true, h, port, u, p);
-        Socket socket = null;
+        Socket tunnel = null;
+        SSLSocket tls = null;
         try {
-            socket = openSocks(probe, "ipwho.is", 443);
+            tunnel = openSocks(probe, "ipwho.is", 443);
+            tunnel.setSoTimeout(15000);
+            tls = (SSLSocket) SSLSocketFactory.getDefault().createSocket(tunnel, "ipwho.is", 443, true);
+            tls.setSoTimeout(15000);
+            tls.startHandshake();
+            OutputStream out = tls.getOutputStream();
+            out.write(("GET / HTTP/1.1\r\nHost: ipwho.is\r\nAccept: application/json\r\n"
+                    + "User-Agent: KinozalClient/0.5.13\r\nConnection: close\r\n\r\n")
+                    .getBytes(StandardCharsets.ISO_8859_1));
+            out.flush();
+            BufferedReader reader = new BufferedReader(new InputStreamReader(
+                    tls.getInputStream(), StandardCharsets.ISO_8859_1));
+            String status = reader.readLine();
+            if (status == null || !status.matches("HTTP/1\\.[01] [1-5][0-9]{2}.*"))
+                throw new java.io.IOException("SOCKS5: TLS установлен, но HTTP-ответ не получен");
+            int code = Integer.parseInt(status.substring(9, 12));
+            if (code < 200 || code >= 400)
+                throw new java.io.IOException("HTTPS через SOCKS5 вернул HTTP " + code);
+            String line;
+            while ((line = reader.readLine()) != null && !line.isEmpty()) { }
+            if (line == null) throw new java.io.IOException("HTTPS: оборваны заголовки ответа");
         } finally {
-            close(socket);
+            close(tls);
+            if (tls == null) close(tunnel);
         }
     }
 
@@ -190,19 +216,19 @@ public final class Socks5ProxyBridge {
             upstream = openSocks(cfg, host, port);
             upstream.setSoTimeout(0);
             if (connect) {
-                out.write("HTTP/1.1 200 Connection Established\\r\\nProxy-Agent: KinozalClient\\r\\n\\r\\n".getBytes(StandardCharsets.ISO_8859_1));
+                out.write("HTTP/1.1 200 Connection Established\r\nProxy-Agent: KinozalClient\r\n\r\n".getBytes(StandardCharsets.ISO_8859_1));
                 out.flush();
             } else {
                 URI uri = URI.create(request[1]);
                 String path = uri.isAbsolute() ? (uri.getRawPath().isEmpty() ? "/" : uri.getRawPath())
                         + (uri.getRawQuery() == null ? "" : "?" + uri.getRawQuery()) : request[1];
-                StringBuilder rewritten = new StringBuilder(request[0]).append(' ').append(path).append(' ').append(request[2]).append("\\r\\n");
+                StringBuilder rewritten = new StringBuilder(request[0]).append(' ').append(path).append(' ').append(request[2]).append("\r\n");
                 for (int i = 1; i < lines.length; i++) {
                     String line = lines[i];
                     if (line.isEmpty() || line.toLowerCase(java.util.Locale.ROOT).startsWith("proxy-connection:")) continue;
-                    rewritten.append(line).append("\\r\\n");
+                    rewritten.append(line).append("\r\n");
                 }
-                rewritten.append("\\r\\n");
+                rewritten.append("\r\n");
                 upstream.getOutputStream().write(rewritten.toString().getBytes(StandardCharsets.ISO_8859_1));
                 upstream.getOutputStream().flush();
             }
@@ -211,7 +237,7 @@ public final class Socks5ProxyBridge {
             lastError = safeMessage(e);
             try {
                 if (!client.isClosed()) client.getOutputStream().write(
-                        "HTTP/1.1 502 Bad Gateway\\r\\nConnection: close\\r\\nContent-Length: 0\\r\\n\\r\\n".getBytes(StandardCharsets.ISO_8859_1));
+                        "HTTP/1.1 502 Bad Gateway\r\nConnection: close\r\nContent-Length: 0\r\n\r\n".getBytes(StandardCharsets.ISO_8859_1));
             } catch (Exception ignored) { }
         } finally {
             close(client); close(upstream);
