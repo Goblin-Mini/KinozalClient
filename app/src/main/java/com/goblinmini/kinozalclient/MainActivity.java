@@ -130,7 +130,7 @@ public class MainActivity extends Activity {
     private static class Category { String title, href, method = "GET", body = ""; }
 
     private static class Torrent {
-        String title, href, size, seeds, leeches, uploaded;
+        String title, href, size, seeds, leeches, uploaded, poster;
     }
 
     @Override public void onCreate(Bundle state) {
@@ -462,7 +462,7 @@ public class MainActivity extends Activity {
             }
             if (target.exists() && !target.delete()) throw new java.io.IOException("Cannot replace home cache");
             if (!temp.renameTo(target)) throw new java.io.IOException("Cannot commit home cache");
-            runOnUiThread(() -> TvHomeChannels.sync(this, target));
+            // TV channels are refreshed separately from authenticated channel feeds.
         } catch (Exception ignored) { }
     }
 
@@ -619,6 +619,7 @@ public class MainActivity extends Activity {
             int total = countHomeCards(sections);
             if (!sections.isEmpty()) homeSectionsMemory = new ArrayList<>(sections);
             progress.setVisibility(View.GONE);
+            browserHandler.postDelayed(this::loadTvChannelFeedsInBrowser, 350);
             if (total == 0) {
                 status.setText("Нет соединения");
                 addEmpty("Не удалось получить постеры Kinozal. Проверьте авторизацию и выбранное зеркало.");
@@ -672,6 +673,105 @@ public class MainActivity extends Activity {
                     setHomeProgress(index + 1, paths.length, sections.size());
                     browserHandler.postDelayed(() -> loadHomeSectionsInBrowser(
                             paths, titles, index + 1, sections, 0), 100);
+                });
+            });
+        });
+    }
+
+    private static final String[] TV_CHANNEL_PATHS = {
+            "novinki.php?c=1002",
+            "novinki.php?c=1001",
+            "top.php?c=1002&d=0&f=0&j=&k=0&s=0&t=0",
+            "top.php?c=1001&d=0&f=0&j=&k=0&s=0&t=0"
+    };
+    private static final String[] TV_CHANNEL_TITLES = {
+            "Новинки фильмов", "Новинки сериалов", "Топ фильмов", "Топ сериалов"
+    };
+    private boolean tvChannelsRefreshInProgress;
+
+    private java.io.File tvChannelModelFile() {
+        return new java.io.File(getFilesDir(), "kinozal_tv_channels_v1.json");
+    }
+
+    private void loadTvChannelFeedsInBrowser() {
+        if (tvChannelsRefreshInProgress || sessionWebView == null || isFinishing()) return;
+        tvChannelsRefreshInProgress = true;
+        List<HomeSection> sections = new ArrayList<>();
+        final String generalTopPath = "top.php?c=0&d=0&f=0&j=&k=0&s=0&t=0";
+        for (HomeSection existing : homeSectionsMemory) {
+            if (generalTopPath.equals(existing.path) && !existing.items.isEmpty()) {
+                HomeSection general = new HomeSection("Общий топ Kinozal", generalTopPath);
+                general.items.addAll(existing.items);
+                sections.add(general);
+                break;
+            }
+        }
+        loadNextTvChannelFeed(0, sections);
+    }
+
+    private void loadNextTvChannelFeed(int index, List<HomeSection> sections) {
+        if (index >= TV_CHANNEL_PATHS.length) {
+            removeHomeDuplicates(sections);
+            io.execute(() -> {
+                try {
+                    org.json.JSONArray feeds = new org.json.JSONArray();
+                    for (HomeSection section : sections) {
+                        org.json.JSONObject feed = new org.json.JSONObject();
+                        feed.put("title", section.title);
+                        feed.put("path", section.path);
+                        org.json.JSONArray items = new org.json.JSONArray();
+                        for (HomePoster poster : section.items) {
+                            org.json.JSONObject item = new org.json.JSONObject();
+                            item.put("title", poster.torrent.title);
+                            item.put("href", poster.torrent.href);
+                            item.put("size", poster.torrent.size);
+                            item.put("seeds", poster.torrent.seeds);
+                            item.put("leeches", poster.torrent.leeches);
+                            item.put("uploaded", poster.torrent.uploaded);
+                            item.put("image", poster.imageUrl);
+                            items.put(item);
+                        }
+                        feed.put("items", items);
+                        feeds.put(feed);
+                    }
+                    org.json.JSONObject rootJson = new org.json.JSONObject();
+                    rootJson.put("version", 1);
+                    rootJson.put("mirror", client.getMirror());
+                    rootJson.put("savedAt", System.currentTimeMillis());
+                    rootJson.put("feeds", feeds);
+                    java.io.File target = tvChannelModelFile();
+                    java.io.File temp = new java.io.File(target.getParentFile(), target.getName() + ".tmp");
+                    try (java.io.FileOutputStream out = new java.io.FileOutputStream(temp)) {
+                        out.write(rootJson.toString().getBytes(StandardCharsets.UTF_8));
+                        out.getFD().sync();
+                    }
+                    if (target.exists() && !target.delete()) throw new java.io.IOException("Cannot replace TV channel cache");
+                    if (!temp.renameTo(target)) throw new java.io.IOException("Cannot commit TV channel cache");
+                    runOnUiThread(() -> {
+                        tvChannelsRefreshInProgress = false;
+                        TvHomeChannels.sync(this, target);
+                    });
+                } catch (Exception e) {
+                    runOnUiThread(() -> tvChannelsRefreshInProgress = false);
+                }
+            });
+            return;
+        }
+        final String path = TV_CHANNEL_PATHS[index];
+        final String title = TV_CHANNEL_TITLES[index];
+        fetchBrowserPage(path, null, html -> {
+            if (html == null || html.trim().isEmpty()) {
+                browserHandler.postDelayed(() -> loadNextTvChannelFeed(index + 1, sections), 180);
+                return;
+            }
+            io.execute(() -> {
+                HomeSection section = new HomeSection(title, path);
+                try {
+                    section.items.addAll(parseHomePosters(Jsoup.parse(html, client.getMirror() + "/")));
+                } catch (Exception ignored) { }
+                runOnUiThread(() -> {
+                    if (!section.items.isEmpty()) sections.add(section);
+                    browserHandler.postDelayed(() -> loadNextTvChannelFeed(index + 1, sections), 180);
                 });
             });
         });
@@ -3241,6 +3341,7 @@ public class MainActivity extends Activity {
                 t.seeds = o.optString("seeds", "—");
                 t.leeches = o.optString("leeches", "—");
                 t.uploaded = o.optString("uploaded", "—");
+                t.poster = o.optString("poster", "");
                 if (!t.href.isEmpty()) result.put(t.href, t);
             }
         } catch (Exception ignored) { }
@@ -3253,7 +3354,7 @@ public class MainActivity extends Activity {
             org.json.JSONObject o = new org.json.JSONObject();
             try {
                 o.put("title", t.title); o.put("href", t.href); o.put("size", t.size);
-                o.put("seeds", t.seeds); o.put("leeches", t.leeches); o.put("uploaded", t.uploaded);
+                o.put("seeds", t.seeds); o.put("leeches", t.leeches); o.put("uploaded", t.uploaded); o.put("poster", t.poster == null ? "" : t.poster);
                 array.put(o);
             } catch (Exception ignored) { }
         }
@@ -3415,6 +3516,7 @@ public class MainActivity extends Activity {
             try {
                 Document cachedDoc = Jsoup.parse(cachedHtml, href);
                 TorrentDetails cachedDetails = parseTorrentDetails(cachedDoc, t);
+                t.poster = cachedDetails.poster;
                 saveRecentlyViewed(t);
                 showTorrentDetails(t, cachedDetails);
             } catch (Exception ignored) {
@@ -3454,6 +3556,7 @@ public class MainActivity extends Activity {
                 }
                 synchronized (pageCache) { pageCache.put(cacheKey, html); }
                 diskCache.put(cacheKey, html.getBytes(StandardCharsets.UTF_8));
+                t.poster = details.poster;
                 saveRecentlyViewed(t);
                 if (href.equals(activeTorrentDetailsHref)) {
                     progress.setVisibility(View.GONE);
