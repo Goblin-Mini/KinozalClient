@@ -3275,43 +3275,35 @@ public class MainActivity extends Activity {
     }
 
     private void playTorrent(TorrentDetails data) {
-        if (data.torrentLink == null || data.torrentLink.isEmpty()) {
-            showMessage("Не удалось найти ссылку на торрент на странице раздачи.");
+        // DIAGNOSTIC ONLY: deliberately do not request download.php or fetch a .torrent.
+        // The generated hash is synthetic and cannot identify the real release.
+        String page = data.sourcePage == null ? "" : data.sourcePage;
+        java.util.regex.Matcher idMatcher = java.util.regex.Pattern
+                .compile("(?:[?&]id=)([0-9]+)").matcher(page);
+        if (!idMatcher.find()) {
+            showMessage("Не удалось определить ID раздачи для тестового Magnet.");
             return;
         }
-        if (data.torrentLink.startsWith("magnet:")) {
-            try {
-                Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(data.torrentLink));
-                intent.setPackage("ru.yourok.torrserve");
-                intent.putExtra("poster", data.poster == null ? "" : data.poster);
-                intent.putExtra("title", data.title == null ? "" : data.title);
-                startActivity(intent);
-            } catch (Exception e) {
-                showMessage("Не удалось открыть magnet в TorrServe: " + safe(e.getMessage()));
+        try {
+            String releaseId = idMatcher.group(1);
+            byte[] digest = java.security.MessageDigest.getInstance("SHA-1")
+                    .digest(("kinozal-diagnostic:" + releaseId)
+                            .getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            StringBuilder hash = new StringBuilder(40);
+            for (byte value : digest) {
+                hash.append(String.format(java.util.Locale.ROOT, "%02x", value & 0xff));
             }
-            return;
+            String magnet = "magnet:?xt=urn:btih:" + hash
+                    + "&dn=" + android.net.Uri.encode(data.title == null ? "" : data.title);
+            Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(magnet));
+            intent.setPackage("ru.yourok.torrserve");
+            intent.putExtra("poster", data.poster == null ? "" : data.poster);
+            intent.putExtra("title", data.title == null ? "" : data.title);
+            startActivity(intent);
+            showMessage("Тестовый Magnet передан в TorrServe. Хеш искусственный: реальную раздачу он не найдёт.");
+        } catch (Exception e) {
+            showMessage("Не удалось открыть тестовый Magnet в TorrServe: " + safe(e.getMessage()));
         }
-
-        WebView web = sessionWebView;
-        if (web == null) {
-            downloadTorrentNativeForPlayback(data);
-            return;
-        }
-
-        // On the first visit the hidden WebView can still be finishing a
-        // catalogue/details navigation. Explicitly establish the detail-page
-        // context before fetching download.php, just as the file-download path does.
-        String detailsPage = data.sourcePage;
-        if (detailsPage == null || detailsPage.trim().isEmpty()) {
-            detailsPage = data.torrentLink;
-        }
-        fetchBrowserPage(detailsPage, null, html -> {
-            if (html == null || html.isEmpty()) {
-                downloadTorrentNativeForPlayback(data);
-                return;
-            }
-            startMagnetWebViewFetch(data, web, 0);
-        });
     }
 
     private void startMagnetWebViewFetch(TorrentDetails data, WebView web, int retry) {
