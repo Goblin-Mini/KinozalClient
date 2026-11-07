@@ -4018,6 +4018,8 @@ public class MainActivity extends Activity {
         String title = "", poster = "", torrentLink = "", sourcePage = "";
         String imdbRating = "—", kinopoiskRating = "—", kinozalRating = "—", kinozalStars = "☆☆☆☆☆☆☆☆☆☆", kinozalVotes = "";
         final java.util.LinkedHashMap<String, String> fields = new java.util.LinkedHashMap<>();
+        final java.util.List<String> screenshotThumbs = new java.util.ArrayList<>();
+        final java.util.List<String> screenshotFull = new java.util.ArrayList<>();
     }
 
     // Warm the next likely details page while the user navigates the list.
@@ -4171,6 +4173,21 @@ public class MainActivity extends Activity {
 
         Element technical = doc.selectFirst("#tabs");
         if (technical != null) extractBoldFields(technical, data.fields);
+        // Extract Kinozal screenshot thumbnails and their full-size links.
+        if (technical != null) {
+            for (Element link : technical.select("a:has(img)")) {
+                Element image = link.selectFirst("img");
+                if (image == null) continue;
+                String thumb = image.absUrl("src");
+                String full = link.absUrl("href");
+                if (thumb == null || thumb.trim().isEmpty()) continue;
+                if (full == null || full.trim().isEmpty()) full = thumb;
+                if (!data.screenshotThumbs.contains(thumb)) {
+                    data.screenshotThumbs.add(thumb);
+                    data.screenshotFull.add(full);
+                }
+            }
+        }
         data.fields.putIfAbsent("Размер", torrent.size);
 
         Element ogImage = doc.selectFirst("meta[property=og:image]");
@@ -4351,14 +4368,14 @@ public class MainActivity extends Activity {
         tabs.setOrientation(LinearLayout.HORIZONTAL);
         Button descriptionTab = button("Описание");
         Button technicalTab = button("Техданные");
+        Button screenshotsTab = button("Скриншоты");
         Button jackettTab = button("Другие раздачи");
-        tabs.addView(descriptionTab, new LinearLayout.LayoutParams(0, dp(44), 1));
-        LinearLayout.LayoutParams technicalParams = new LinearLayout.LayoutParams(0, dp(44), 1);
-        technicalParams.leftMargin = dp(6);
-        tabs.addView(technicalTab, technicalParams);
-        LinearLayout.LayoutParams jackettParams = new LinearLayout.LayoutParams(0, dp(44), 1);
-        jackettParams.leftMargin = dp(6);
-        tabs.addView(jackettTab, jackettParams);
+        Button[] tabButtons = {descriptionTab, technicalTab, screenshotsTab, jackettTab};
+        for (int tabIndex = 0; tabIndex < tabButtons.length; tabIndex++) {
+            LinearLayout.LayoutParams tabParams = new LinearLayout.LayoutParams(0, dp(44), 1);
+            if (tabIndex > 0) tabParams.leftMargin = dp(5);
+            tabs.addView(tabButtons[tabIndex], tabParams);
+        }
         detailsColumn.addView(tabs);
 
         ScrollView detailsScroll = new ScrollView(this);
@@ -4378,6 +4395,52 @@ public class MainActivity extends Activity {
         final int[] active = {0};
         Runnable render = () -> {
             detailContent.removeAllViews();
+            if (active[0] == 2) {
+                if (data.screenshotThumbs.isEmpty()) {
+                    detailContent.addView(text("Скриншоты на странице раздачи не найдены.",
+                            15, Color.LTGRAY, false));
+                } else {
+                    detailContent.addView(text("Скриншоты (" + data.screenshotThumbs.size() + ")",
+                            13, TEAL, true));
+                    for (int shot = 0; shot < data.screenshotThumbs.size(); shot += 2) {
+                        LinearLayout shotRow = new LinearLayout(this);
+                        shotRow.setOrientation(LinearLayout.HORIZONTAL);
+                        shotRow.setGravity(Gravity.TOP);
+                        for (int col = 0; col < 2 && shot + col < data.screenshotThumbs.size(); col++) {
+                            final int shotIndex = shot + col;
+                            ImageView preview = new ImageView(this);
+                            preview.setScaleType(ImageView.ScaleType.FIT_CENTER);
+                            preview.setBackground(shape(PANEL, 0));
+                            preview.setFocusable(true);
+                            preview.setFocusableInTouchMode(true);
+                            preview.setContentDescription("Скриншот " + (shotIndex + 1));
+                            preview.setOnFocusChangeListener((v, focused) ->
+                                    v.setBackground(shape(focused ? Color.rgb(65, 72, 73) : PANEL,
+                                            focused ? GOLD : 0)));
+                            preview.setOnClickListener(v -> {
+                                String fullUrl = data.screenshotFull.get(shotIndex);
+                                try {
+                                    startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(fullUrl)));
+                                } catch (Exception e) {
+                                    showMessage("Не удалось открыть полноразмерный скриншот.");
+                                }
+                            });
+                            LinearLayout.LayoutParams imageParams =
+                                    new LinearLayout.LayoutParams(0, dp(190), 1);
+                            if (col == 1) imageParams.leftMargin = dp(8);
+                            shotRow.addView(preview, imageParams);
+                            loadImageIntoView(data.screenshotThumbs.get(shotIndex), preview);
+                        }
+                        detailContent.addView(shotRow,
+                                new LinearLayout.LayoutParams(-1, dp(198)));
+                    }
+                }
+                descriptionTab.setBackground(shape(descriptionTab.hasFocus() ? Color.rgb(65, 72, 73) : PANEL, descriptionTab.hasFocus() ? GOLD : 0));
+                technicalTab.setBackground(shape(technicalTab.hasFocus() ? Color.rgb(65, 72, 73) : PANEL, technicalTab.hasFocus() ? GOLD : 0));
+                screenshotsTab.setBackground(shape(screenshotsTab.hasFocus() ? Color.rgb(65, 72, 73) : PANEL, screenshotsTab.hasFocus() ? GOLD : 0));
+                detailsScroll.scrollTo(0, 0);
+                return;
+            }
             String[] keys = groups[active[0]];
             boolean any = false;
             int index = 0;
@@ -4419,14 +4482,18 @@ public class MainActivity extends Activity {
             // while the default focus is on Просмотр.
             descriptionTab.setBackground(shape(descriptionTab.hasFocus() ? Color.rgb(65, 72, 73) : PANEL, descriptionTab.hasFocus() ? GOLD : 0));
             technicalTab.setBackground(shape(technicalTab.hasFocus() ? Color.rgb(65, 72, 73) : PANEL, technicalTab.hasFocus() ? GOLD : 0));
+            screenshotsTab.setBackground(shape(screenshotsTab.hasFocus() ? Color.rgb(65, 72, 73) : PANEL, screenshotsTab.hasFocus() ? GOLD : 0));
             detailsScroll.scrollTo(0, 0);
         };
         descriptionTab.setOnFocusChangeListener((v, focused) ->
                 v.setBackground(shape(focused ? Color.rgb(65, 72, 73) : PANEL, focused ? GOLD : 0)));
         technicalTab.setOnFocusChangeListener((v, focused) ->
                 v.setBackground(shape(focused ? Color.rgb(65, 72, 73) : PANEL, focused ? GOLD : 0)));
+        screenshotsTab.setOnFocusChangeListener((v, focused) ->
+                v.setBackground(shape(focused ? Color.rgb(65, 72, 73) : PANEL, focused ? GOLD : 0)));
         descriptionTab.setOnClickListener(v -> { active[0] = 0; render.run(); });
         technicalTab.setOnClickListener(v -> { active[0] = 1; render.run(); });
+        screenshotsTab.setOnClickListener(v -> { active[0] = 2; render.run(); });
         jackettTab.setOnClickListener(v -> searchJackett(torrent.title, data.poster));
         render.run();
 
