@@ -1102,7 +1102,7 @@ public class MainActivity extends Activity {
                 list.removeViewAt(i);
                 list.addView(sectionTitle, i, titleParams);
                 list.addView(horizontal, i + 1, rowParams);
-                animateContentTransition(horizontal);
+                horizontal.post(this::scheduleVisibleHomePosterLoad);
                 return;
             }
         }
