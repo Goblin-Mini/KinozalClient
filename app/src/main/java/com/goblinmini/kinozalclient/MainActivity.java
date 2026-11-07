@@ -402,13 +402,26 @@ public class MainActivity extends Activity {
         loadInitialCatalog(0);
     }
 
-    private static final String[] HOME_PATHS = {"novinki.php", "top.php?c=0&d=0&f=0&j=&k=0&s=0&t=0",
-            "top.php?c=0&d=0&f=0&j=&k=0&s=0&t=0&w=1",
-            "top.php?c=0&d=0&f=0&j=&k=0&s=0&t=0&w=2",
-            "top.php?j=%D0%BB%D1%83%D1%87%D1%88%D0%B8%D0%B9%20%D1%84%D0%B8%D0%BB%D1%8C%D0%BC%20%D0%9E%D1%81%D0%BA%D0%B0%D1%80",
-            "top.php?j=Netflix", "top.php?j=HBO", "top.php?j=Walt%20Disney%20Pictures", "top.php?j=Marvel"};
-    private static final String[] HOME_TITLES = {"Новинки", "Топ раздач", "Топ недели", "Топ месяца",
-            "Топ Оскар", "Топ Netflix", "Топ HBO", "Топ Walt Disney", "Топ Marvel"};
+    private static final String[] HOME_PATHS = {
+            "novinki.php",
+            "top.php?j=&t=0&d=0&k=0&f=0&w=2&s=0",
+            "top.php?j=&t=31&d=0&k=0&f=0&w=2&s=0",
+            "top.php?j=&t=32&d=0&k=0&f=0&w=2&s=0",
+            "top.php?j=&t=1&d=0&k=0&f=0&w=2&s=0",
+            "top.php?t=2&d=0&f=0&k=0&j=&s=0&w=2",
+            "top.php?j=&t=4&d=0&k=0&f=0&w=2&s=0",
+            "top.php?j=&t=7&d=0&k=0&f=0&w=2&s=0"
+    };
+    private static final String[] HOME_TITLES = {
+            "Новинки кино",
+            "Топ раздач месяца",
+            "Топ русские сериалы",
+            "Топ иностранные сериалы",
+            "Топ фильмы",
+            "Топ мульты",
+            "Топ музыка",
+            "Топ игр"
+    };
 
     private void loadInitialCatalog(int startupRetry) {
         currentPath = "";
