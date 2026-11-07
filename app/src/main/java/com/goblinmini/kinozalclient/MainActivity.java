@@ -456,9 +456,7 @@ public class MainActivity extends Activity {
                 addEmpty("Не удалось получить постеры Kinozal. Проверьте авторизацию и выбранное зеркало.");
             } else {
                 setCatalogStatus("Постеров", total);
-                status.setText("Главная · Лент показано: " + sections.size() + "/" + paths.length
-                        + "\nЗапросов обработано: " + paths.length + "/" + paths.length
-                        + (homeCacheDisplayed ? "\nКэш обновлён" : ""));
+                status.setText("Главная · Лент показано: " + sections.size() + "/" + paths.length);
             }
             return;
         }
@@ -1110,6 +1108,11 @@ public class MainActivity extends Activity {
         LinearLayout.LayoutParams countryParams = new LinearLayout.LayoutParams(-1, dp(42));
         countryParams.topMargin = dp(2);
         sidebar.addView(exitCountryView, countryParams);
+        TextView appVersionView = text("Версия 0.5.14", 10, TEAL, true);
+        appVersionView.setGravity(Gravity.CENTER);
+        appVersionView.setSingleLine(true);
+        appVersionView.setPadding(dp(2), dp(2), dp(2), dp(2));
+        sidebar.addView(appVersionView, new LinearLayout.LayoutParams(-1, dp(22)));
 
         heading = text("Главная", 25, GOLD, true);
         LinearLayout.LayoutParams headingParams = new LinearLayout.LayoutParams(-1, dp(42));
@@ -1238,7 +1241,7 @@ public class MainActivity extends Activity {
         Button restore = button("⇩   Восстановить из копии");
         Button about = button("ⓘ   О приложении");
         Button close = button("Закрыть");
-        for (Button action : new Button[]{login, mirrorButton, updates, diagnostics, socks5, jackett, about, close}) {
+        for (Button action : new Button[]{login, mirrorButton, updates, diagnostics, socks5, jackett}) {
             action.setTextSize(15);
             action.setGravity(Gravity.CENTER);
             LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-1, dp(48));
@@ -1257,7 +1260,15 @@ public class MainActivity extends Activity {
         LinearLayout.LayoutParams restoreParams = new LinearLayout.LayoutParams(0, -1, 1f);
         restoreParams.leftMargin = dp(8);
         backupRow.addView(restore, restoreParams);
-        panel.addView(backupRow, 0);
+        // Keep backup actions immediately below the Jackett search, in the same two-column row.
+        panel.addView(backupRow);
+        for (Button action : new Button[]{about, close}) {
+            action.setTextSize(15);
+            action.setGravity(Gravity.CENTER);
+            LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-1, dp(48));
+            params.bottomMargin = dp(8);
+            panel.addView(action, params);
+        }
         login.setOnClickListener(v -> { settingsDialog.dismiss(); showLogin(); });
         mirrorButton.setOnClickListener(v -> { settingsDialog.dismiss(); chooseMirror(); });
         updates.setOnClickListener(v -> { settingsDialog.dismiss(); new UpdateManager(this).check(); });
