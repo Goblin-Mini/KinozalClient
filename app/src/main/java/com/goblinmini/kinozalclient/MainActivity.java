@@ -2337,7 +2337,9 @@ public class MainActivity extends Activity {
         java.util.HashMap<String, Object> preserved = new java.util.HashMap<>();
         if (excluded != null) for (String key : excluded) if (old.containsKey(key)) preserved.put(key, old.get(key));
         if (replace) editor.clear();
-        for (String key : values.keySet()) {
+        java.util.Iterator<String> keys = values.keys();
+        while (keys.hasNext()) {
+            String key = keys.next();
             if (key.startsWith("__set__")) continue;
             if (excluded != null && java.util.Arrays.asList(excluded).contains(key)) continue;
             Object value = values.get(key);
