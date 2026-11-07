@@ -461,53 +461,63 @@ public class MainActivity extends Activity {
     }
 
     private void refreshHomeInBackground() {
-        if (homeRefreshInProgress || sessionWebView == null) return;
+        if (homeRefreshInProgress) return;
         homeRefreshInProgress = true;
-        String[] paths = {"novinki.php", "top.php?c=0&d=0&f=0&j=&k=0&s=0&t=0",
+        final String[] paths = {"novinki.php", "top.php?c=0&d=0&f=0&j=&k=0&s=0&t=0",
                 "top.php?c=0&d=0&f=0&j=&k=0&s=0&t=0&w=1",
                 "top.php?c=0&d=0&f=0&j=&k=0&s=0&t=0&w=2",
                 "top.php?j=%D0%BB%D1%83%D1%87%D1%88%D0%B8%D0%B9%20%D1%84%D0%B8%D0%BB%D1%8C%D0%BC%20%D0%9E%D1%81%D0%BA%D0%B0%D1%80",
                 "top.php?j=Netflix", "top.php?j=HBO",
                 "top.php?j=Walt%20Disney%20Pictures", "top.php?j=Marvel"};
-        String[] titles = {"Новинки", "Топ раздач", "Топ недели", "Топ месяца",
+        final String[] titles = {"Новинки", "Топ раздач", "Топ недели", "Топ месяца",
                 "Топ Оскар", "Топ Netflix", "Топ HBO", "Топ Walt Disney", "Топ Marvel"};
-        fetchHomeRefresh(paths, titles, 0, new ArrayList<>());
-    }
-
-    private void fetchHomeRefresh(String[] paths, String[] titles, int index,
-            List<HomeSection> refreshed) {
-        if (index >= paths.length) {
-            removeHomeDuplicates(refreshed);
-            homeSectionsMemory = new ArrayList<>(refreshed);
-            homeRefreshInProgress = false;
-            return;
-        }
-        fetchBrowserPage(paths[index], null, html -> {
-            if (html == null || html.trim().isEmpty()) {
-                browserHandler.postDelayed(() -> fetchHomeRefresh(paths, titles,
-                        index + 1, refreshed), 120);
-                return;
-            }
-            io.execute(() -> {
-                HomeSection section = new HomeSection(titles[index], paths[index]);
-                try {
-                    section.items.addAll(parseHomePosters(Jsoup.parse(html, client.getMirror() + "/")));
-                    if (!section.items.isEmpty()) {
-                        diskCache.put("home|" + client.getMirror() + "|" + paths[index],
+        final String browserCookies = CookieManager.getInstance().getCookie(client.getMirror());
+        // Let the cached screen settle first. Refresh uses native HTTP on the
+        // I/O executor; it must never navigate the shared WebView.
+        browserHandler.postDelayed(() -> io.execute(() -> {
+            try {
+                if (browserCookies != null && !browserCookies.isEmpty()) {
+                    client.importBrowserCookies(browserCookies);
+                }
+                java.util.Map<String, HomeSection> merged = new java.util.LinkedHashMap<>();
+                for (HomeSection old : homeSectionsMemory) merged.put(old.path, old);
+                List<HomeSection> changed = new ArrayList<>();
+                for (int i = 0; i < paths.length; i++) {
+                    try {
+                        String html = client.fetch(paths[i]);
+                        if (html == null || html.trim().isEmpty()) continue;
+                        HomeSection section = new HomeSection(titles[i], paths[i]);
+                        section.items.addAll(parseHomePosters(
+                                Jsoup.parse(html, client.getMirror() + "/")));
+                        if (section.items.isEmpty()) continue;
+                        List<HomeSection> oneFeed = new ArrayList<>();
+                        oneFeed.add(section);
+                        removeHomeDuplicates(oneFeed);
+                        if (section.items.isEmpty()) continue;
+                        diskCache.put("home|" + client.getMirror() + "|" + paths[i],
                                 html.getBytes(StandardCharsets.UTF_8));
+                        HomeSection previous = merged.get(paths[i]);
+                        if (previous == null || isHomeSectionChanged(section)) changed.add(section);
+                        merged.put(paths[i], section);
+                    } catch (Exception ignored) {
+                        // Keep the last known-good feed when a background request fails.
                     }
-                } catch (Exception ignored) { }
+                }
+                List<HomeSection> refreshed = new ArrayList<>(merged.values());
+                removeHomeDuplicates(refreshed);
                 runOnUiThread(() -> {
-                    if (!section.items.isEmpty()) {
-                        refreshed.add(section);
-                        if (isHomeSectionChanged(section)) {
-                            if (currentPath == null || currentPath.isEmpty()) renderHomeSection(section);
-                        }
+                    homeSectionsMemory = refreshed;
+                    // Never interrupt a category screen. If Home is visible,
+                    // replace only feeds whose content actually changed.
+                    if (currentPath == null || currentPath.isEmpty()) {
+                        for (HomeSection section : changed) renderHomeSection(section);
                     }
-                    fetchHomeRefresh(paths, titles, index + 1, refreshed);
+                    homeRefreshInProgress = false;
                 });
-            });
-        });
+            } catch (Exception ignored) {
+                runOnUiThread(() -> homeRefreshInProgress = false);
+            }
+        }), 15000);
     }
 
     private boolean isHomeSectionChanged(HomeSection updated) {
