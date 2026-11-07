@@ -125,30 +125,22 @@ final class TvHomeChannels {
                     replacePrograms(activity, helper, channelIds[i], CHANNEL_KEYS[i], programs);
                 }
 
-                List<Long> needsApproval = new ArrayList<>();
-                for (int i = 0; i < channelIds.length; i++) {
-                    if (channelIds[i] <= 0) continue;
-                    // Android TV permits requestChannelBrowsable() only for the app's
-                    // first channel. Every additional channel requires the explicit
-                    // system approval activity; calling requestChannelBrowsable() for
-                    // all six silently leaves channels hidden on many launchers.
-                    if (hadChannels || i != firstValidIndex(channelIds)) needsApproval.add(channelIds[i]);
-                }
+                // Ask Android TV to pin only the first collection (Новинки кино).
+                // Other collections are published silently and must not trigger
+                // a chain of system confirmation dialogs.
                 final long firstChannel = !hadChannels ? firstValidChannel(channelIds) : -1L;
                 activity.runOnUiThread(() -> {
                     if (activity.isFinishing()) return;
                     try {
                         if (firstChannel > 0) {
                             TvContractCompat.requestChannelBrowsable(activity, firstChannel);
-                            Log.i(TAG, "Requested default channel visibility id=" + firstChannel);
+                            Log.i(TAG, "Requested home-screen visibility only for Новинки кино id=" + firstChannel);
                         }
                         synchronized (PENDING_BROWSABLE) {
                             PENDING_BROWSABLE.clear();
-                            PENDING_BROWSABLE.addAll(needsApproval);
                         }
-                        requestNextBrowsable(activity);
                     } catch (Exception e) {
-                        Log.e(TAG, "Could not request channel visibility", e);
+                        Log.e(TAG, "Could not request Новинки кино channel visibility", e);
                     }
                 });
             } catch (SecurityException e) {
