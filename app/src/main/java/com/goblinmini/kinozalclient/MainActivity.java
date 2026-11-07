@@ -3280,7 +3280,6 @@ public class MainActivity extends Activity {
             showMessage("Нет авторизованной WebView-сессии Kinozal. Сначала откройте каталог.");
             return;
         }
-
         String page = data.sourcePage == null ? "" : data.sourcePage.trim();
         java.util.regex.Matcher idMatcher = java.util.regex.Pattern
                 .compile("(?:[?&]id=)([0-9]+)").matcher(page);
@@ -3288,98 +3287,74 @@ public class MainActivity extends Activity {
             showMessage("Не удалось определить ID раздачи.");
             return;
         }
-        final String releaseId = idMatcher.group(1);
-        final Uri source = Uri.parse(page);
-        final String endpoint = source.buildUpon()
+        String releaseId = idMatcher.group(1);
+        Uri source = Uri.parse(page);
+        String endpoint = source.buildUpon()
                 .path("/get_srv_details.php")
                 .clearQuery()
                 .appendQueryParameter("id", releaseId)
                 .appendQueryParameter("action", "2")
                 .build().toString();
 
-        // Establish the authenticated page context and Referer exactly as the
-        // normal torrent-download flow does before calling Kinozal's endpoint.
-        showMessage("Подготавливаю авторизованную сессию Kinozal…");
-        fetchBrowserPage(page, null, html -> {
-            if (html == null || html.isEmpty()) {
-                showMessage("Не удалось открыть карточку раздачи перед запросом infohash. Проверьте авторизацию и соединение.");
+        // Sync the latest WebView cookies into the native cookie jar before
+        // issuing the endpoint request. This is a small header-only operation.
+        try {
+            String browserCookies = CookieManager.getInstance().getCookie(client.getMirror());
+            if (browserCookies != null && !browserCookies.isEmpty()) {
+                client.importBrowserCookies(browserCookies);
+                client.saveBrowserCookies(browserCookies);
+            }
+        } catch (Exception e) {
+            showMessage("Не удалось синхронизировать cookies Kinozal: " + safe(e.getMessage()));
+            return;
+        }
+
+        showMessage("Запрашиваю infohash через native HTTP…");
+        io.execute(() -> {
+            String response;
+            try {
+                response = client.fetchTextWithReferer(endpoint, page);
+            } catch (Exception e) {
+                String error = safe(e.getMessage());
+                runOnUiThread(() -> showMessage("Ошибка native-запроса infohash: " + error));
                 return;
             }
-            if (sessionWebView == null) {
-                showMessage("Авторизованная WebView-сессия закрыта.");
-                return;
+
+            // Kinozal TV 1.13 parses the value from the first <li> entry.
+            // Require a real 40-character BitTorrent infohash before creating a magnet.
+            java.util.regex.Matcher itemMatcher = java.util.regex.Pattern
+                    .compile("(?is)<li>\\s*[^<:]*:([^<]*)</li>").matcher(response);
+            String candidate = null;
+            if (itemMatcher.find()) candidate = itemMatcher.group(1).trim();
+            if (candidate == null || !candidate.matches("(?i)[0-9a-f]{40}")) {
+                java.util.regex.Matcher hashMatcher = java.util.regex.Pattern
+                        .compile("(?i)\\b[0-9a-f]{40}\\b").matcher(
+                                candidate == null ? response : candidate);
+                if (hashMatcher.find()) candidate = hashMatcher.group();
             }
-
-            final WebView requestWeb = sessionWebView;
-            final boolean[] completed = {false};
-            final Runnable timeout = () -> {
-                if (completed[0]) return;
-                completed[0] = true;
-                requestWeb.removeJavascriptInterface("KinozalInfoHashBridge");
-                showMessage("Kinozal не ответил на запрос infohash за 20 секунд после открытия карточки.");
-            };
-            browserHandler.postDelayed(timeout, 20000);
-
-            requestWeb.addJavascriptInterface(new Object() {
-                @JavascriptInterface
-                public void onInfoHashResult(int statusCode, String responseUrl,
-                        String contentType, String body) {
-                    runOnUiThread(() -> {
-                        if (completed[0]) return;
-                        completed[0] = true;
-                        browserHandler.removeCallbacks(timeout);
-                        requestWeb.removeJavascriptInterface("KinozalInfoHashBridge");
-
-                        String response = body == null ? "" : body;
-                        java.util.regex.Matcher hashMatcher = java.util.regex.Pattern
-                                .compile("[0-9a-fA-F]{40}").matcher(response);
-                        if (statusCode < 200 || statusCode >= 300) {
-                            String detail = response.replaceAll("\\s+", " ").trim();
-                            if (detail.length() > 120) detail = detail.substring(0, 120);
-                            showMessage("get_srv_details.php: HTTP " + statusCode
-                                    + (detail.isEmpty() ? "" : " — " + detail));
-                            return;
-                        }
-                        if (!hashMatcher.find()) {
-                            String preview = response.replaceAll("\\s+", " ").trim();
-                            if (preview.length() > 180) preview = preview.substring(0, 180);
-                            showMessage("Ответ action=2 получен, infohash не найден. Тип: "
-                                    + (contentType == null ? "неизвестен" : contentType)
-                                    + ". URL: " + (responseUrl == null ? "" : responseUrl)
-                                    + ". Ответ: " + (preview.isEmpty() ? "(пусто)" : preview));
-                            return;
-                        }
-
-                        String hash = hashMatcher.group().toLowerCase(java.util.Locale.ROOT);
-                        String magnet = "magnet:?xt=urn:btih:" + hash
-                                + "&dn=" + Uri.encode(data.title == null ? "" : data.title);
-                        Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(magnet));
-                        intent.setPackage("ru.yourok.torrserve");
-                        intent.putExtra("poster", data.poster == null ? "" : data.poster);
-                        intent.putExtra("title", data.title == null ? "" : data.title);
-                        try {
-                            startActivity(intent);
-                            showMessage("Получен настоящий infohash Kinozal. Magnet передан в TorrServe.");
-                        } catch (Exception e) {
-                            showMessage("Infohash получен (" + hash
-                                    + "), но TorrServe не открыл Magnet: " + safe(e.getMessage()));
-                        }
-                    });
+            final String hash = candidate == null ? null : candidate.toLowerCase(java.util.Locale.ROOT);
+            runOnUiThread(() -> {
+                if (hash == null || !hash.matches("[0-9a-f]{40}")) {
+                    String preview = response.replaceAll("\\s+", " ").trim();
+                    if (preview.length() > 220) preview = preview.substring(0, 220);
+                    showMessage("Ответ action=2 получен, но infohash не распознан. Ответ: "
+                            + (preview.isEmpty() ? "(пусто)" : preview));
+                    return;
                 }
-            }, "KinozalInfoHashBridge");
-
-            String script = "(function(){"
-                    + "var u=" + org.json.JSONObject.quote(endpoint) + ";"
-                    + "try{fetch(u,{method:'GET',credentials:'include',cache:'no-store',"
-                    + "redirect:'follow',headers:{'X-Requested-With':'XMLHttpRequest'}})"
-                    + ".then(function(r){return r.text().then(function(t){"
-                    + "window.KinozalInfoHashBridge.onInfoHashResult(r.status,r.url,"
-                    + "r.headers.get('content-type')||'',String(t||'').slice(0,4096));"
-                    + "});})"
-                    + ".catch(function(e){window.KinozalInfoHashBridge.onInfoHashResult(0,u,'',String(e));});"
-                    + "}catch(e){window.KinozalInfoHashBridge.onInfoHashResult(0,u,'',String(e));}"
-                    + "})()";
-            requestWeb.evaluateJavascript(script, null);
+                String magnet = "magnet:?xt=urn:btih:" + hash
+                        + "&dn=" + Uri.encode(data.title == null ? "" : data.title);
+                Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(magnet));
+                intent.setPackage("ru.yourok.torrserve");
+                intent.putExtra("poster", data.poster == null ? "" : data.poster);
+                intent.putExtra("title", data.title == null ? "" : data.title);
+                try {
+                    startActivity(intent);
+                    showMessage("Получен настоящий infohash Kinozal. Magnet передан в TorrServe.");
+                } catch (Exception e) {
+                    showMessage("Infohash получен (" + hash
+                            + "), но TorrServe не открыл Magnet: " + safe(e.getMessage()));
+                }
+            });
         });
     }
 
