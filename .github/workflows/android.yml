@@ -42,7 +42,7 @@ jobs:
         run: gradle --no-daemon assembleDebug
 
       - name: Upload debug APK
-        if: github.event_name == 'pull_request'
+        if: github.event_name == 'pull_request' || github.ref_name == 'feature/magnet-playback'
         uses: actions/upload-artifact@v4
         with:
           name: KinozalClient-debug
@@ -61,7 +61,7 @@ jobs:
           test -s "$RUNNER_TEMP/kinozal-release.jks"
 
       - name: Build signed release APK
-        if: github.event_name != 'pull_request'
+        if: github.event_name != 'pull_request' && github.ref_name != 'feature/magnet-playback'
         env:
           KINOZAL_KEYSTORE_FILE: ${{ runner.temp }}/kinozal-release.jks
           KINOZAL_STORE_PASSWORD: ${{ secrets.KINOZAL_STORE_PASSWORD }}
@@ -83,7 +83,7 @@ jobs:
           echo "VERSION_NAME=$VERSION_NAME" >> "$GITHUB_ENV"
 
       - name: Publish GitHub Release
-        if: github.event_name != 'pull_request'
+        if: github.event_name != 'pull_request' && github.ref_name != 'feature/magnet-playback'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ env.VERSION_CODE }}
