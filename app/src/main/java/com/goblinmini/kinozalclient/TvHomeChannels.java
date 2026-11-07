@@ -27,10 +27,27 @@ import java.util.concurrent.Executors;
 
 final class TvHomeChannels {
     private static final String TAG = "KinozalTvChannels";
-    private static final String PREFS = "kinozal_tv_channels";
-    private static final String[] FEED_PATHS = {"novinki.php", "top.php?c=0&d=0&f=0&j=&k=0&s=0&t=0"};
-    private static final String[] CHANNEL_IDS = {"kinozal:novinki", "kinozal:top"};
-    private static final String[] CHANNEL_NAMES = {"Kinozal — Новинки", "Kinozal — Топ раздач"};
+    private static final String PREFS = "kinozal_settings";
+    private static final String RECENT_KEY = "recently_viewed";
+    private static final String[] CHANNEL_KEYS = {
+            "new_movies", "new_series", "top_movies", "top_series", "top_all", "continue"
+    };
+    private static final String[] CHANNEL_NAMES = {
+            "Kinozal — Новинки фильмов",
+            "Kinozal — Новинки сериалов",
+            "Kinozal — Топ фильмов",
+            "Kinozal — Топ сериалов",
+            "Kinozal — Общий топ",
+            "Kinozal — Продолжить просмотр"
+    };
+    private static final String[] FEED_PATHS = {
+            "novinki.php?c=1002",
+            "novinki.php?c=1001",
+            "top.php?c=1002&d=0&f=0&j=&k=0&s=0&t=0",
+            "top.php?c=1001&d=0&f=0&j=&k=0&s=0&t=0",
+            "top.php?c=0&d=0&f=0&j=&k=0&s=0&t=0",
+            "local:recently-viewed"
+    };
     private static final ExecutorService EXECUTOR = Executors.newSingleThreadExecutor();
 
     private TvHomeChannels() { }
@@ -41,49 +58,48 @@ final class TvHomeChannels {
             try {
                 if (!modelFile.isFile() || modelFile.length() <= 0 || modelFile.length() > 8L * 1024L * 1024L) return;
                 JSONObject root = new JSONObject(new String(Files.readAllBytes(modelFile.toPath()), StandardCharsets.UTF_8));
+                if (root.optInt("version") != 1) return;
+                String savedMirror = root.optString("mirror", "");
+                if (savedMirror.isEmpty()) return;
                 JSONArray feeds = root.optJSONArray("feeds");
                 if (feeds == null) return;
 
                 PreviewChannelHelper helper = new PreviewChannelHelper(activity);
-                long[] ids = new long[2];
-                boolean[] created = new boolean[2];
+                long[] channelIds = new long[CHANNEL_KEYS.length];
+                boolean[] created = new boolean[CHANNEL_KEYS.length];
                 Bitmap logo = loadAppLogo(activity);
 
-                for (int index = 0; index < FEED_PATHS.length; index++) {
-                    JSONObject feed = findFeed(feeds, FEED_PATHS[index]);
-                    if (feed == null) continue;
-                    PreviewChannel channel = findChannel(helper, CHANNEL_IDS[index]);
+                for (int i = 0; i < CHANNEL_KEYS.length; i++) {
+                    PreviewChannel channel = findChannel(helper, "kinozal:" + CHANNEL_KEYS[i]);
                     if (channel == null) {
                         Intent appIntent = new Intent(activity, MainActivity.class);
                         appIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
                         PreviewChannel.Builder builder = new PreviewChannel.Builder()
-                                .setDisplayName(CHANNEL_NAMES[index])
-                                .setDescription(index == 0 ? "Свежие публикации Kinozal" : "Самые популярные раздачи Kinozal")
-                                .setInternalProviderId(CHANNEL_IDS[index])
+                                .setDisplayName(CHANNEL_NAMES[i])
+                                .setDescription("Подборка раздач с " + savedMirror)
+                                .setInternalProviderId("kinozal:" + CHANNEL_KEYS[i])
                                 .setAppLinkIntent(appIntent);
                         if (logo != null) builder.setLogo(logo);
                         long id = helper.publishChannel(builder.build());
                         if (id < 0) continue;
-                        ids[index] = id;
-                        created[index] = true;
+                        channelIds[i] = id;
+                        created[i] = true;
                     } else {
-                        ids[index] = channel.getId();
+                        channelIds[i] = channel.getId();
                     }
-                    replacePrograms(activity, helper, ids[index], CHANNEL_IDS[index], feed.optJSONArray("items"));
+
+                    JSONArray programs = i == 5 ? readRecentPrograms(activity) : findFeedItems(feeds, FEED_PATHS[i]);
+                    replacePrograms(activity, helper, channelIds[i], CHANNEL_KEYS[i], programs);
                 }
 
                 activity.runOnUiThread(() -> {
-                    try {
-                        if (created[0] && ids[0] > 0) {
-                            TvContractCompat.requestChannelBrowsable(activity, ids[0]);
+                    for (int i = 0; i < channelIds.length; i++) {
+                        if (!created[i] || channelIds[i] <= 0 || activity.isFinishing()) continue;
+                        try {
+                            TvContractCompat.requestChannelBrowsable(activity, channelIds[i]);
+                        } catch (Exception e) {
+                            Log.w(TAG, "Could not request visibility for " + CHANNEL_NAMES[i], e);
                         }
-                        if (created[1] && ids[1] > 0 && !activity.isFinishing()) {
-                            Intent request = new Intent(TvContractCompat.ACTION_REQUEST_CHANNEL_BROWSABLE);
-                            request.putExtra(TvContractCompat.EXTRA_CHANNEL_ID, ids[1]);
-                            activity.startActivityForResult(request, 802);
-                        }
-                    } catch (Exception e) {
-                        Log.w(TAG, "Unable to request channel visibility", e);
                     }
                 });
             } catch (SecurityException e) {
@@ -94,12 +110,37 @@ final class TvHomeChannels {
         });
     }
 
-    private static JSONObject findFeed(JSONArray feeds, String path) {
+    private static JSONArray findFeedItems(JSONArray feeds, String path) {
         for (int i = 0; i < feeds.length(); i++) {
             JSONObject feed = feeds.optJSONObject(i);
-            if (feed != null && path.equals(feed.optString("path"))) return feed;
+            if (feed != null && path.equals(feed.optString("path"))) {
+                JSONArray items = feed.optJSONArray("items");
+                return items == null ? new JSONArray() : items;
+            }
         }
-        return null;
+        return new JSONArray();
+    }
+
+    private static JSONArray readRecentPrograms(Activity activity) {
+        String raw = activity.getSharedPreferences(PREFS, Activity.MODE_PRIVATE).getString(RECENT_KEY, "[]");
+        try {
+            JSONArray source = new JSONArray(raw);
+            JSONArray result = new JSONArray();
+            for (int i = 0; i < Math.min(source.length(), 20); i++) {
+                JSONObject old = source.optJSONObject(i);
+                if (old == null) continue;
+                JSONObject item = new JSONObject();
+                item.put("title", old.optString("title", ""));
+                item.put("href", old.optString("href", ""));
+                item.put("size", old.optString("size", "—"));
+                item.put("seeds", old.optString("seeds", "—"));
+                item.put("image", old.optString("poster", ""));
+                result.put(item);
+            }
+            return result;
+        } catch (Exception e) {
+            return new JSONArray();
+        }
     }
 
     private static PreviewChannel findChannel(PreviewChannelHelper helper, String internalId) {
@@ -125,22 +166,17 @@ final class TvHomeChannels {
 
     private static void replacePrograms(Activity activity, PreviewChannelHelper helper,
             long channelId, String channelKey, JSONArray items) {
-        if (items == null) return;
+        if (channelId <= 0 || items == null) return;
         String[] projection = {BaseColumns._ID};
         try (Cursor cursor = activity.getContentResolver().query(
-                TvContractCompat.PreviewPrograms.CONTENT_URI,
-                projection,
+                TvContractCompat.PreviewPrograms.CONTENT_URI, projection,
                 TvContractCompat.PreviewPrograms.COLUMN_CHANNEL_ID + "=?",
-                new String[]{String.valueOf(channelId)},
-                null)) {
+                new String[]{String.valueOf(channelId)}, null)) {
             if (cursor != null) {
-                while (cursor.moveToNext()) {
-                    long oldId = cursor.getLong(0);
-                    helper.deletePreviewProgram(oldId);
-                }
+                while (cursor.moveToNext()) helper.deletePreviewProgram(cursor.getLong(0));
             }
         } catch (Exception e) {
-            Log.w(TAG, "Could not clear old channel programs", e);
+            Log.w(TAG, "Could not clear old programs for " + channelKey, e);
         }
 
         int limit = Math.min(items.length(), 20);
@@ -151,11 +187,11 @@ final class TvHomeChannels {
             String href = item.optString("href").trim();
             if (title.isEmpty() || href.isEmpty()) continue;
 
-            Intent playIntent = new Intent(activity, MainActivity.class);
-            playIntent.setAction(Intent.ACTION_VIEW);
-            playIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
-            playIntent.putExtra("tv_torrent_href", href);
-            playIntent.putExtra("tv_torrent_title", title);
+            Intent openIntent = new Intent(activity, MainActivity.class);
+            openIntent.setAction(Intent.ACTION_VIEW);
+            openIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+            openIntent.putExtra("tv_torrent_href", href);
+            openIntent.putExtra("tv_torrent_title", title);
 
             StringBuilder description = new StringBuilder();
             String size = item.optString("size", "");
@@ -172,14 +208,18 @@ final class TvHomeChannels {
                     .setTitle(title)
                     .setDescription(description.length() == 0 ? "Открыть карточку раздачи Kinozal" : description.toString())
                     .setWeight(limit - i)
-                    .setIntentUri(Uri.parse(playIntent.toUri(Intent.URI_INTENT_SCHEME)))
-                    .setInternalProviderId(channelKey + ":" + href);
+                    .setIntentUri(Uri.parse(openIntent.toUri(Intent.URI_INTENT_SCHEME)))
+                    .setInternalProviderId("kinozal:" + channelKey + ":" + href);
             String image = item.optString("image", "").trim();
             if (image.startsWith("https://") || image.startsWith("http://")) {
                 program.setPosterArtUri(Uri.parse(image));
                 program.setPosterArtAspectRatio(TvContractCompat.PreviewPrograms.ASPECT_RATIO_2_3);
             }
-            helper.publishPreviewProgram(program.build());
+            try {
+                helper.publishPreviewProgram(program.build());
+            } catch (Exception e) {
+                Log.w(TAG, "Could not publish program " + title, e);
+            }
         }
     }
 }
