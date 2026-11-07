@@ -1332,8 +1332,9 @@ public class MainActivity extends Activity {
                 org.json.JSONObject connectionInfo = json.optJSONObject("connection");
                 String isp = connectionInfo == null ? "" : connectionInfo.optString("isp", "");
                 String result = "Маршрут: " + (cfg.enabled ? "SOCKS5" : "напрямую")
+                        + (cfg.enabled ? "\\nSOCKS5: подключение активно (" + cfg.host + ":" + cfg.port + ")" : "")
                         + "\\nВнешний IP: " + ip
-                        + "\\nСтрана: " + country + (codeCountry.isEmpty() ? "" : " (" + codeCountry + ")")
+                        + "\\nСтрана выхода: " + country + (codeCountry.isEmpty() ? "" : " (" + codeCountry + ")")
                         + (isp.isEmpty() ? "" : "\\nПровайдер: " + isp);
                 runOnUiThread(() -> target.setText(result));
             } catch (Exception e) {
