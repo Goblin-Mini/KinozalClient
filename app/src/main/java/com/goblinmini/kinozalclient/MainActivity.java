@@ -94,6 +94,7 @@ public class MainActivity extends Activity {
     private boolean homeCacheDisplayed = false;
     private String homeCacheDiagnostic = "Кэш главной ещё не проверялся";
     private volatile String exitCountryStatus = "Страна выхода: проверка…";
+    private TextView exitCountryView;
 
     private volatile String lastBrowserError = "Причина пока не определена";
     private interface BrowserPageCallback { void onPage(String html, String error); }
@@ -714,22 +715,16 @@ public class MainActivity extends Activity {
     private void setHomeProgress(int processed, int total, int displayed) {
         status.setText("Главная · Запросов: " + processed + "/" + total
                 + " · Лент отображено: " + displayed + "/" + total
-                + "\nВерсия: " + getAppVersionName()
-                + "\n" + exitCountryStatus);
+                + "\nВерсия: " + getAppVersionName());
     }
 
     private void setCatalogStatus(String itemType, int count) {
         status.setText(currentTitle + " · Загружено: " + count + " " + itemType
-                + "\nВерсия: " + getAppVersionName()
-                + "\n" + exitCountryStatus);
+                + "\nВерсия: " + getAppVersionName());
     }
 
     private void updateSidebarExitCountry() {
-        if (status == null) return;
-        String current = status.getText().toString();
-        int previous = current.lastIndexOf("\nСтрана выхода:");
-        if (previous >= 0) current = current.substring(0, previous);
-        status.setText(current + "\n" + exitCountryStatus);
+        if (exitCountryView != null) exitCountryView.setText(exitCountryStatus);
     }
 
     private String getAppVersionName() {
@@ -1099,6 +1094,13 @@ public class MainActivity extends Activity {
         LinearLayout.LayoutParams statusParams = new LinearLayout.LayoutParams(-1, dp(44));
         statusParams.topMargin = dp(6);
         sidebar.addView(status, statusParams);
+        exitCountryView = text(exitCountryStatus, 12, TEAL, true);
+        exitCountryView.setGravity(Gravity.CENTER);
+        exitCountryView.setMaxLines(2);
+        exitCountryView.setPadding(dp(4), dp(4), dp(4), dp(4));
+        LinearLayout.LayoutParams countryParams = new LinearLayout.LayoutParams(-1, dp(42));
+        countryParams.topMargin = dp(2);
+        sidebar.addView(exitCountryView, countryParams);
 
         heading = text("Главная", 25, GOLD, true);
         LinearLayout.LayoutParams headingParams = new LinearLayout.LayoutParams(-1, dp(42));
