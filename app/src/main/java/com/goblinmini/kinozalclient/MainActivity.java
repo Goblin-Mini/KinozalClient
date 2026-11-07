@@ -1637,14 +1637,47 @@ public class MainActivity extends Activity {
         if (menuItems.getChildCount() > 0) menuItems.getChildAt(0).requestFocus();
     }
 
+    private String categoryIcon(String label) {
+        String value = label == null ? "" : label.toLowerCase(java.util.Locale.ROOT);
+        if (value.contains("сериал")) return "▣";
+        if (value.contains("все фильмы") || value.contains("наше кино")) return "▰";
+        if (value.contains("комедия")) return "☻";
+        if (value.contains("боевик") || value.contains("военный")) return "⚔";
+        if (value.contains("триллер") || value.contains("детектив")) return "⌕";
+        if (value.contains("драма")) return "◈";
+        if (value.contains("мелодрама")) return "♡";
+        if (value.contains("индий")) return "✿";
+        if (value.contains("фантаст")) return "✧";
+        if (value.contains("фэнтези")) return "✦";
+        if (value.contains("ужас") || value.contains("мистик")) return "☾";
+        if (value.contains("приключ")) return "➤";
+        if (value.contains("истор")) return "⌛";
+        if (value.contains("азиат")) return "❖";
+        if (value.contains("документ")) return "▤";
+        if (value.contains("спорт")) return "⚑";
+        if (value.contains("детский") || value.contains("семейн")) return "☆";
+        if (value.contains("классик")) return "▥";
+        if (value.contains("концерт")) return "♫";
+        if (value.contains("передач") || value.contains("тв-шоу")) return "▣";
+        if (value.contains("театр") || value.contains("опера") || value.contains("балет")) return "♟";
+        if (value.contains("эрот")) return "♡";
+        if (value.contains("мульт")) return "▧";
+        if (value.contains("аниме")) return "✧";
+        return "◆";
+    }
+
     private void addSubMenu(LinearLayout parent, String label, String path) {
-        Button b = button(label);
-        // Keep every category glyph visually consistent, regardless of the
-        // Unicode symbol used for the individual category.
-        int iconEnd = label.indexOf("  ");
+        String displayLabel = label;
+        int existingIconEnd = label.indexOf("  ");
+        if (existingIconEnd <= 0 || existingIconEnd > 3) {
+            displayLabel = categoryIcon(label) + "  " + label;
+        }
+        Button b = button(displayLabel);
+        // One uniform icon size and weight across every category row.
+        int iconEnd = displayLabel.indexOf("  ");
         if (iconEnd > 0 && iconEnd <= 3) {
-            android.text.SpannableString menuLabel = new android.text.SpannableString(label);
-            menuLabel.setSpan(new android.text.style.RelativeSizeSpan(1.15f),
+            android.text.SpannableString menuLabel = new android.text.SpannableString(displayLabel);
+            menuLabel.setSpan(new android.text.style.RelativeSizeSpan(1.0f),
                     0, iconEnd, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
             menuLabel.setSpan(new android.text.style.StyleSpan(android.graphics.Typeface.BOLD),
                     0, iconEnd, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
