@@ -55,7 +55,7 @@ import androidx.webkit.WebViewFeature;
 public class MainActivity extends Activity {
     private static final int BG = Color.rgb(16, 19, 23);
     private static final int PANEL = Color.rgb(29, 34, 39);
-    private static final int GOLD = Color.rgb(251, 226, 173);
+    private int GOLD = Color.rgb(251, 226, 173);
     private static final int RED = Color.rgb(174, 55, 18);
     private static final int TEAL = Color.rgb(115, 164, 170);
     private static final String PREFS = "kinozal_settings";
@@ -136,6 +136,7 @@ public class MainActivity extends Activity {
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
+        GOLD = getAccentColor(getSharedPreferences(PREFS, MODE_PRIVATE).getString("accent_color", "gold"));
         readTvLaunchIntent(getIntent());
         mirror = getSharedPreferences(PREFS, MODE_PRIVATE).getString("mirror", MIRRORS[0]);
         client = new KinozalHttpClient(this, mirror);
@@ -1657,6 +1658,35 @@ public class MainActivity extends Activity {
     private static final int REQUEST_BACKUP_IMPORT = 7511;
     private EditText torrServeAddressField;
 
+    private int getAccentColor(String key) {
+        if ("silver".equals(key)) return Color.rgb(214, 219, 224);
+        if ("bronze".equals(key)) return Color.rgb(205, 145, 96);
+        return Color.rgb(251, 226, 173);
+    }
+
+    private void showAccentPicker() {
+        String[] labels = {"Золотистый", "Серебряный", "Бронзовый"};
+        String[] keys = {"gold", "silver", "bronze"};
+        String current = getSharedPreferences(PREFS, MODE_PRIVATE).getString("accent_color", "gold");
+        int selected = 0;
+        for (int i = 0; i < keys.length; i++) if (keys[i].equals(current)) selected = i;
+        AlertDialog dialog = new AlertDialog.Builder(this)
+                .setTitle("Цвет акцента")
+                .setSingleChoiceItems(labels, selected, (d, which) -> {
+                    getSharedPreferences(PREFS, MODE_PRIVATE).edit()
+                            .putString("accent_color", keys[which]).apply();
+                    d.dismiss();
+                    recreate();
+                })
+                .setNegativeButton("Отмена", null)
+                .create();
+        dialog.setOnShowListener(d -> {
+            dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setTextColor(GOLD);
+        });
+        dialog.show();
+        dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setTextColor(GOLD);
+    }
+
     private void showSettings() {
         LinearLayout page = new LinearLayout(this);
         page.setOrientation(LinearLayout.VERTICAL);
@@ -1692,6 +1722,9 @@ public class MainActivity extends Activity {
         addSettingsAction(left, "Выбрать зеркало Kinozal", () -> chooseMirror());
         addSettingsAction(left, "Проверить обновления", () -> new UpdateManager(this).check());
         addSettingsAction(left, "Стартовый раздел", () -> chooseStartupSource());
+
+        addSettingsSection(left, "ОФОРМЛЕНИЕ");
+        addSettingsAction(left, "Цвет акцента", () -> showAccentPicker());
 
         addSettingsSection(left, "ANDROID TV");
         CheckBox tvChannelsEnabled = new CheckBox(this);
