@@ -1495,85 +1495,52 @@ public class MainActivity extends Activity {
         String base = getSharedPreferences(PREFS, MODE_PRIVATE)
                 .getString("torrserve_url", "").trim().replaceAll("/+$", "");
         if (base.isEmpty()) {
-            showMessage("Сначала укажите адрес внешнего TorrServe в настройках.");
+            showMessage("Сначала укажите адрес TorrServer в настройках.");
             return;
         }
-        showMessage("Проверяем API истории TorrServer…");
+        showMessage("Проверяем историю TorrServer…");
         io.execute(() -> {
-            HttpURLConnection viewedConnection = null;
-            HttpURLConnection ffprobeConnection = null;
+            HttpURLConnection connection = null;
             try {
-                viewedConnection = (HttpURLConnection) new URL(base + "/viewed").openConnection();
-                viewedConnection.setConnectTimeout(7000);
-                viewedConnection.setReadTimeout(10000);
-                viewedConnection.setRequestMethod("POST");
-                viewedConnection.setDoOutput(true);
-                viewedConnection.setRequestProperty("Content-Type", "application/json; charset=utf-8");
-                viewedConnection.setRequestProperty("Accept", "application/json");
+                connection = (HttpURLConnection) new URL(base + "/viewed").openConnection();
+                connection.setConnectTimeout(7000);
+                connection.setReadTimeout(10000);
+                connection.setRequestMethod("POST");
+                connection.setDoOutput(true);
+                connection.setRequestProperty("Content-Type", "application/json; charset=utf-8");
+                connection.setRequestProperty("Accept", "application/json");
                 byte[] payload = "{\"action\":\"list\"}".getBytes(StandardCharsets.UTF_8);
-                try (java.io.OutputStream out = viewedConnection.getOutputStream()) { out.write(payload); }
-                int viewedCode = viewedConnection.getResponseCode();
-                java.io.InputStream viewedStream = viewedCode >= 200 && viewedCode < 300
-                        ? viewedConnection.getInputStream() : viewedConnection.getErrorStream();
-                StringBuilder viewedBody = new StringBuilder();
-                if (viewedStream != null) {
+                try (java.io.OutputStream out = connection.getOutputStream()) { out.write(payload); }
+                int code = connection.getResponseCode();
+                java.io.InputStream stream = code >= 200 && code < 300
+                        ? connection.getInputStream() : connection.getErrorStream();
+                StringBuilder body = new StringBuilder();
+                if (stream != null) {
                     try (java.io.BufferedReader reader = new java.io.BufferedReader(
-                            new java.io.InputStreamReader(viewedStream, StandardCharsets.UTF_8))) {
+                            new java.io.InputStreamReader(stream, StandardCharsets.UTF_8))) {
                         String line;
-                        while ((line = reader.readLine()) != null) viewedBody.append(line);
+                        while ((line = reader.readLine()) != null) body.append(line);
                     }
                 }
-                if (viewedCode < 200 || viewedCode >= 300)
-                    throw new java.io.IOException("/viewed: HTTP " + viewedCode + " "
-                            + viewedBody.toString().substring(0, Math.min(180, viewedBody.length())));
-                org.json.JSONArray entries = new org.json.JSONArray(viewedBody.toString());
-                int withPosition = 0;
-                for (int i = 0; i < entries.length(); i++) {
-                    org.json.JSONObject item = entries.optJSONObject(i);
-                    if (item != null && item.optDouble("timecode", 0d) > 0d) withPosition++;
-                }
-
-                String ffprobe = "не удалось проверить";
-                try {
-                    ffprobeConnection = (HttpURLConnection) new URL(base + "/ffp/status").openConnection();
-                    ffprobeConnection.setConnectTimeout(5000);
-                    ffprobeConnection.setReadTimeout(7000);
-                    ffprobeConnection.setRequestProperty("Accept", "application/json");
-                    int code = ffprobeConnection.getResponseCode();
-                    java.io.InputStream stream = code >= 200 && code < 300
-                            ? ffprobeConnection.getInputStream() : ffprobeConnection.getErrorStream();
-                    StringBuilder body = new StringBuilder();
-                    if (stream != null) {
-                        try (java.io.BufferedReader reader = new java.io.BufferedReader(
-                                new java.io.InputStreamReader(stream, StandardCharsets.UTF_8))) {
-                            String line;
-                            while ((line = reader.readLine()) != null) body.append(line);
-                        }
-                    }
-                    ffprobe = "HTTP " + code + ": " + body.toString();
-                } catch (Exception e) {
-                    ffprobe = safe(e.getMessage());
-                }
+                if (code < 200 || code >= 300)
+                    throw new java.io.IOException("/viewed: HTTP " + code + " "
+                            + body.toString().substring(0, Math.min(180, body.length())));
+                org.json.JSONArray entries = new org.json.JSONArray(body.toString());
                 final String report = "API /viewed: доступен\n"
-                        + "Записей в истории TorrServer: " + entries.length() + "\n"
-                        + "Записей с позицией больше 0: " + withPosition + "\n"
-                        + "FFprobe: " + ffprobe + "\n\n"
-                        + (withPosition > 0
-                        ? "Сервер уже хранит временные позиции. Можно подключать канал «Продолжить просмотр»."
-                        : "Пока нет подтверждённых временных позиций. Запустите видео через TorrServe, "
-                        + "посмотрите 1–2 минуты, остановите воспроизведение и проверьте ещё раз.");
+                        + "Записей в истории TorrServer: " + entries.length()
+                        + "\n\nПроверяется только список истории. Временные позиции воспроизведения "
+                        + "не используются.";
                 runOnUiThread(() -> new AlertDialog.Builder(this)
-                        .setTitle("Диагностика TorrServer").setMessage(report)
+                        .setTitle("История TorrServer").setMessage(report)
                         .setPositiveButton("Закрыть", null).show());
             } catch (Exception e) {
                 final String report = "Не удалось прочитать историю TorrServer: " + safe(e.getMessage())
                         + "\n\nПроверьте адрес, доступность сервера и авторизацию API.";
                 runOnUiThread(() -> new AlertDialog.Builder(this)
-                        .setTitle("Диагностика TorrServer").setMessage(report)
+                        .setTitle("История TorrServer").setMessage(report)
                         .setPositiveButton("Закрыть", null).show());
             } finally {
-                if (viewedConnection != null) viewedConnection.disconnect();
-                if (ffprobeConnection != null) ffprobeConnection.disconnect();
+                if (connection != null) connection.disconnect();
             }
         });
     }
@@ -3926,11 +3893,6 @@ public class MainActivity extends Activity {
         io.execute(() -> {
             HttpURLConnection connection = null;
             try {
-                java.util.regex.Matcher hashMatcher = java.util.regex.Pattern
-                        .compile("(?i)btih:([0-9a-f]{40})").matcher(magnet);
-                if (!hashMatcher.find()) throw new java.io.IOException("В magnet-ссылке нет корректного InfoHash");
-                String expectedHash = hashMatcher.group(1).toLowerCase(java.util.Locale.ROOT);
-
                 URL endpoint = new URL(baseUrl + "/torrents");
                 connection = (HttpURLConnection) endpoint.openConnection();
                 connection.setRequestMethod("POST");
@@ -3962,70 +3924,17 @@ public class MainActivity extends Activity {
                         while ((line = reader.readLine()) != null) response.append(line);
                     }
                 }
-                if (code < 200 || code >= 300) {
-                    throw new java.io.IOException("TorrServer HTTP " + code + ": " + response);
-                }
-
+                if (code < 200 || code >= 300) throw new java.io.IOException("HTTP " + code);
                 String answer = response.toString().trim();
                 if (answer.startsWith("{")) {
                     org.json.JSONObject json = new org.json.JSONObject(answer);
-                    if (json.has("error") && !json.isNull("error")) {
-                        throw new java.io.IOException("TorrServer: " + json.optString("error"));
-                    }
-                    String returnedHash = json.optString("hash", "")
-                            .toLowerCase(java.util.Locale.ROOT);
-                    if (!returnedHash.isEmpty() && returnedHash.equals(expectedHash)) {
-                        runOnUiThread(() -> showMessage("Раздача подтверждена TorrServer: " + data.title));
-                        return;
-                    }
+                    if (json.has("error") && !json.isNull("error"))
+                        throw new java.io.IOException(json.optString("error"));
                 }
-
-                // A 200 response alone is not proof that the torrent was added.
-                // Verify the exact InfoHash in the server's live torrent list.
-                HttpURLConnection verify = null;
-                try {
-                    verify = (HttpURLConnection) new URL(baseUrl + "/torrents").openConnection();
-                    verify.setRequestMethod("POST");
-                    verify.setConnectTimeout(10000);
-                    verify.setReadTimeout(15000);
-                    verify.setDoOutput(true);
-                    verify.setRequestProperty("Content-Type", "application/json; charset=utf-8");
-                    byte[] listPayload = "{\"action\":\"list\"}".getBytes(StandardCharsets.UTF_8);
-                    verify.setFixedLengthStreamingMode(listPayload.length);
-                    try (java.io.OutputStream out = verify.getOutputStream()) {
-                        out.write(listPayload);
-                    }
-                    int listCode = verify.getResponseCode();
-                    java.io.InputStream listStream = listCode >= 200 && listCode < 300
-                            ? verify.getInputStream() : verify.getErrorStream();
-                    StringBuilder listResponse = new StringBuilder();
-                    if (listStream != null) {
-                        try (java.io.BufferedReader reader = new java.io.BufferedReader(
-                                new java.io.InputStreamReader(listStream, StandardCharsets.UTF_8))) {
-                            String line;
-                            while ((line = reader.readLine()) != null) listResponse.append(line);
-                        }
-                    }
-                    if (listCode < 200 || listCode >= 300) {
-                        throw new java.io.IOException("проверка списка HTTP " + listCode + ": " + listResponse);
-                    }
-                    org.json.JSONArray torrents = new org.json.JSONArray(listResponse.toString());
-                    for (int i = 0; i < torrents.length(); i++) {
-                        org.json.JSONObject item = torrents.optJSONObject(i);
-                        if (item != null && expectedHash.equalsIgnoreCase(item.optString("hash", ""))) {
-                            runOnUiThread(() -> showMessage("Раздача найдена в TorrServer: " + data.title));
-                            return;
-                        }
-                    }
-                    throw new java.io.IOException("HTTP 200 получен, но InfoHash " + expectedHash
-                            + " отсутствует в списке TorrServer. Ответ add: "
-                            + (answer.isEmpty() ? "<пусто>" : answer));
-                } finally {
-                    if (verify != null) verify.disconnect();
-                }
+                runOnUiThread(() -> showMessage("Magnet отправлен на внешний TorrServe"));
             } catch (Exception e) {
                 String error = safe(e.getMessage());
-                runOnUiThread(() -> showMessage("TorrServer не подтвердил добавление: " + error));
+                runOnUiThread(() -> showMessage("Не удалось добавить раздачу на внешний TorrServe: " + error));
             } finally {
                 if (connection != null) connection.disconnect();
             }
