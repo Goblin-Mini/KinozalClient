@@ -22,6 +22,8 @@ import org.json.JSONObject;
 import java.io.File;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -48,6 +50,8 @@ final class TvHomeChannels {
             "top.php?c=0&d=0&f=0&j=&k=0&s=0&t=0",
             "local:recently-viewed"
     };
+    private static final int REQUEST_BROWSABLE = 7410;
+    private static final List<Long> PENDING_BROWSABLE = new ArrayList<>();
     private static final ExecutorService EXECUTOR = Executors.newSingleThreadExecutor();
 
     private TvHomeChannels() { }
@@ -65,6 +69,7 @@ final class TvHomeChannels {
                 if (feeds == null) return;
 
                 PreviewChannelHelper helper = new PreviewChannelHelper(activity);
+                boolean hadChannels = !helper.getAllChannels().isEmpty();
                 long[] channelIds = new long[CHANNEL_KEYS.length];
                 boolean[] created = new boolean[CHANNEL_KEYS.length];
                 Bitmap logo = loadAppLogo(activity);
@@ -81,9 +86,13 @@ final class TvHomeChannels {
                                 .setAppLinkIntent(appIntent);
                         if (logo != null) builder.setLogo(logo);
                         long id = helper.publishChannel(builder.build());
-                        if (id < 0) continue;
+                        if (id < 0) {
+                            Log.e(TAG, "TvProvider rejected channel creation: " + CHANNEL_NAMES[i]);
+                            continue;
+                        }
                         channelIds[i] = id;
                         created[i] = true;
+                        Log.i(TAG, "Created channel " + CHANNEL_NAMES[i] + " id=" + id);
                     } else {
                         channelIds[i] = channel.getId();
                     }
@@ -92,14 +101,30 @@ final class TvHomeChannels {
                     replacePrograms(activity, helper, channelIds[i], CHANNEL_KEYS[i], programs);
                 }
 
+                List<Long> needsApproval = new ArrayList<>();
+                for (int i = 0; i < channelIds.length; i++) {
+                    if (channelIds[i] <= 0) continue;
+                    // Android TV permits requestChannelBrowsable() only for the app's
+                    // first channel. Every additional channel requires the explicit
+                    // system approval activity; calling requestChannelBrowsable() for
+                    // all six silently leaves channels hidden on many launchers.
+                    if (hadChannels || i != firstValidIndex(channelIds)) needsApproval.add(channelIds[i]);
+                }
+                final long firstChannel = !hadChannels ? firstValidChannel(channelIds) : -1L;
                 activity.runOnUiThread(() -> {
-                    for (int i = 0; i < channelIds.length; i++) {
-                        if (!created[i] || channelIds[i] <= 0 || activity.isFinishing()) continue;
-                        try {
-                            TvContractCompat.requestChannelBrowsable(activity, channelIds[i]);
-                        } catch (Exception e) {
-                            Log.w(TAG, "Could not request visibility for " + CHANNEL_NAMES[i], e);
+                    if (activity.isFinishing()) return;
+                    try {
+                        if (firstChannel > 0) {
+                            TvContractCompat.requestChannelBrowsable(activity, firstChannel);
+                            Log.i(TAG, "Requested default channel visibility id=" + firstChannel);
                         }
+                        synchronized (PENDING_BROWSABLE) {
+                            PENDING_BROWSABLE.clear();
+                            PENDING_BROWSABLE.addAll(needsApproval);
+                        }
+                        requestNextBrowsable(activity);
+                    } catch (Exception e) {
+                        Log.e(TAG, "Could not request channel visibility", e);
                     }
                 });
             } catch (SecurityException e) {
@@ -108,6 +133,38 @@ final class TvHomeChannels {
                 Log.w(TAG, "Channel synchronization failed", e);
             }
         });
+    }
+
+    private static int firstValidIndex(long[] ids) {
+        for (int i = 0; i < ids.length; i++) if (ids[i] > 0) return i;
+        return -1;
+    }
+
+    private static long firstValidChannel(long[] ids) {
+        int index = firstValidIndex(ids);
+        return index < 0 ? -1L : ids[index];
+    }
+
+    private static void requestNextBrowsable(Activity activity) {
+        if (activity == null || activity.isFinishing()) return;
+        final long channelId;
+        synchronized (PENDING_BROWSABLE) {
+            if (PENDING_BROWSABLE.isEmpty()) return;
+            channelId = PENDING_BROWSABLE.remove(0);
+        }
+        try {
+            Intent request = new Intent(TvContractCompat.ACTION_REQUEST_CHANNEL_BROWSABLE);
+            request.putExtra(TvContractCompat.EXTRA_CHANNEL_ID, channelId);
+            activity.startActivityForResult(request, REQUEST_BROWSABLE);
+            Log.i(TAG, "Requested user approval for channel id=" + channelId);
+        } catch (Exception e) {
+            Log.e(TAG, "Could not launch channel approval for id=" + channelId, e);
+            requestNextBrowsable(activity);
+        }
+    }
+
+    static void onBrowsableRequestResult(Activity activity, int requestCode) {
+        if (requestCode == REQUEST_BROWSABLE) requestNextBrowsable(activity);
     }
 
     static void refreshContinue(Activity activity) {
