@@ -110,6 +110,20 @@ final class TvHomeChannels {
         });
     }
 
+    static void refreshContinue(Activity activity) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O || activity == null || activity.isFinishing()) return;
+        EXECUTOR.execute(() -> {
+            try {
+                PreviewChannelHelper helper = new PreviewChannelHelper(activity);
+                PreviewChannel channel = findChannel(helper, "kinozal:continue");
+                if (channel == null) return;
+                replacePrograms(activity, helper, channel.getId(), "continue", readRecentPrograms(activity));
+            } catch (Exception e) {
+                Log.w(TAG, "Could not refresh continue-watching channel", e);
+            }
+        });
+    }
+
     private static JSONArray findFeedItems(JSONArray feeds, String path) {
         for (int i = 0; i < feeds.length(); i++) {
             JSONObject feed = feeds.optJSONObject(i);
