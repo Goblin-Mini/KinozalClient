@@ -4426,6 +4426,7 @@ public class MainActivity extends Activity {
                 {"Качество", "Видео", "Аудио", "Субтитры", "Продолжительность", "Перевод", "Размер", "Язык"}
         };
         final int[] active = {0};
+        final Runnable[] renderHolder = new Runnable[1];
         Runnable render = () -> {
             detailContent.removeAllViews();
             if (active[0] == 2) {
@@ -4440,7 +4441,7 @@ public class MainActivity extends Activity {
                         detailContent.post(() -> {
                             if (active[0] == 2 && !data.screenshotsLoading
                                     && !data.screenshotsLoaded) {
-                                loadScreenshotThumbnails(data, render);
+                                loadScreenshotThumbnails(data, renderHolder[0]);
                             }
                         });
                     }
@@ -4525,6 +4526,7 @@ public class MainActivity extends Activity {
             screenshotsTab.setBackground(shape(screenshotsTab.hasFocus() ? Color.rgb(65, 72, 73) : PANEL, screenshotsTab.hasFocus() ? GOLD : 0));
             detailsScroll.scrollTo(0, 0);
         };
+        renderHolder[0] = render;
         descriptionTab.setOnFocusChangeListener((v, focused) ->
                 v.setBackground(shape(focused ? Color.rgb(65, 72, 73) : PANEL, focused ? GOLD : 0)));
         technicalTab.setOnFocusChangeListener((v, focused) ->
