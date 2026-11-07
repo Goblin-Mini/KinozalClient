@@ -3275,11 +3275,11 @@ public class MainActivity extends Activity {
     }
 
     private void playTorrent(TorrentDetails data) {
-        WebView web = sessionWebView;
-        if (web == null) {
+        if (sessionWebView == null) {
             showMessage("Нет авторизованной WebView-сессии Kinozal. Сначала откройте каталог.");
             return;
         }
+
         String page = data.sourcePage == null ? "" : data.sourcePage.trim();
         java.util.regex.Matcher idMatcher = java.util.regex.Pattern
                 .compile("(?:[?&]id=)([0-9]+)").matcher(page);
@@ -3287,6 +3287,7 @@ public class MainActivity extends Activity {
             showMessage("Не удалось определить ID раздачи.");
             return;
         }
+
         String releaseId = idMatcher.group(1);
         Uri source = Uri.parse(page);
         String endpoint = source.buildUpon()
@@ -3296,65 +3297,64 @@ public class MainActivity extends Activity {
                 .appendQueryParameter("action", "2")
                 .build().toString();
 
-        // Sync the latest WebView cookies into the native cookie jar before
-        // issuing the endpoint request. This is a small header-only operation.
-        try {
-            String browserCookies = CookieManager.getInstance().getCookie(client.getMirror());
-            if (browserCookies != null && !browserCookies.isEmpty()) {
-                client.importBrowserCookies(browserCookies);
-                client.saveBrowserCookies(browserCookies);
-            }
-        } catch (Exception e) {
-            showMessage("Не удалось синхронизировать cookies Kinozal: " + safe(e.getMessage()));
-            return;
-        }
-
-        showMessage("Запрашиваю infohash через native HTTP…");
-        io.execute(() -> {
-            String response;
-            try {
-                response = client.fetchTextWithReferer(endpoint, page);
-            } catch (Exception e) {
-                String error = safe(e.getMessage());
-                runOnUiThread(() -> showMessage("Ошибка native-запроса infohash: " + error));
+        // Cloudflare rejects the native HTTP stack with HTTP 403. Load the
+        // action=2 endpoint as a real top-level navigation in the already
+        // authenticated WebView so its browser challenge/session is reused.
+        showMessage("Получаю infohash через браузерную сессию Kinozal…");
+        fetchBrowserPage(endpoint, null, response -> {
+            if (response == null || response.trim().isEmpty()) {
+                String detail = lastBrowserError == null ? "" : lastBrowserError;
+                showMessage("Не удалось получить ответ action=2 в WebView."
+                        + (detail.isEmpty() ? "" : " " + detail));
                 return;
             }
 
-            // Kinozal TV 1.13 parses the value from the first <li> entry.
-            // Require a real 40-character BitTorrent infohash before creating a magnet.
+            String normalized = response.replaceAll("(?is)<script[^>]*>.*?</script>", " ")
+                    .replaceAll("(?is)<style[^>]*>.*?</style>", " ");
+            if (normalized.toLowerCase(java.util.Locale.ROOT).contains("just a moment")
+                    || normalized.toLowerCase(java.util.Locale.ROOT).contains("cf-chl-")
+                    || normalized.toLowerCase(java.util.Locale.ROOT).contains("challenge-platform")) {
+                showMessage("Cloudflare всё ещё проверяет браузер. Откройте каталог Kinozal, дождитесь его загрузки и повторите.");
+                return;
+            }
+
             java.util.regex.Matcher itemMatcher = java.util.regex.Pattern
-                    .compile("(?is)<li>\\s*[^<:]*:([^<]*)</li>").matcher(response);
+                    .compile("(?is)<li>[\\s\\S]*?:([\\s\\S]*?)</li>").matcher(response);
             String candidate = null;
-            if (itemMatcher.find()) candidate = itemMatcher.group(1).trim();
+            if (itemMatcher.find()) {
+                candidate = android.text.Html.fromHtml(itemMatcher.group(1),
+                        android.text.Html.FROM_HTML_MODE_LEGACY).toString().trim();
+            }
             if (candidate == null || !candidate.matches("(?i)[0-9a-f]{40}")) {
                 java.util.regex.Matcher hashMatcher = java.util.regex.Pattern
-                        .compile("(?i)\\b[0-9a-f]{40}\\b").matcher(
-                                candidate == null ? response : candidate);
+                        .compile("(?i)\\b[0-9a-f]{40}\\b").matcher(response);
                 if (hashMatcher.find()) candidate = hashMatcher.group();
             }
-            final String hash = candidate == null ? null : candidate.toLowerCase(java.util.Locale.ROOT);
-            runOnUiThread(() -> {
-                if (hash == null || !hash.matches("[0-9a-f]{40}")) {
-                    String preview = response.replaceAll("\\s+", " ").trim();
-                    if (preview.length() > 220) preview = preview.substring(0, 220);
-                    showMessage("Ответ action=2 получен, но infohash не распознан. Ответ: "
-                            + (preview.isEmpty() ? "(пусто)" : preview));
-                    return;
-                }
-                String magnet = "magnet:?xt=urn:btih:" + hash
-                        + "&dn=" + Uri.encode(data.title == null ? "" : data.title);
-                Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(magnet));
-                intent.setPackage("ru.yourok.torrserve");
-                intent.putExtra("poster", data.poster == null ? "" : data.poster);
-                intent.putExtra("title", data.title == null ? "" : data.title);
-                try {
-                    startActivity(intent);
-                    showMessage("Получен настоящий infohash Kinozal. Magnet передан в TorrServe.");
-                } catch (Exception e) {
-                    showMessage("Infohash получен (" + hash
-                            + "), но TorrServe не открыл Magnet: " + safe(e.getMessage()));
-                }
-            });
+
+            if (candidate == null || !candidate.matches("(?i)[0-9a-f]{40}")) {
+                String preview = android.text.Html.fromHtml(response,
+                        android.text.Html.FROM_HTML_MODE_LEGACY).toString()
+                        .replaceAll("\\s+", " ").trim();
+                if (preview.length() > 180) preview = preview.substring(0, 180);
+                showMessage("Ответ action=2 получен, но infohash не распознан. Ответ: "
+                        + (preview.isEmpty() ? "(пусто)" : preview));
+                return;
+            }
+
+            String hash = candidate.toLowerCase(java.util.Locale.ROOT);
+            String magnet = "magnet:?xt=urn:btih:" + hash
+                    + "&dn=" + Uri.encode(data.title == null ? "" : data.title);
+            Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(magnet));
+            intent.setPackage("ru.yourok.torrserve");
+            intent.putExtra("poster", data.poster == null ? "" : data.poster);
+            intent.putExtra("title", data.title == null ? "" : data.title);
+            try {
+                startActivity(intent);
+                showMessage("Получен настоящий infohash Kinozal. Magnet передан в TorrServe.");
+            } catch (Exception e) {
+                showMessage("Infohash получен (" + hash
+                        + "), но TorrServe не открыл Magnet: " + safe(e.getMessage()));
+            }
         });
     }
 
