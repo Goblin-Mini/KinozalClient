@@ -3769,7 +3769,6 @@ public class MainActivity extends Activity {
             try {
                 Document doc = Jsoup.parse(html, href);
                 TorrentDetails details = parseTorrentDetails(doc, t);
-                applyHomeDetailsToCards(t, details);
                 // Do not let a challenge/login/empty document replace a good entry.
                 boolean validDetails = !details.title.trim().isEmpty()
                         && (doc.selectFirst("#main .content") != null
@@ -3912,6 +3911,39 @@ public class MainActivity extends Activity {
         try { return Integer.parseInt(value.replaceAll("[^0-9]", "")); }
         catch (Exception ignored) { return 0; }
     }
+
+    private void prefetchTorrentDetails(Torrent torrent) {
+        if (torrent == null || torrent.href == null || torrent.href.trim().isEmpty()
+                || sessionWebView == null || !pendingDetailPrefetchHref.isEmpty()
+                || pendingBrowserCallback != null) return;
+        final String href = torrent.href;
+        final String key = "details|" + client.getMirror() + "|" + href;
+        synchronized (pageCache) {
+            if (pageCache.containsKey(key)) return;
+        }
+        if (diskCache.get(key, 30L * 60L * 1000L) != null) return;
+        pendingDetailPrefetchHref = href;
+        fetchBrowserPage(href, null, html -> {
+            if (href.equals(pendingDetailPrefetchHref)) pendingDetailPrefetchHref = "";
+            if (html == null || html.trim().isEmpty()) return;
+            try {
+                Document doc = Jsoup.parse(html, href);
+                TorrentDetails parsed = parseTorrentDetails(doc, torrent);
+                boolean valid = !parsed.title.trim().isEmpty()
+                        && (doc.selectFirst("#main .content") != null
+                        || doc.selectFirst("a[href*=download.php]") != null);
+                if (!valid) return;
+                synchronized (pageCache) { pageCache.put(key, html); }
+                diskCache.put(key, html.getBytes(StandardCharsets.UTF_8));
+                if (href.equals(activeTorrentDetailsHref)) {
+                    progress.setVisibility(View.GONE);
+                    saveRecentlyViewed(torrent);
+                    showTorrentDetails(torrent, parsed);
+                }
+            } catch (Exception ignored) { }
+        });
+    }
+
 
     private void showTorrentDetails(Torrent torrent, TorrentDetails data) {
         LinearLayout root = new LinearLayout(this);
