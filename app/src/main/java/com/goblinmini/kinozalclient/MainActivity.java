@@ -69,9 +69,10 @@ public class MainActivity extends Activity {
     private String mirror;
     private String currentPath = "browse.php";
     private String currentTitle = "Все раздачи";
-    private TextView settingsConnectionInfo;
-    private TextView settingsCategoryInfo;
-    private TextView settingsCountryInfo;
+    private TextView sidebarConnectionInfo;
+    private TextView sidebarCategoryInfo;
+    private TextView sidebarCountryInfo;
+    private TextView sidebarVersionInfo;
     private int lastLoadedTorrentCount = 0;
     private String lastKinozalConnectionStatus = "не проверено";
     private String activeTorrentDetailsHref = "";
@@ -127,6 +128,7 @@ public class MainActivity extends Activity {
         diskCache = new DiskCache(this, 200L * 1024L * 1024L);
         buildShell();
         socks5Bridge = new Socks5ProxyBridge(this);
+        loadExternalCountryInfo(sidebarCountryInfo);
         String savedBrowserCookies = client.getSavedBrowserCookies();
         initializeNetwork(savedBrowserCookies);
     }
@@ -733,19 +735,19 @@ public class MainActivity extends Activity {
     private void setCatalogStatus(String itemType, int count) {
         status.setText(currentTitle + " · Загружено: " + count + " " + itemType
                 + "\nВерсия: " + getAppVersionName());
-        updateSettingsCategoryInfo(count);
+        updateSidebarCategoryInfo(count);
     }
 
-    private void updateSettingsCategoryInfo(int count) {
+    private void updateSidebarCategoryInfo(int count) {
         lastLoadedTorrentCount = count;
-        if (settingsCategoryInfo != null) {
-            settingsCategoryInfo.setText(currentTitle + " — загружено " + count + " раздач");
+        if (sidebarCategoryInfo != null) {
+            sidebarCategoryInfo.setText(currentTitle + " — загружено " + count + " раздач");
         }
     }
 
-    private void updateSettingsConnectionInfo() {
-        if (settingsConnectionInfo != null) {
-            settingsConnectionInfo.setText("Подключение к Kinozal: " + lastKinozalConnectionStatus);
+    private void updateSidebarConnectionInfo() {
+        if (sidebarConnectionInfo != null) {
+            sidebarConnectionInfo.setText("Подключение к Kinozal: " + lastKinozalConnectionStatus);
         }
     }
 
@@ -1110,12 +1112,23 @@ public class MainActivity extends Activity {
         addMenu("★", "Избранное", () -> showFavorites());
         addMenu("◷", "Недавно смотрели", () -> showRecentlyViewed());
         addMenu("⚙", "Настройки", () -> showSettings());
-        status = text("Подключение…", 11, TEAL, false);
+        status = text("Показано лент: 0", 10, TEAL, false);
         status.setGravity(Gravity.CENTER);
         status.setLineSpacing(dp(2), 1f);
-        LinearLayout.LayoutParams statusParams = new LinearLayout.LayoutParams(-1, dp(44));
-        statusParams.topMargin = dp(6);
+        LinearLayout.LayoutParams statusParams = new LinearLayout.LayoutParams(-1, dp(30));
+        statusParams.topMargin = dp(4);
         sidebar.addView(status, statusParams);
+        sidebarConnectionInfo = text("Подключение к Kinozal: " + lastKinozalConnectionStatus, 10, TEAL, false);
+        sidebarCategoryInfo = text(currentTitle + " — загружено " + lastLoadedTorrentCount + " раздач", 10, TEAL, false);
+        sidebarCountryInfo = text("Страна подключения: определяется…", 10, TEAL, false);
+        sidebarVersionInfo = text("Версия приложения: " + getAppVersionName(), 10, GOLD, false);
+        TextView[] diagnosticLines = {sidebarConnectionInfo, sidebarCategoryInfo, sidebarCountryInfo, sidebarVersionInfo};
+        for (TextView line : diagnosticLines) {
+            line.setGravity(Gravity.CENTER);
+            line.setMaxLines(2);
+            line.setPadding(dp(2), dp(2), dp(2), dp(2));
+            sidebar.addView(line, new LinearLayout.LayoutParams(-1, -2));
+        }
 
         heading = text("Главная", 25, GOLD, true);
         LinearLayout.LayoutParams headingParams = new LinearLayout.LayoutParams(-1, dp(42));
@@ -1262,22 +1275,6 @@ public class MainActivity extends Activity {
         columns.addView(leftScroll, new LinearLayout.LayoutParams(0, -1, 1f));
         columns.addView(rightScroll, new LinearLayout.LayoutParams(0, -1, 1f));
         page.addView(columns, new LinearLayout.LayoutParams(-1, 0, 1f));
-
-        addSettingsSection(left, "ДИАГНОСТИКА");
-        settingsConnectionInfo = text("Подключение к Kinozal…", 12, TEAL, false);
-        settingsConnectionInfo.setPadding(dp(4), dp(3), dp(4), dp(3));
-        left.addView(settingsConnectionInfo);
-        settingsCategoryInfo = text(currentTitle + " — загружено " + lastLoadedTorrentCount + " раздач", 12, TEAL, false);
-        settingsCategoryInfo.setPadding(dp(4), dp(3), dp(4), dp(3));
-        left.addView(settingsCategoryInfo);
-        settingsCountryInfo = text("Страна подключения: определяется…", 12, TEAL, false);
-        settingsCountryInfo.setPadding(dp(4), dp(3), dp(4), dp(3));
-        left.addView(settingsCountryInfo);
-        TextView settingsVersionInfo = text("Версия приложения: " + getAppVersionName(), 12, GOLD, false);
-        settingsVersionInfo.setPadding(dp(4), dp(3), dp(4), dp(10));
-        left.addView(settingsVersionInfo);
-        updateSettingsConnectionInfo();
-        loadExternalCountryInfo(settingsCountryInfo);
 
         addSettingsSection(left, "АККАУНТ И СЕРВЕР");
         addSettingsAction(left, "Авторизация / проверка Kinozal", () -> showLogin());
@@ -2003,13 +2000,13 @@ public class MainActivity extends Activity {
             fetchBrowserPage(path, postBody, html -> {
                 if (html != null && !html.isEmpty()) {
                     lastKinozalConnectionStatus = "установлено";
-                    updateSettingsConnectionInfo();
+                    updateSidebarConnectionInfo();
                     synchronized (pageCache) { pageCache.put(cacheKey, html); }
                     if (postBody == null) diskCache.put("page|" + scopedCacheKey, html.getBytes(StandardCharsets.UTF_8));
                     showLoadedPage(html);
                 } else {
                     lastKinozalConnectionStatus = "нет соединения";
-                    if (settingsConnectionInfo != null) settingsConnectionInfo.setText("Подключение к Kinozal: нет соединения");
+                    if (sidebarConnectionInfo != null) sidebarConnectionInfo.setText("Подключение к Kinozal: нет соединения");
                     progress.setVisibility(View.GONE);
                     status.setText("Нет соединения");
                     addEmpty("Не удалось загрузить каталог через браузерную сессию.");
@@ -2023,13 +2020,13 @@ public class MainActivity extends Activity {
                     if (postBody == null) diskCache.put("page|" + scopedCacheKey, html.getBytes(StandardCharsets.UTF_8));
                     runOnUiThread(() -> {
                         lastKinozalConnectionStatus = "установлено";
-                        updateSettingsConnectionInfo();
+                        updateSidebarConnectionInfo();
                         showLoadedPage(html);
                     });
                 } catch (Exception e) {
                     runOnUiThread(() -> {
                         lastKinozalConnectionStatus = "нет соединения";
-                        if (settingsConnectionInfo != null) settingsConnectionInfo.setText("Подключение к Kinozal: нет соединения");
+                        if (sidebarConnectionInfo != null) sidebarConnectionInfo.setText("Подключение к Kinozal: нет соединения");
                         progress.setVisibility(View.GONE); status.setText("Нет соединения");
                         addEmpty("Не удалось загрузить каталог. " + safe(e.getMessage())); });
                 }
