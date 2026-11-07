@@ -1350,23 +1350,23 @@ public class MainActivity extends Activity {
 
             card.addView(posterFrame, new LinearLayout.LayoutParams(dp(126), dp(178)));
             List<String> badges = extractHomeBadges(item.torrent.title, section.title);
-            if (!badges.isEmpty()) {
-                LinearLayout badgeRow = new LinearLayout(this);
-                badgeRow.setOrientation(LinearLayout.HORIZONTAL);
-                badgeRow.setGravity(Gravity.CENTER_VERTICAL);
-                badgeRow.setPadding(0, dp(4), 0, dp(1));
-                for (String badge : badges) {
-                    TextView chip = text(badge, 10, GOLD, true);
-                    chip.setSingleLine(true);
-                    chip.setGravity(Gravity.CENTER);
-                    chip.setPadding(dp(6), dp(2), dp(6), dp(2));
-                    chip.setBackground(shape(Color.rgb(39, 57, 61), TEAL));
-                    LinearLayout.LayoutParams chipParams = new LinearLayout.LayoutParams(-2, dp(20));
-                    chipParams.rightMargin = dp(3);
-                    badgeRow.addView(chip, chipParams);
-                }
-                card.addView(badgeRow, new LinearLayout.LayoutParams(dp(126), dp(21)));
+            // Reserve the same metadata line on every card. Without this spacer,
+            // releases with no detectable tags become visibly shorter than neighbours.
+            LinearLayout badgeRow = new LinearLayout(this);
+            badgeRow.setOrientation(LinearLayout.HORIZONTAL);
+            badgeRow.setGravity(Gravity.CENTER_VERTICAL);
+            badgeRow.setPadding(0, dp(2), 0, dp(2));
+            for (String badge : badges) {
+                TextView chip = text(badge, 10, GOLD, true);
+                chip.setSingleLine(true);
+                chip.setGravity(Gravity.CENTER);
+                chip.setPadding(dp(6), dp(2), dp(6), dp(2));
+                chip.setBackground(shape(Color.rgb(39, 57, 61), TEAL));
+                LinearLayout.LayoutParams chipParams = new LinearLayout.LayoutParams(-2, dp(20));
+                chipParams.rightMargin = dp(3);
+                badgeRow.addView(chip, chipParams);
             }
+            card.addView(badgeRow, new LinearLayout.LayoutParams(dp(126), dp(25)));
             TextView name = text(item.torrent.title, 12, Color.WHITE, true);
             name.setMaxLines(2);
             name.setEllipsize(android.text.TextUtils.TruncateAt.END);
