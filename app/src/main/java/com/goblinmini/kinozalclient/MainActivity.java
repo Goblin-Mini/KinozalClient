@@ -396,6 +396,7 @@ public class MainActivity extends Activity {
             }
             removeHomeDuplicates(cached);
             int total = countHomeCards(cached);
+            final int cachedFilesCount = cachedFiles;
             long elapsed = android.os.SystemClock.elapsedRealtime() - startedAt;
             String diagnostic = String.format(java.util.Locale.ROOT,
                     "Главная: файлов прочитано %d из %d; лент восстановлено %d; карточек восстановлено %d; чтение %.1f мс",
@@ -412,7 +413,7 @@ public class MainActivity extends Activity {
                 // The home feed cache is durable for seven days. If all feeds
                 // are present, returning from another category is a local
                 // render only: do not issue nine authenticated WebView requests.
-                if (cachedFiles == homePaths.length && cached.size() == homePaths.length) {
+                if (cachedFilesCount == homePaths.length && cached.size() == homePaths.length) {
                     status.setText("Показано лент: " + cached.size() + " · из кэша");
                     return;
                 }
