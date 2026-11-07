@@ -222,6 +222,14 @@ public final class KinozalHttpClient {
         throw new java.io.IOException("Не удалось загрузить файл");
     }
 
+    /** Public catalogue/home GET. Does not require or import a browser login session. */
+    public String fetchPublic(String pathOrUrl) throws Exception {
+        String mirror = getMirror();
+        String target = pathOrUrl.startsWith("http") ? pathOrUrl
+                : mirror + "/" + pathOrUrl.replaceFirst("^/+", "");
+        return request(target, "GET", null, false);
+    }
+
     public synchronized String fetch(String pathOrUrl) throws Exception {
         String target = pathOrUrl.startsWith("http") ? pathOrUrl : baseUrl + "/" + pathOrUrl.replaceFirst("^/+", "");
         String html = request(target, "GET", null, false);
