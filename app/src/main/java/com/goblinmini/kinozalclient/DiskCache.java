@@ -19,8 +19,9 @@ public final class DiskCache {
     public DiskCache(Context context, long maxBytes) {
         this.directory = new File(context.getCacheDir(), "kinozal_cache");
         this.maxBytes = Math.max(1L, maxBytes);
+        // Directory maintenance can scan/sort up to 200 MB of cache files.
+        // Never do that synchronously from Activity.onCreate().
         if (!directory.exists()) directory.mkdirs();
-        trim();
     }
 
     private File fileFor(String key) {
