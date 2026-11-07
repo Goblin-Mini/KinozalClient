@@ -1544,7 +1544,7 @@ public class MainActivity extends Activity {
                     ViewGroup.LayoutParams.WRAP_CONTENT);
         }
         dialog.getButton(AlertDialog.BUTTON_POSITIVE).setTextColor(GOLD);
-        loadExternalIpInfo(networkInfo);
+        loadExternalCountryInfo(networkInfo);
         refresh.requestFocus();
     }
 
