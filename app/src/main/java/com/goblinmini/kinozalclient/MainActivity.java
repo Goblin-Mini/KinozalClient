@@ -3370,9 +3370,12 @@ public class MainActivity extends Activity {
         try {
             Document doc = Jsoup.parse(html == null ? "" : html, pageUrl);
             Element tabs = doc.selectFirst("#tabs");
-            if (tabs == null) return false;
+            boolean isFragment = html != null
+                    && !html.toLowerCase(java.util.Locale.ROOT).contains("<html");
+            if (tabs == null && !isFragment) return false;
             java.util.LinkedHashSet<String> unique = new java.util.LinkedHashSet<>();
-            for (Element image : tabs.select("a:has(img) img, img")) {
+            Elements screenshotImages = tabs != null ? tabs.select("img") : doc.select("img");
+            for (Element image : screenshotImages) {
                 String raw = image.hasAttr("data-src") ? image.attr("data-src").trim() : image.attr("src").trim();
                 if (raw.isEmpty() || raw.startsWith("data:")) continue;
                 String src = image.absUrl(image.hasAttr("data-src") ? "data-src" : "src");
