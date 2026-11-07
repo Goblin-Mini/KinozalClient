@@ -111,9 +111,9 @@ public class MainActivity extends Activity {
 
     private interface BrowserPageCallback { void onPage(String html, String error); }
     private final java.util.LinkedHashMap<String, String> pageCache =
-            new java.util.LinkedHashMap<String, String>(12, 0.75f, true) {
+            new java.util.LinkedHashMap<String, String>(48, 0.75f, true) {
                 @Override protected boolean removeEldestEntry(java.util.Map.Entry<String, String> eldest) {
-                    return size() > 12;
+                    return size() > 48;
                 }
             };
 
@@ -407,12 +407,38 @@ public class MainActivity extends Activity {
                     setCatalogStatus("Постеров в кэше", total);
                     renderHome(cached);
                     progress.setVisibility(View.GONE);
-                    status.setText("Сохранённые ленты: " + cached.size() + " · обновление…");
                 }
+
+                // The home feed cache is durable for seven days. If all feeds
+                // are present, returning from another category is a local
+                // render only: do not issue nine authenticated WebView requests.
+                if (cachedFiles == homePaths.length && cached.size() == homePaths.length) {
+                    status.setText("Показано лент: " + cached.size() + " · из кэша");
+                    return;
+                }
+
+                // A partially populated cache is useful too: fetch only the
+                // missing feeds instead of downloading already stored pages.
+                List<String> missingPaths = new ArrayList<>();
+                List<String> missingTitles = new ArrayList<>();
+                for (int i = 0; i < homePaths.length; i++) {
+                    byte[] saved = diskCache.get("home|" + client.getMirror() + "|" + homePaths[i],
+                            7L * 24L * 60L * 60L * 1000L);
+                    if (saved == null || saved.length == 0) {
+                        missingPaths.add(homePaths[i]);
+                        missingTitles.add(homeTitles[i]);
+                    }
+                }
+                if (missingPaths.isEmpty()) {
+                    status.setText("Показано лент: " + cached.size() + " · из кэша");
+                    return;
+                }
+                String[] pathsToLoad = missingPaths.toArray(new String[0]);
+                String[] titlesToLoad = missingTitles.toArray(new String[0]);
                 if (sessionWebView != null) {
-                    loadHomeSectionsInBrowser(homePaths, homeTitles, 0, new ArrayList<>(), startupRetry);
+                    loadHomeSectionsInBrowser(pathsToLoad, titlesToLoad, 0, new ArrayList<>(), startupRetry);
                 } else {
-                    loadInitialCatalogFromHttp(homePaths, homeTitles);
+                    loadInitialCatalogFromHttp(pathsToLoad, titlesToLoad);
                 }
             });
         });
@@ -1985,12 +2011,13 @@ public class MainActivity extends Activity {
 
     private void load(String path, String title, String postBody) {
         currentPath = path; currentTitle = title; heading.setText(title);
-        String cacheKey = (postBody == null ? "GET|" + path : "POST|" + path + "|" + postBody);
-        String scopedCacheKey = client.getMirror() + "|" + cacheKey;
+        String cacheKey = client.getMirror() + "|" +
+                (postBody == null ? "GET|" + path : "POST|" + path + "|" + postBody);
+        String scopedCacheKey = cacheKey;
         String cachedPage;
         synchronized (pageCache) { cachedPage = pageCache.get(cacheKey); }
         if (cachedPage == null && postBody == null) {
-            byte[] saved = diskCache.get("page|" + scopedCacheKey, 3L * 60L * 1000L);
+            byte[] saved = diskCache.get("page|" + scopedCacheKey, 7L * 24L * 60L * 60L * 1000L);
             if (saved != null) {
                 cachedPage = new String(saved, StandardCharsets.UTF_8);
                 synchronized (pageCache) { pageCache.put(cacheKey, cachedPage); }
