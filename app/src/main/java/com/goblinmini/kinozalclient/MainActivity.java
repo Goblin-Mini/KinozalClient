@@ -378,6 +378,11 @@ public class MainActivity extends Activity {
             String diagnostic = String.format(java.util.Locale.ROOT,
                     "Главная: файлов прочитано %d из %d; лент восстановлено %d; карточек восстановлено %d; чтение %.1f мс",
                     cachedFiles, homePaths.length, cached.size(), total, (double) elapsed);
+            android.content.SharedPreferences homePrefs =
+                    getSharedPreferences("home_cache_control", MODE_PRIVATE);
+            long lastRefresh = homePrefs.getLong("last_successful_refresh", 0L);
+            boolean refreshDue = lastRefresh == 0L
+                    || System.currentTimeMillis() - lastRefresh >= 60L * 60L * 1000L;
             runOnUiThread(() -> {
                 homeCacheDiagnostic = diagnostic;
                 homeCacheDisplayed = total > 0;
@@ -385,8 +390,10 @@ public class MainActivity extends Activity {
                     setCatalogStatus("Постеров в кэше", total);
                     renderHome(cached);
                     progress.setVisibility(View.GONE);
-                    status.setText("Сохранённые ленты: " + cached.size() + " · обновление…");
+                    status.setText("Сохранённые ленты: " + cached.size()
+                            + (refreshDue ? " · фоновое обновление…" : " · кэш актуален"));
                 }
+                if (!refreshDue && homeCacheDisplayed) return;
                 if (sessionWebView != null) {
                     loadHomeSectionsInBrowser(homePaths, homeTitles, 0, new ArrayList<>(), startupRetry);
                 } else {
@@ -423,6 +430,10 @@ public class MainActivity extends Activity {
                 }
                 removeHomeDuplicates(sections);
                 int total = countHomeCards(sections);
+                if (total > 0) {
+                    getSharedPreferences("home_cache_control", MODE_PRIVATE).edit()
+                            .putLong("last_successful_refresh", System.currentTimeMillis()).apply();
+                }
                 runOnUiThread(() -> {
                     progress.setVisibility(View.GONE);
                     if (!homeCacheDisplayed) {
@@ -451,6 +462,10 @@ public class MainActivity extends Activity {
             for (HomeSection section : sections) renderHomeSection(section);
             int total = countHomeCards(sections);
             progress.setVisibility(View.GONE);
+            if (total > 0) {
+                getSharedPreferences("home_cache_control", MODE_PRIVATE).edit()
+                        .putLong("last_successful_refresh", System.currentTimeMillis()).apply();
+            }
             if (total == 0) {
                 status.setText("Нет соединения");
                 addEmpty("Не удалось получить постеры Kinozal. Проверьте авторизацию и выбранное зеркало.");
