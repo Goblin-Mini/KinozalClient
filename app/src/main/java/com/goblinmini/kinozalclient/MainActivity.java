@@ -1510,7 +1510,7 @@ public class MainActivity extends Activity {
                 viewedConnection.setDoOutput(true);
                 viewedConnection.setRequestProperty("Content-Type", "application/json; charset=utf-8");
                 viewedConnection.setRequestProperty("Accept", "application/json");
-                byte[] payload = "{\\"action\\":\\"list\\"}".getBytes(StandardCharsets.UTF_8);
+                byte[] payload = "{\"action\":\"list\"}".getBytes(StandardCharsets.UTF_8);
                 try (java.io.OutputStream out = viewedConnection.getOutputStream()) { out.write(payload); }
                 int viewedCode = viewedConnection.getResponseCode();
                 java.io.InputStream viewedStream = viewedCode >= 200 && viewedCode < 300
