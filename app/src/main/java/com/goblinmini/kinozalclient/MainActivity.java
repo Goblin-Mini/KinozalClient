@@ -919,6 +919,7 @@ public class MainActivity extends Activity {
             if (image == null || image.trim().isEmpty()
                     || !(image.startsWith("http://") || image.startsWith("https://"))) continue;
             item.imageUrl = image;
+            item.torrent.poster = image;
             boolean duplicate = false;
             for (HomePoster old : out) {
                 if (old.torrent.href.equals(href)) { duplicate = true; break; }
@@ -3460,6 +3461,20 @@ public class MainActivity extends Activity {
 
     private void saveRecentlyViewed(Torrent torrent) {
         if (torrent == null || torrent.href == null || torrent.href.isEmpty()) return;
+        // Home-feed torrents carry their poster separately from the details parser.
+        // Preserve it in history so Continue Watching can build complete TV cards.
+        if (torrent.poster == null || torrent.poster.isEmpty()) {
+            for (HomeSection section : homeSectionsMemory) {
+                for (HomePoster poster : section.items) {
+                    if (poster.torrent != null && torrent.href.equals(poster.torrent.href)
+                            && poster.imageUrl != null && !poster.imageUrl.isEmpty()) {
+                        torrent.poster = poster.imageUrl;
+                        break;
+                    }
+                }
+                if (torrent.poster != null && !torrent.poster.isEmpty()) break;
+            }
+        }
         java.util.LinkedHashMap<String, Torrent> recent = readRecentlyViewed();
         recent.remove(torrent.href);
         recent.put(torrent.href, torrent);
