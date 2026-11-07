@@ -15,6 +15,7 @@ import android.view.Gravity;
 import android.view.KeyEvent;
 import android.view.View;
 import android.view.ViewGroup;
+import android.graphics.Rect;
 import android.view.inputmethod.EditorInfo;
 import android.widget.Button;
 import android.widget.CheckBox;
@@ -83,6 +84,7 @@ public class MainActivity extends Activity {
     private String pendingDetailPrefetchHref = "";
     private final java.util.Set<String> detailPrefetchScheduled = new java.util.HashSet<>();
     private LinearLayout root, sidebar, content, list, menuItems;
+    private ScrollView homeScrollView;
     private TextView heading, status;
     private ProgressBar progress;
     private EditText search;
@@ -1038,7 +1040,7 @@ public class MainActivity extends Activity {
         list.removeAllViews();
         for (HomeSection section : sections) renderHomeSection(section);
         if (sections.isEmpty()) addEmpty("На главной пока нет подборок.");
-        animateContentTransition(list);
+        scheduleVisibleHomePosterLoad();
     }
 
     /** Append one completed home feed without rebuilding rows already on screen. */
@@ -1064,8 +1066,10 @@ public class MainActivity extends Activity {
             card.setBackground(shape(PANEL, 0));
             card.setFocusable(true);
             card.setClickable(true);
-            card.setOnFocusChangeListener((v, focused) ->
-                    v.setBackground(shape(focused ? Color.rgb(57, 68, 70) : PANEL, focused ? GOLD : 0)));
+            card.setOnFocusChangeListener((v, focused) -> {
+                v.setBackground(shape(focused ? Color.rgb(57, 68, 70) : PANEL, focused ? GOLD : 0));
+                if (focused) loadHomePosterForCard(card);
+            });
             ImageView poster = new ImageView(this);
             poster.setScaleType(ImageView.ScaleType.CENTER_CROP);
             poster.setBackground(shape(Color.rgb(40, 45, 49), 0));
@@ -1078,12 +1082,11 @@ public class MainActivity extends Activity {
             LinearLayout.LayoutParams cardParams = new LinearLayout.LayoutParams(dp(138), -2);
             cardParams.rightMargin = dp(8);
             strip.addView(card, cardParams);
-            card.setOnClickListener(v -> showTorrent(item.torrent));
+            card.setTag("home-card");
             if (!item.imageUrl.isEmpty()) {
-                loadImageIntoView(item.imageUrl, poster, client.getMirror() + "/" + section.path);
-            } else {
-                loadHomePosterFromDetails(item, poster);
+                poster.setTag(new HomeImageRequest(item.imageUrl, client.getMirror() + "/" + section.path));
             }
+            card.setOnClickListener(v -> showTorrent(item.torrent));
         }
         horizontal.addView(strip);
         LinearLayout.LayoutParams rowParams = new LinearLayout.LayoutParams(-1, dp(238));
@@ -1104,7 +1107,55 @@ public class MainActivity extends Activity {
         }
         list.addView(sectionTitle, titleParams);
         list.addView(horizontal, rowParams);
-        animateContentTransition(horizontal);
+        horizontal.setOnScrollChangeListener((View v, int x, int y, int oldX, int oldY) -> scheduleVisibleHomePosterLoad());
+        horizontal.post(this::scheduleVisibleHomePosterLoad);
+    }
+
+    private static class HomeImageRequest {
+        final String url, referer;
+        boolean started;
+        HomeImageRequest(String url, String referer) { this.url = url; this.referer = referer; }
+    }
+
+    private void scheduleVisibleHomePosterLoad() {
+        if (list == null) return;
+        list.post(() -> {
+            if (list == null) return;
+            for (int i = 0; i < list.getChildCount(); i++) {
+                View child = list.getChildAt(i);
+                if (child instanceof android.widget.HorizontalScrollView) {
+                    loadVisibleHomePosters((android.widget.HorizontalScrollView) child);
+                }
+            }
+        });
+    }
+
+    private void loadVisibleHomePosters(android.widget.HorizontalScrollView row) {
+        if (row == null || row.getVisibility() != View.VISIBLE) return;
+        Rect visible = new Rect();
+        for (int i = 0; i < row.getChildCount(); i++) {
+            View strip = row.getChildAt(i);
+            if (!(strip instanceof ViewGroup)) continue;
+            ViewGroup cards = (ViewGroup) strip;
+            for (int j = 0; j < cards.getChildCount(); j++) {
+                View card = cards.getChildAt(j);
+                if (!card.getLocalVisibleRect(visible)) continue;
+                loadHomePosterForCard(card);
+            }
+        }
+    }
+
+    private void loadHomePosterForCard(View card) {
+        if (!(card instanceof ViewGroup) || ((ViewGroup) card).getChildCount() == 0) return;
+        View first = ((ViewGroup) card).getChildAt(0);
+        if (!(first instanceof ImageView)) return;
+        ImageView poster = (ImageView) first;
+        Object tag = poster.getTag();
+        if (!(tag instanceof HomeImageRequest)) return;
+        HomeImageRequest request = (HomeImageRequest) tag;
+        if (request.started) return;
+        request.started = true;
+        loadImageIntoView(request.url, poster, request.referer);
     }
 
     /** Subtle content entrance used after a catalogue or home section is rendered. */
@@ -1333,10 +1384,14 @@ public class MainActivity extends Activity {
         LinearLayout.LayoutParams progressParams = new LinearLayout.LayoutParams(-1, dp(3));
         progressParams.bottomMargin = dp(5);
         main.addView(progress, progressParams);
-        ScrollView scroll = new ScrollView(this); scroll.setFillViewport(true);
+        homeScrollView = new ScrollView(this); homeScrollView.setFillViewport(true);
+        homeScrollView.setVerticalScrollBarEnabled(false);
         list = new LinearLayout(this); list.setOrientation(LinearLayout.VERTICAL);
-        scroll.addView(list);
-        main.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1));
+        homeScrollView.addView(list);
+        main.addView(homeScrollView, new LinearLayout.LayoutParams(-1, 0, 1));
+        homeScrollView.setOnScrollChangeListener((View v, int x, int y, int oldX, int oldY) -> {
+            if (y != oldY) scheduleVisibleHomePosterLoad();
+        });
         setContentView(root);
         if (menuItems.getChildCount() > 0) menuItems.getChildAt(0).requestFocus();
     }
