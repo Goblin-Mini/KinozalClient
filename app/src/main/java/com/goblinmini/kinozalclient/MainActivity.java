@@ -3156,7 +3156,13 @@ public class MainActivity extends Activity {
         Button insert = button("Вставить");
         Button signIn = button("Вход");
         Button done = button("Готово");
-        Button challenge = button("Я не робот");
+        Button cursorToggle = button("Курсор: вкл");
+        Button insert = button("Вставить");
+        Button signIn = button("Вход");
+        Button done = button("Готово");
+        LinearLayout.LayoutParams cursorButtonParams = new LinearLayout.LayoutParams(dp(112), dp(44));
+        cursorButtonParams.leftMargin = dp(6);
+        credentials.addView(cursorToggle, cursorButtonParams);
         LinearLayout.LayoutParams smallAction = new LinearLayout.LayoutParams(dp(112), dp(44));
         smallAction.leftMargin = dp(6);
         credentials.addView(insert, smallAction);
@@ -3166,73 +3172,12 @@ public class MainActivity extends Activity {
         LinearLayout.LayoutParams doneTopParams = new LinearLayout.LayoutParams(dp(112), dp(44));
         doneTopParams.leftMargin = dp(6);
         credentials.addView(done, doneTopParams);
-        LinearLayout.LayoutParams challengeParams = new LinearLayout.LayoutParams(dp(132), dp(44));
-        challengeParams.leftMargin = dp(6);
-        credentials.addView(challenge, challengeParams);
         panel.addView(credentials, new LinearLayout.LayoutParams(-1, -2));
-
-        // Cloudflare's checkbox lives inside a cross-origin challenge iframe, so
-        // JavaScript in the parent page cannot reliably click it. The TV button
-        // moves focus to the challenge frame and sends the same DPAD_CENTER/ENTER
-        // activation a remote would send after focusing the widget.
-        challenge.setOnClickListener(v -> {
-            // Cloudflare changes iframe titles and markup between challenge versions.
-            // Try broad iframe discovery first; if the frame is not exposed in the
-            // parent DOM, tap the checkbox's stable visible position in the challenge
-            // panel as rendered in this login window.
-            web.evaluateJavascript("(function(){"
-                    + "var fs=[].slice.call(document.querySelectorAll('iframe'));"
-                    + "var a=fs.map(function(f){var r=f.getBoundingClientRect();return {"
-                    + "src:f.src||'',title:f.title||'',x:r.left,y:r.top,w:r.width,h:r.height,"
-                    + "visible:r.width>0&&r.height>0};}).filter(function(x){return x.visible});"
-                    + "if(a.length){a.sort(function(p,q){return (q.w*q.h)-(p.w*p.h)});"
-                    + "var f=a.find(function(x){return /cloudflare|challenge|turnstile/i.test(x.src+' '+x.title)})||a[0];"
-                    + "return JSON.stringify({mode:'iframe',x:f.x+36,y:f.y+55});}"
-                    + "return JSON.stringify({mode:'fallback'});})()", result -> {
-                try {
-                    String raw = result == null ? "" : result;
-                    String decoded = new org.json.JSONArray("[" + raw + "]").getString(0);
-                    org.json.JSONObject pos = new org.json.JSONObject(decoded);
-                    float x;
-                    float y;
-                    boolean fallback = "fallback".equals(pos.optString("mode"));
-                    if (fallback) {
-                        // Relative to WebView viewport: checkbox is near the upper-left
-                        // of the visible Cloudflare challenge card.
-                        x = web.getWidth() * 0.055f;
-                        y = web.getHeight() * 0.65f;
-                    } else {
-                        float density = getResources().getDisplayMetrics().density;
-                        x = (float) (pos.getDouble("x") * density);
-                        y = (float) (pos.getDouble("y") * density);
-                    }
-                    if (x < 0 || y < 0 || x >= web.getWidth() || y >= web.getHeight()) {
-                        showMessage("Кнопка проверки находится вне видимой области. Нажми «Обновить» и попробуй снова.");
-                        return;
-                    }
-                    long downTime = android.os.SystemClock.uptimeMillis();
-                    android.view.MotionEvent down = android.view.MotionEvent.obtain(downTime, downTime,
-                            android.view.MotionEvent.ACTION_DOWN, x, y, 0);
-                    android.view.MotionEvent up = android.view.MotionEvent.obtain(downTime, downTime + 100,
-                            android.view.MotionEvent.ACTION_UP, x, y, 0);
-                    web.dispatchTouchEvent(down);
-                    web.dispatchTouchEvent(up);
-                    down.recycle();
-                    up.recycle();
-                    showMessage(fallback
-                            ? "Отправлено нажатие в область чекбокса Cloudflare. Подожди несколько секунд."
-                            : "Отправлено нажатие по виджету Cloudflare. Подожди несколько секунд.");
-                } catch (Exception e) {
-                    showMessage("Не удалось выполнить нажатие Cloudflare. Обнови страницу и попробуй снова.");
-                }
-            });
-        });
 
         LinearLayout actions = new LinearLayout(this);
         actions.setGravity(Gravity.CENTER_VERTICAL);
         actions.setPadding(0, dp(6), 0, dp(6));
         Button refresh = button("Обновить");
-        Button cursorToggle = button("Курсор: выкл");
         Button close = button("Закрыть");
         LinearLayout.LayoutParams actionParams = new LinearLayout.LayoutParams(0, dp(46), 1f);
         actions.addView(refresh, actionParams);
@@ -3247,7 +3192,7 @@ public class MainActivity extends Activity {
         FrameLayout webContainer = new FrameLayout(this);
         webContainer.setFocusable(false);
         TvWebCursorView tvCursor = new TvWebCursorView(this, web);
-        tvCursor.setVisibility(View.GONE);
+        tvCursor.setVisibility(View.VISIBLE);
         webContainer.addView(web, new FrameLayout.LayoutParams(-1, -1));
         webContainer.addView(tvCursor, new FrameLayout.LayoutParams(-1, -1));
         panel.addView(webContainer, new LinearLayout.LayoutParams(-1, 0, 1f));
@@ -3261,6 +3206,11 @@ public class MainActivity extends Activity {
             } else {
                 web.requestFocus();
             }
+        });
+        webContainer.post(() -> {
+            tvCursor.setCursorPosition(webContainer.getWidth() * 0.12f,
+                    webContainer.getHeight() * 0.18f);
+            tvCursor.requestFocus();
         });
 
         AlertDialog dialog = new AlertDialog.Builder(this)
@@ -3392,6 +3342,12 @@ public class MainActivity extends Activity {
                 android.graphics.Paint.ANTI_ALIAS_FLAG);
         private float cursorX = dp(45);
         private float cursorY = dp(45);
+
+        void setCursorPosition(float x, float y) {
+            cursorX = Math.max(dp(14), Math.min(getWidth() - dp(14), x));
+            cursorY = Math.max(dp(14), Math.min(getHeight() - dp(14), y));
+            invalidate();
+        }
         private final float step = dp(22);
 
         TvWebCursorView(android.content.Context context, WebView target) {
@@ -3409,11 +3365,11 @@ public class MainActivity extends Activity {
             paint.setStrokeWidth(dp(2));
             paint.setColor(Color.BLACK);
             canvas.drawCircle(cursorX, cursorY, dp(13), paint);
-            paint.setColor(GOLD);
-            paint.setStrokeWidth(dp(3));
-            canvas.drawCircle(cursorX, cursorY, dp(11), paint);
+            paint.setColor(Color.rgb(0, 255, 210));
+            paint.setStrokeWidth(dp(4));
+            canvas.drawCircle(cursorX, cursorY, dp(12), paint);
             paint.setStyle(android.graphics.Paint.Style.FILL);
-            paint.setColor(Color.WHITE);
+            paint.setColor(Color.rgb(255, 235, 0));
             android.graphics.Path pointer = new android.graphics.Path();
             pointer.moveTo(cursorX - dp(5), cursorY - dp(9));
             pointer.lineTo(cursorX - dp(5), cursorY + dp(10));
@@ -3423,6 +3379,12 @@ public class MainActivity extends Activity {
             pointer.lineTo(cursorX + dp(4), cursorY + dp(3));
             pointer.lineTo(cursorX + dp(11), cursorY + dp(3));
             pointer.close();
+            paint.setStyle(android.graphics.Paint.Style.STROKE);
+            paint.setStrokeWidth(dp(2));
+            paint.setColor(Color.rgb(255, 0, 180));
+            canvas.drawPath(pointer, paint);
+            paint.setStyle(android.graphics.Paint.Style.FILL);
+            paint.setColor(Color.rgb(255, 235, 0));
             canvas.drawPath(pointer, paint);
         }
 
