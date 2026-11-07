@@ -1363,10 +1363,10 @@ public class MainActivity extends Activity {
                 String countryLine = "Страна выхода: " + country
                         + (codeCountry.isEmpty() ? "" : " (" + codeCountry + ")");
                 String result = "Маршрут: " + (cfg.enabled ? "SOCKS5" : "напрямую")
-                        + (cfg.enabled ? "\\nSOCKS5: подключение активно (" + cfg.host + ":" + cfg.port + ")" : "")
-                        + "\\nВнешний IP: " + ip
-                        + "\\n" + countryLine
-                        + (isp.isEmpty() ? "" : "\\nПровайдер: " + isp);
+                        + (cfg.enabled ? "\nSOCKS5: подключение активно (" + cfg.host + ":" + cfg.port + ")" : "")
+                        + "\nВнешний IP: " + ip
+                        + "\n" + countryLine
+                        + (isp.isEmpty() ? "" : "\nПровайдер: " + isp);
                 runOnUiThread(() -> {
                     exitCountryStatus = countryLine;
                     if (target != null) target.setText(result);
