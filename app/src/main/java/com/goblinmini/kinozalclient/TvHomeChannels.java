@@ -69,7 +69,7 @@ final class TvHomeChannels {
                     } else {
                         ids[index] = channel.getId();
                     }
-                    replacePrograms(activity, helper, ids[index], feed.optJSONArray("items"));
+                    replacePrograms(activity, helper, ids[index], CHANNEL_IDS[index], feed.optJSONArray("items"));
                 }
 
                 activity.runOnUiThread(() -> {
@@ -124,7 +124,7 @@ final class TvHomeChannels {
     }
 
     private static void replacePrograms(Activity activity, PreviewChannelHelper helper,
-            long channelId, JSONArray items) {
+            long channelId, String channelKey, JSONArray items) {
         if (items == null) return;
         String[] projection = {BaseColumns._ID};
         try (Cursor cursor = activity.getContentResolver().query(
@@ -173,7 +173,7 @@ final class TvHomeChannels {
                     .setDescription(description.length() == 0 ? "Открыть карточку раздачи Kinozal" : description.toString())
                     .setWeight(limit - i)
                     .setIntentUri(Uri.parse(playIntent.toUri(Intent.URI_INTENT_SCHEME)))
-                    .setInternalProviderId(CHANNEL_IDS[channelId == -1 ? 0 : (channelId == channelId ? 0 : 0)] + ":" + href);
+                    .setInternalProviderId(channelKey + ":" + href);
             String image = item.optString("image", "").trim();
             if (image.startsWith("https://") || image.startsWith("http://")) {
                 program.setPosterArtUri(Uri.parse(image));
