@@ -3407,6 +3407,7 @@ public class MainActivity extends Activity {
                 t.seeds = o.optString("seeds", "—");
                 t.leeches = o.optString("leeches", "—");
                 t.uploaded = o.optString("uploaded", "—");
+                t.poster = o.optString("poster", "");
                 if (!t.href.isEmpty()) result.put(t.href, t);
             }
         } catch (Exception ignored) { }
@@ -3430,6 +3431,7 @@ public class MainActivity extends Activity {
             try {
                 o.put("title", t.title); o.put("href", t.href); o.put("size", t.size);
                 o.put("seeds", t.seeds); o.put("leeches", t.leeches); o.put("uploaded", t.uploaded);
+                o.put("poster", t.poster == null ? "" : t.poster);
                 array.put(o);
             } catch (Exception ignored) { }
         }
