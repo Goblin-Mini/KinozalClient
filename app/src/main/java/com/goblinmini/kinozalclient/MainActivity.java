@@ -611,6 +611,8 @@ public class MainActivity extends Activity {
             List<HomeSection> sections, int retry) {
         if (index >= paths.length) {
             removeHomeDuplicates(sections);
+            List<HomeSection> channelSnapshot = new ArrayList<>(sections);
+            io.execute(() -> saveHomeModel(channelSnapshot));
             // Re-render the final de-duplicated model. This replaces each row
             // in place, so cards discarded by final normalization disappear too.
             for (HomeSection section : sections) renderHomeSection(section);
