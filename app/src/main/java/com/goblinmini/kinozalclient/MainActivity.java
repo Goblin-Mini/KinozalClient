@@ -381,30 +381,16 @@ public class MainActivity extends Activity {
         currentPath = "";
         currentTitle = "Главная";
         heading.setText("Главная");
-        if (!homeSectionsMemory.isEmpty()) {
-            renderHome(homeSectionsMemory);
-            progress.setVisibility(View.GONE);
-            status.setText("Показано лент: " + homeSectionsMemory.size());
-            refreshHomeInBackground();
-            return;
+        showPageLoading("Загрузка главной через WebView…");
+
+        // Главная загружается только через браузерную сессию Kinozal.
+        // Нативный HTTP-загрузчик и его фоновое обновление здесь не используются.
+        if (sessionWebView == null) {
+            restoreBrowserSession("");
         }
-        showPageLoading("Загрузка главной…");
-        io.execute(() -> {
-            List<HomeSection> saved = readHomeModel();
-            if (saved != null && !saved.isEmpty()) {
-                removeHomeDuplicates(saved);
-                runOnUiThread(() -> {
-                    homeSectionsMemory = saved;
-                    homeCacheDisplayed = true;
-                    renderHome(saved);
-                    progress.setVisibility(View.GONE);
-                    status.setText("Показано лент: " + saved.size() + " · сохранённая главная");
-                    refreshHomeInBackground();
-                });
-            } else {
-                loadInitialCatalogFromHttp(HOME_PATHS, HOME_TITLES);
-            }
-        });
+        browserHandler.postDelayed(() -> loadHomeSectionsInBrowser(
+                HOME_PATHS, HOME_TITLES, 0, new ArrayList<>(), 0),
+                sessionWebView == null ? 350 : 100);
     }
 
     private java.io.File homeModelFile() {
