@@ -1,5 +1,5 @@
 name: Android CI
-run-name: KinozalClient | ${{ github.event_name }} | #${{ github.run_number }} | ${{ github.sha }}
+run-name: KinozalClient | ${{ github.event_name }} | run-${{ github.run_id }}
 
 on:
   push:
