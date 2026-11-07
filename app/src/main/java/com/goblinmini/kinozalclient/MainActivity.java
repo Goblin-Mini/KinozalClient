@@ -682,10 +682,11 @@ public class MainActivity extends Activity {
             "novinki.php?c=1002",
             "novinki.php?c=1001",
             "top.php?c=1002&d=0&f=0&j=&k=0&s=0&t=0",
-            "top.php?c=1001&d=0&f=0&j=&k=0&s=0&t=0"
+            "top.php?c=1001&d=0&f=0&j=&k=0&s=0&t=0",
+            "?page=1"
     };
     private static final String[] TV_CHANNEL_TITLES = {
-            "Новинки фильмов", "Новинки сериалов", "Топ фильмов", "Топ сериалов"
+            "Новинки фильмов", "Новинки сериалов", "Топ фильмов", "Топ сериалов", "Новые поступления"
     };
     private boolean tvChannelsRefreshInProgress;
 
@@ -711,7 +712,9 @@ public class MainActivity extends Activity {
 
     private void loadNextTvChannelFeed(int index, List<HomeSection> sections) {
         if (index >= TV_CHANNEL_PATHS.length) {
-            removeHomeDuplicates(sections);
+            // Keep each TV channel independent: the same release may legitimately
+            // appear in more than one feed. parseHomePosters already removes duplicates
+            // within an individual feed.
             io.execute(() -> {
                 try {
                     org.json.JSONArray feeds = new org.json.JSONArray();
