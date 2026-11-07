@@ -3896,101 +3896,105 @@ public class MainActivity extends Activity {
 
 
     private void addMagnetToExternalTorrServer(String baseUrl, String magnet, TorrentDetails data) {
-        // First ask TorrServer for metadata. Its /stream?stat endpoint returns file_stats;
-        // /stream?play without index fails for multi-file torrents ("index is empty or wrong").
+        // Match TorrServe MatriX "Играть все": add the magnet through the server API,
+        // wait until metadata is ready, then open the server-generated M3U playlist.
+        // Do not select a single file or build a /stream URL on the client.
         io.execute(() -> {
-            HttpURLConnection connection = null;
             try {
-                Uri statUri = Uri.parse(baseUrl + "/stream").buildUpon()
-                        .appendQueryParameter("link", magnet)
-                        .appendQueryParameter("stat", "true")
-                        .appendQueryParameter("title", data.title == null ? "" : data.title)
-                        .appendQueryParameter("poster", data.poster == null ? "" : data.poster)
-                        .build();
-                connection = (HttpURLConnection) new URL(statUri.toString()).openConnection();
-                connection.setConnectTimeout(15000);
-                connection.setReadTimeout(45000);
-                connection.setRequestMethod("GET");
-                connection.setRequestProperty("Accept", "application/json");
-                int code = connection.getResponseCode();
-                java.io.InputStream input = code >= 200 && code < 300
-                        ? connection.getInputStream() : connection.getErrorStream();
-                StringBuilder body = new StringBuilder();
-                if (input != null) {
-                    try (java.io.BufferedReader reader = new java.io.BufferedReader(
-                            new java.io.InputStreamReader(input, StandardCharsets.UTF_8))) {
-                        String line;
-                        while ((line = reader.readLine()) != null) body.append(line);
-                    }
-                }
-                if (code < 200 || code >= 300) {
-                    String detail = body.toString();
-                    throw new java.io.IOException("TorrServer HTTP " + code
-                            + (detail.isEmpty() ? "" : ": " + detail.substring(0, Math.min(180, detail.length()))));
+                org.json.JSONObject addRequest = new org.json.JSONObject();
+                addRequest.put("action", "add");
+                addRequest.put("link", magnet);
+                addRequest.put("title", data.title == null ? "" : data.title);
+                addRequest.put("poster", data.poster == null ? "" : data.poster);
+                addRequest.put("category", "");
+                addRequest.put("data", "");
+                addRequest.put("save_to_db", true);
+
+                org.json.JSONObject torrent = postTorrServerJson(baseUrl, addRequest);
+                String hash = torrent.optString("hash", "");
+                if (hash.isEmpty()) {
+                    throw new java.io.IOException("Удалённый TorrServer не вернул hash добавленной раздачи.");
                 }
 
-                org.json.JSONObject status = new org.json.JSONObject(body.toString());
-                org.json.JSONArray files = status.optJSONArray("file_stats");
-                if (files == null || files.length() == 0)
-                    throw new java.io.IOException("TorrServer не вернул список файлов раздачи.");
-
-                int selectedIndex = -1;
-                long selectedLength = -1;
-                String selectedName = "";
-                String[] videoExtensions = {
-                        ".mkv", ".mp4", ".avi", ".m4v", ".mov", ".wmv", ".webm",
-                        ".ts", ".m2ts", ".mpg", ".mpeg", ".vob", ".flv", ".mts"
-                };
-                for (int i = 0; i < files.length(); i++) {
-                    org.json.JSONObject file = files.optJSONObject(i);
-                    if (file == null) continue;
-                    String path = file.optString("path", "");
-                    String lower = path.toLowerCase(java.util.Locale.ROOT);
-                    boolean video = false;
-                    for (String ext : videoExtensions) {
-                        if (lower.endsWith(ext)) { video = true; break; }
-                    }
-                    long length = file.optLong("length", 0);
-                    if (video && length > selectedLength) {
-                        selectedIndex = file.optInt("id", -1);
-                        selectedLength = length;
-                        selectedName = path;
-                    }
+                org.json.JSONArray files = torrent.optJSONArray("file_stats");
+                for (int attempt = 0; (files == null || files.length() == 0) && attempt < 60; attempt++) {
+                    Thread.sleep(1000);
+                    org.json.JSONObject getRequest = new org.json.JSONObject();
+                    getRequest.put("action", "get");
+                    getRequest.put("hash", hash);
+                    torrent = postTorrServerJson(baseUrl, getRequest);
+                    files = torrent.optJSONArray("file_stats");
                 }
-                if (selectedIndex < 0)
-                    throw new java.io.IOException("В раздаче не найден видеофайл для воспроизведения.");
+                if (files == null || files.length() == 0) {
+                    throw new java.io.IOException("Удалённый TorrServer не подготовил список файлов за 60 секунд.");
+                }
 
-                // TorrServer's player URL includes the selected filename in the path.
-                // Some external players fail to resolve the stream when the path is only /stream.
-                String fileName = selectedName;
-                if (fileName == null || fileName.trim().isEmpty())
-                    fileName = data.title == null ? "video" : data.title;
-                int slash = fileName.lastIndexOf('/');
-                if (slash >= 0) fileName = fileName.substring(slash + 1);
-                Uri streamUri = Uri.parse(baseUrl + "/stream/" + Uri.encode(fileName)).buildUpon()
-                        .appendQueryParameter("link", magnet)
-                        .appendQueryParameter("index", String.valueOf(selectedIndex))
-                        .appendQueryParameter("play", "true")
-                        .appendQueryParameter("save", "true")
-                        .appendQueryParameter("title", data.title == null ? "" : data.title)
-                        .appendQueryParameter("poster", data.poster == null ? "" : data.poster)
+                String torrentName = torrent.optString("name", "");
+                if (torrentName.trim().isEmpty()) {
+                    torrentName = data.title == null || data.title.trim().isEmpty()
+                            ? hash : data.title;
+                }
+
+                // This is the same endpoint used by TorrServe MatriX's own
+                // "Играть все" button: /playlist/{torrent-name}.m3u?hash=...
+                Uri playlistUri = Uri.parse(baseUrl + "/playlist/" + Uri.encode(torrentName) + ".m3u")
+                        .buildUpon()
+                        .appendQueryParameter("hash", hash)
                         .build();
                 Intent intent = new Intent(Intent.ACTION_VIEW);
-                intent.setDataAndType(streamUri, "video/*");
+                intent.setDataAndType(playlistUri, "video/*");
+                intent.putExtra("title", data.title == null ? "" : data.title);
+                intent.putExtra("poster", data.poster == null ? "" : data.poster);
                 runOnUiThread(() -> {
                     try {
                         startActivity(intent);
                     } catch (Exception e) {
-                        showMessage("Не найден видеоплеер для потока TorrServer. Установите VLC или другой плеер.");
+                        showMessage("Не найден плеер, поддерживающий плейлисты TorrServer. Установите VLC или другой совместимый плеер.");
                     }
                 });
             } catch (Exception e) {
                 String error = safe(e.getMessage());
-                runOnUiThread(() -> showMessage("Не удалось подготовить поток TorrServer: " + error));
-            } finally {
-                if (connection != null) connection.disconnect();
+                runOnUiThread(() -> showMessage("Не удалось запустить «Играть все» на удалённом TorrServer: " + error));
             }
         });
+    }
+
+    private org.json.JSONObject postTorrServerJson(String baseUrl, org.json.JSONObject request) throws Exception {
+        HttpURLConnection connection = null;
+        try {
+            connection = (HttpURLConnection) new URL(baseUrl + "/torrents").openConnection();
+            connection.setConnectTimeout(15000);
+            connection.setReadTimeout(45000);
+            connection.setRequestMethod("POST");
+            connection.setDoOutput(true);
+            connection.setRequestProperty("Content-Type", "application/json; charset=utf-8");
+            connection.setRequestProperty("Accept", "application/json");
+            byte[] payload = request.toString().getBytes(StandardCharsets.UTF_8);
+            connection.setFixedLengthStreamingMode(payload.length);
+            try (java.io.OutputStream output = connection.getOutputStream()) {
+                output.write(payload);
+            }
+
+            int code = connection.getResponseCode();
+            java.io.InputStream input = code >= 200 && code < 300
+                    ? connection.getInputStream() : connection.getErrorStream();
+            StringBuilder body = new StringBuilder();
+            if (input != null) {
+                try (java.io.BufferedReader reader = new java.io.BufferedReader(
+                        new java.io.InputStreamReader(input, StandardCharsets.UTF_8))) {
+                    String line;
+                    while ((line = reader.readLine()) != null) body.append(line);
+                }
+            }
+            if (code < 200 || code >= 300) {
+                String detail = body.toString();
+                throw new java.io.IOException("TorrServer HTTP " + code
+                        + (detail.isEmpty() ? "" : ": " + detail.substring(0, Math.min(180, detail.length()))));
+            }
+            return new org.json.JSONObject(body.toString());
+        } finally {
+            if (connection != null) connection.disconnect();
+        }
     }
 
     private void startMagnetWebViewFetch(TorrentDetails data, WebView web, int retry) {
