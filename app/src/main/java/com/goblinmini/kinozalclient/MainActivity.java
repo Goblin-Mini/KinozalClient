@@ -1268,7 +1268,7 @@ public class MainActivity extends Activity {
         boolean music = section.contains("музык") || section.contains("music")
                 || value.matches("(?s).*\\b(FLAC|MP3|WAV|ALAC|APE|AAC|DSD)\\b.*");
         boolean game = section.contains("игр") || section.contains("game")
-                || value.matches("(?s).*\\b(PC|PS[345]|PS[345]\s*\\b|XBOX|NINTENDO|SWITCH|REPACK|REPACK|PORTABLE)\\b.*");
+                || value.matches("(?s).*\\b(PC|PS[345]|XBOX|NINTENDO|SWITCH|REPACK|PORTABLE)\\b.*");
 
         if (music) {
             addBadge(badges, value, "FLAC|ALAC|APE|WAV|DSD|MP3|AAC|OGG|OPUS");
