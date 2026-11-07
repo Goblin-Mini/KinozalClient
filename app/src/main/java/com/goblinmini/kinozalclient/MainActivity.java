@@ -95,6 +95,12 @@ public class MainActivity extends Activity {
     private String homeCacheDiagnostic = "Кэш главной ещё не проверялся";
 
     private volatile String lastBrowserError = "Причина пока не определена";
+    // Infohash is prefetched while the native details dialog is being viewed.
+    // This hides the Kinozal/Cloudflare round trip behind the user's reading time.
+    private final java.util.Map<String, String> infoHashCache = new java.util.HashMap<>();
+    private String pendingInfoHashId;
+    private final List<java.util.function.Consumer<String>> pendingInfoHashCallbacks = new ArrayList<>();
+
     private interface BrowserPageCallback { void onPage(String html, String error); }
     private final java.util.LinkedHashMap<String, String> pageCache =
             new java.util.LinkedHashMap<String, String>(12, 0.75f, true) {
@@ -3252,8 +3258,9 @@ public class MainActivity extends Activity {
             window.setAttributes(windowParams);
             window.setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT);
         }
-        if (!data.poster.isEmpty()) loadImageIntoView(data.poster, poster);
+        if (data.poster != null && !data.poster.isEmpty()) loadImageIntoView(data.poster, poster);
         watch.requestFocus();
+        prefetchInfoHash(data);
     }
 
     private void addDetailField(LinearLayout parent, String key, String value, int column) {
@@ -3274,53 +3281,92 @@ public class MainActivity extends Activity {
         }
     }
 
-    private void playTorrent(TorrentDetails data) {
-        if (sessionWebView == null) {
-            showMessage("Откройте каталог Kinozal и повторите.");
-            return;
-        }
-
+    private String getReleaseId(TorrentDetails data) {
         String page = data.sourcePage == null ? "" : data.sourcePage.trim();
-        java.util.regex.Matcher idMatcher = java.util.regex.Pattern
+        java.util.regex.Matcher matcher = java.util.regex.Pattern
                 .compile("(?:[?&]id=)([0-9]+)").matcher(page);
-        if (!idMatcher.find()) {
-            showMessage("Не удалось запустить воспроизведение.");
+        return matcher.find() ? matcher.group(1) : null;
+    }
+
+    private String parseInfoHash(String response) {
+        if (response == null || response.isEmpty()) return null;
+        java.util.regex.Matcher itemMatcher = java.util.regex.Pattern
+                .compile("(?is)<li>[^<]*?:\\s*([0-9a-f]{40})\\s*</li>").matcher(response);
+        if (itemMatcher.find()) return itemMatcher.group(1).toLowerCase(java.util.Locale.ROOT);
+        java.util.regex.Matcher hashMatcher = java.util.regex.Pattern
+                .compile("(?i)\\b[0-9a-f]{40}\\b").matcher(response);
+        return hashMatcher.find() ? hashMatcher.group().toLowerCase(java.util.Locale.ROOT) : null;
+    }
+
+    private void prefetchInfoHash(TorrentDetails data) {
+        requestInfoHash(data, null);
+    }
+
+    private void requestInfoHash(TorrentDetails data,
+            java.util.function.Consumer<String> callback) {
+        if (sessionWebView == null) {
+            if (callback != null) callback.accept(null);
+            return;
+        }
+        String releaseId = getReleaseId(data);
+        if (releaseId == null) {
+            if (callback != null) callback.accept(null);
             return;
         }
 
-        String endpoint = Uri.parse(page).buildUpon()
+        String cached;
+        synchronized (infoHashCache) { cached = infoHashCache.get(releaseId); }
+        if (cached != null) {
+            if (callback != null) callback.accept(cached);
+            return;
+        }
+
+        if (releaseId.equals(pendingInfoHashId)) {
+            if (callback != null) pendingInfoHashCallbacks.add(callback);
+            return;
+        }
+
+        // Only one top-level WebView navigation can be active. If the user
+        // switches to another release, finish the old waiters gracefully.
+        if (pendingInfoHashId != null) {
+            List<java.util.function.Consumer<String>> old = new ArrayList<>(pendingInfoHashCallbacks);
+            pendingInfoHashCallbacks.clear();
+            pendingInfoHashId = null;
+            for (java.util.function.Consumer<String> waiter : old) waiter.accept(null);
+        }
+        pendingInfoHashId = releaseId;
+        pendingInfoHashCallbacks.clear();
+        if (callback != null) pendingInfoHashCallbacks.add(callback);
+
+        String endpoint = Uri.parse(data.sourcePage).buildUpon()
                 .path("/get_srv_details.php")
                 .clearQuery()
-                .appendQueryParameter("id", idMatcher.group(1))
+                .appendQueryParameter("id", releaseId)
                 .appendQueryParameter("action", "2")
                 .build().toString();
 
-        // Use the authenticated WebView top-level navigation: this is the
-        // proven path that passes Cloudflare and returns the real infohash.
         fetchBrowserPage(endpoint, null, response -> {
-            if (response == null || response.isEmpty()) {
-                showMessage("Не удалось получить ссылку для воспроизведения. Проверьте авторизацию Kinozal.");
+            if (!releaseId.equals(pendingInfoHashId)) return;
+            String hash = parseInfoHash(response);
+            if (hash != null) {
+                synchronized (infoHashCache) { infoHashCache.put(releaseId, hash); }
+            }
+            List<java.util.function.Consumer<String>> waiters =
+                    new ArrayList<>(pendingInfoHashCallbacks);
+            pendingInfoHashCallbacks.clear();
+            pendingInfoHashId = null;
+            for (java.util.function.Consumer<String> waiter : waiters) waiter.accept(hash);
+        });
+    }
+
+    private void playTorrent(TorrentDetails data) {
+        requestInfoHash(data, hash -> {
+            if (hash == null) {
+                showMessage("Не удалось получить ссылку для воспроизведения. Проверьте авторизацию Kinozal и повторите.");
                 return;
             }
 
-            java.util.regex.Matcher itemMatcher = java.util.regex.Pattern
-                    .compile("(?is)<li>[^<]*?:\\s*([0-9a-f]{40})\\s*</li>")
-                    .matcher(response);
-            String hash = null;
-            if (itemMatcher.find()) hash = itemMatcher.group(1);
-
-            // Keep a tolerant fallback for minor markup changes on Kinozal.
-            if (hash == null) {
-                java.util.regex.Matcher hashMatcher = java.util.regex.Pattern
-                        .compile("(?i)\\b[0-9a-f]{40}\\b").matcher(response);
-                if (hashMatcher.find()) hash = hashMatcher.group();
-            }
-            if (hash == null) {
-                showMessage("Не удалось получить ссылку для воспроизведения. Повторите попытку позже.");
-                return;
-            }
-
-            String magnet = "magnet:?xt=urn:btih:" + hash.toLowerCase(java.util.Locale.ROOT)
+            String magnet = "magnet:?xt=urn:btih:" + hash
                     + "&dn=" + Uri.encode(data.title == null ? "" : data.title);
             Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(magnet));
             intent.setPackage("ru.yourok.torrserve");
