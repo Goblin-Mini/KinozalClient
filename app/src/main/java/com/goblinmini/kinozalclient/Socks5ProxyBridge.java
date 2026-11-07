@@ -115,7 +115,8 @@ public final class Socks5ProxyBridge {
         try {
             tunnel = openSocks(probe, "ipwho.is", 443);
             tunnel.setSoTimeout(15000);
-            tls = (SSLSocket) SSLSocketFactory.getDefault().createSocket(tunnel, "ipwho.is", 443, true);
+            SSLSocketFactory factory = (SSLSocketFactory) SSLSocketFactory.getDefault();
+            tls = (SSLSocket) factory.createSocket(tunnel, "ipwho.is", 443, true);
             tls.setSoTimeout(15000);
             tls.startHandshake();
             OutputStream out = tls.getOutputStream();
