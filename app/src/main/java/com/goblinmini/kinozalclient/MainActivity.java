@@ -177,11 +177,6 @@ public class MainActivity extends Activity {
         return new Proxy(Proxy.Type.HTTP, new java.net.InetSocketAddress("127.0.0.1", 1));
     }
 
-    @Override protected void onActivityResult(int requestCode, int resultCode, Intent data) {
-        super.onActivityResult(requestCode, resultCode, data);
-        TvHomeChannels.onBrowsableRequestResult(this, requestCode);
-    }
-
     @Override protected void onNewIntent(android.content.Intent intent) {
         super.onNewIntent(intent);
         setIntent(intent);
@@ -2782,6 +2777,7 @@ public class MainActivity extends Activity {
 
     @Override protected void onActivityResult(int requestCode, int resultCode, android.content.Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
+        TvHomeChannels.onBrowsableRequestResult(this, requestCode);
         if (resultCode != RESULT_OK || data == null || data.getData() == null) return;
         if (requestCode == REQUEST_BACKUP_EXPORT) {
             writeBackupToUri(data.getData());
