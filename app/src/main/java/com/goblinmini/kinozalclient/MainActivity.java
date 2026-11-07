@@ -3872,7 +3872,13 @@ public class MainActivity extends Activity {
                     + "&dn=" + Uri.encode(data.title == null ? "" : data.title);
             String remote = getSharedPreferences(PREFS, MODE_PRIVATE)
                     .getString("torrserve_url", "").trim().replaceAll("/+$", "");
-            if (!remote.isEmpty()) {
+            String remoteHost = remote.isEmpty() ? "" : Uri.parse(remote).getHost();
+            boolean localTorrServer = "127.0.0.1".equals(remoteHost)
+                    || "localhost".equalsIgnoreCase(remoteHost)
+                    || "::1".equals(remoteHost);
+            // On the same Android device, hand the magnet to the installed TorrServe app.
+            // The REST /torrents add endpoint only queues a torrent and does not start playback.
+            if (!remote.isEmpty() && !localTorrServer) {
                 addMagnetToExternalTorrServer(remote, magnet, data);
                 return;
             }
