@@ -792,6 +792,11 @@ public class MainActivity extends Activity {
                 HomeSection section = new HomeSection(title, path);
                 try {
                     section.items.addAll(parseHomePosters(Jsoup.parse(html, client.getMirror() + "/")));
+                    // Apply the same title/id/link de-duplication used by the home rows,
+                    // but scope it to this feed so separate TV collections stay independent.
+                    List<HomeSection> oneFeed = new ArrayList<>();
+                    oneFeed.add(section);
+                    removeHomeDuplicates(oneFeed);
                 } catch (Exception ignored) { }
                 runOnUiThread(() -> {
                     if (!section.items.isEmpty()) sections.add(section);
