@@ -2104,27 +2104,16 @@ public class MainActivity extends Activity {
 
     private void load(String path, String title, String postBody) {
         currentPath = path; currentTitle = title; heading.setText(title);
-        String cacheKey = client.getMirror() + "|" +
-                (postBody == null ? "GET|" + path : "POST|" + path + "|" + postBody);
-        String scopedCacheKey = cacheKey;
-        String cachedPage;
-        synchronized (pageCache) { cachedPage = pageCache.get(cacheKey); }
-        if (cachedPage == null && postBody == null) {
-            byte[] saved = diskCache.get("page|" + scopedCacheKey, 7L * 24L * 60L * 60L * 1000L);
-            if (saved != null) {
-                cachedPage = new String(saved, StandardCharsets.UTF_8);
-                synchronized (pageCache) { pageCache.put(cacheKey, cachedPage); }
-            }
-        }
-        if (cachedPage != null) { showLoadedPage(cachedPage); return; }
+
+        // Browse/category pages change frequently. Always request the current
+        // page from Kinozal; only Home feeds, posters and torrent details use
+        // their dedicated caches.
         showPageLoading("Загрузка каталога…");
         if (sessionWebView != null) {
             fetchBrowserPage(path, postBody, html -> {
                 if (html != null && !html.isEmpty()) {
                     lastKinozalConnectionStatus = "установлено";
                     updateSidebarConnectionInfo();
-                    synchronized (pageCache) { pageCache.put(cacheKey, html); }
-                    if (postBody == null) diskCache.put("page|" + scopedCacheKey, html.getBytes(StandardCharsets.UTF_8));
                     showLoadedPage(html);
                 } else {
                     lastKinozalConnectionStatus = "нет соединения";
@@ -2138,8 +2127,6 @@ public class MainActivity extends Activity {
             io.execute(() -> {
                 try {
                     String html = postBody == null ? client.fetch(path) : client.fetchPost(path, postBody);
-                    synchronized (pageCache) { pageCache.put(cacheKey, html); }
-                    if (postBody == null) diskCache.put("page|" + scopedCacheKey, html.getBytes(StandardCharsets.UTF_8));
                     runOnUiThread(() -> {
                         lastKinozalConnectionStatus = "установлено";
                         updateSidebarConnectionInfo();
