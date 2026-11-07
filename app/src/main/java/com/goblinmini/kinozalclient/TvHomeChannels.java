@@ -49,7 +49,7 @@ final class TvHomeChannels {
             "top.php?c=1002&d=0&f=0&j=&k=0&s=0&t=0",
             "top.php?c=1001&d=0&f=0&j=&k=0&s=0&t=0",
             "top.php?c=0&d=0&f=0&j=&k=0&s=0&t=0",
-            "?page=1",
+            "",
             "local:recently-viewed"
     };
     private static final int REQUEST_BROWSABLE = 7410;
@@ -99,7 +99,9 @@ final class TvHomeChannels {
                         channelIds[i] = channel.getId();
                     }
 
-                    JSONArray programs = i == 6 ? readRecentPrograms(activity) : findFeedItems(feeds, FEED_PATHS[i]);
+                    JSONArray programs = i == 6 ? readRecentPrograms(activity)
+                            : i == 5 ? findCombinedFeedItems(feeds, "", "?page=1")
+                            : findFeedItems(feeds, FEED_PATHS[i]);
                     replacePrograms(activity, helper, channelIds[i], CHANNEL_KEYS[i], programs);
                 }
 
@@ -181,6 +183,22 @@ final class TvHomeChannels {
                 Log.w(TAG, "Could not refresh continue-watching channel", e);
             }
         });
+    }
+
+    private static JSONArray findCombinedFeedItems(JSONArray feeds, String firstPath, String secondPath) {
+        JSONArray combined = new JSONArray();
+        java.util.HashSet<String> seen = new java.util.HashSet<>();
+        for (String path : new String[]{firstPath, secondPath}) {
+            JSONArray items = findFeedItems(feeds, path);
+            for (int i = 0; i < items.length(); i++) {
+                JSONObject item = items.optJSONObject(i);
+                if (item == null) continue;
+                String href = item.optString("href", "");
+                if (!href.isEmpty() && !seen.add(href)) continue;
+                combined.put(item);
+            }
+        }
+        return combined;
     }
 
     private static JSONArray findFeedItems(JSONArray feeds, String path) {
