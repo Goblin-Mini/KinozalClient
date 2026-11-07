@@ -3607,6 +3607,12 @@ public class MainActivity extends Activity {
 
             String magnet = "magnet:?xt=urn:btih:" + hash
                     + "&dn=" + Uri.encode(data.title == null ? "" : data.title);
+            String remote = getSharedPreferences(PREFS, MODE_PRIVATE)
+                    .getString("torrserve_url", "").trim().replaceAll("/+$", "");
+            if (!remote.isEmpty()) {
+                addMagnetToExternalTorrServer(remote, magnet, data);
+                return;
+            }
             Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(magnet));
             intent.setPackage("ru.yourok.torrserve");
             intent.putExtra("poster", data.poster == null ? "" : data.poster);
@@ -3615,6 +3621,59 @@ public class MainActivity extends Activity {
                 startActivity(intent);
             } catch (Exception e) {
                 showMessage("Не удалось открыть TorrServe. Проверьте, что он установлен.");
+            }
+        });
+    }
+
+
+    private void addMagnetToExternalTorrServer(String baseUrl, String magnet, TorrentDetails data) {
+        io.execute(() -> {
+            HttpURLConnection connection = null;
+            try {
+                URL endpoint = new URL(baseUrl + "/torrents");
+                connection = (HttpURLConnection) endpoint.openConnection();
+                connection.setRequestMethod("POST");
+                connection.setConnectTimeout(10000);
+                connection.setReadTimeout(20000);
+                connection.setDoOutput(true);
+                connection.setRequestProperty("Content-Type", "application/json; charset=utf-8");
+                connection.setRequestProperty("Accept", "application/json");
+                org.json.JSONObject body = new org.json.JSONObject();
+                body.put("action", "add");
+                body.put("link", magnet);
+                body.put("title", data.title == null ? "" : data.title);
+                body.put("poster", data.poster == null ? "" : data.poster);
+                body.put("save_to_db", true);
+                byte[] payload = body.toString().getBytes(StandardCharsets.UTF_8);
+                connection.setFixedLengthStreamingMode(payload.length);
+                try (java.io.OutputStream out = connection.getOutputStream()) {
+                    out.write(payload);
+                    out.flush();
+                }
+                int code = connection.getResponseCode();
+                java.io.InputStream stream = code >= 200 && code < 300
+                        ? connection.getInputStream() : connection.getErrorStream();
+                StringBuilder response = new StringBuilder();
+                if (stream != null) {
+                    try (java.io.BufferedReader reader = new java.io.BufferedReader(
+                            new java.io.InputStreamReader(stream, StandardCharsets.UTF_8))) {
+                        String line;
+                        while ((line = reader.readLine()) != null) response.append(line);
+                    }
+                }
+                if (code < 200 || code >= 300) throw new java.io.IOException("HTTP " + code);
+                String answer = response.toString().trim();
+                if (answer.startsWith("{")) {
+                    org.json.JSONObject json = new org.json.JSONObject(answer);
+                    if (json.has("error") && !json.isNull("error"))
+                        throw new java.io.IOException(json.optString("error"));
+                }
+                runOnUiThread(() -> showMessage("Magnet отправлен на внешний TorrServe"));
+            } catch (Exception e) {
+                String error = safe(e.getMessage());
+                runOnUiThread(() -> showMessage("Не удалось добавить раздачу на внешний TorrServe: " + error));
+            } finally {
+                if (connection != null) connection.disconnect();
             }
         });
     }
