@@ -3437,6 +3437,7 @@ public class MainActivity extends Activity {
         }
         getSharedPreferences(PREFS, MODE_PRIVATE).edit()
                 .putString(RECENTLY_VIEWED_KEY, array.toString()).apply();
+        TvHomeChannels.refreshContinue(this);
     }
 
     private void showRecentlyViewed() {
