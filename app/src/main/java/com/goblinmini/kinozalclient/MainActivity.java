@@ -4173,15 +4173,21 @@ public class MainActivity extends Activity {
 
         Element technical = doc.selectFirst("#tabs");
         if (technical != null) extractBoldFields(technical, data.fields);
-        // Extract Kinozal screenshot thumbnails and their full-size links.
+        // Kinozal can render the screenshots tab in #tabs in the saved HTML.
+        // Do not treat local "saved_resource" paths as image URLs: prefer a real
+        // network URL in src/data-src/data-original and resolve relative paths
+        // against the torrent page. Full-size links are stored only as metadata.
         if (technical != null) {
             for (Element link : technical.select("a:has(img)")) {
                 Element image = link.selectFirst("img");
                 if (image == null) continue;
-                String thumb = image.absUrl("src");
-                String full = link.absUrl("href");
-                if (thumb == null || thumb.trim().isEmpty()) continue;
-                if (full == null || full.trim().isEmpty()) full = thumb;
+                String rawThumb = firstNonEmpty(image.attr("data-src"),
+                        image.attr("data-original"), image.attr("src"));
+                String thumb = resolveDetailImageUrl(rawThumb, doc.baseUri());
+                if (thumb.isEmpty()) continue;
+                String rawFull = link.attr("href");
+                String full = resolveDetailImageUrl(rawFull, doc.baseUri());
+                if (full.isEmpty()) full = thumb;
                 if (!data.screenshotThumbs.contains(thumb)) {
                     data.screenshotThumbs.add(thumb);
                     data.screenshotFull.add(full);
@@ -4208,6 +4214,39 @@ public class MainActivity extends Activity {
             data.torrentLink = href.startsWith("magnet:") ? href : download.absUrl("href");
         }
         return data;
+    }
+
+    private String firstNonEmpty(String... values) {
+        if (values == null) return "";
+        for (String value : values) {
+            if (value != null && !value.trim().isEmpty()
+                    && !value.trim().equalsIgnoreCase("null")
+                    && !value.trim().startsWith("data:")) return value.trim();
+        }
+        return "";
+    }
+
+    private String resolveDetailImageUrl(String raw, String pageUrl) {
+        if (raw == null) return "";
+        String value = raw.trim();
+        if (value.isEmpty() || value.startsWith("data:")
+                || value.startsWith("file:") || value.startsWith("content:")) return "";
+        // Browser-saved HTML sometimes rewrites image paths to local filenames.
+        // A local filename is not a valid server path; use it only if it is a
+        // genuine root-relative or absolute HTTP URL.
+        try {
+            java.net.URI uri = java.net.URI.create(value);
+            if (uri.isAbsolute()) {
+                String scheme = uri.getScheme();
+                if (!"http".equalsIgnoreCase(scheme) && !"https".equalsIgnoreCase(scheme)) return "";
+                return uri.toString();
+            }
+            if (pageUrl == null || pageUrl.trim().isEmpty()) return "";
+            if (!(value.startsWith("/") || value.startsWith("./") || value.startsWith("../"))) return "";
+            return java.net.URI.create(pageUrl).resolve(uri).toString();
+        } catch (Exception ignored) {
+            return "";
+        }
     }
 
     private void extractBoldFields(Element block, java.util.LinkedHashMap<String, String> fields) {
@@ -4341,7 +4380,7 @@ public class MainActivity extends Activity {
 
         TextView externalRatings = text(
                 "IMDb  " + data.imdbRating + "     Кинопоиск  " + data.kinopoiskRating,
-                10, Color.LTGRAY, false);
+                12, Color.LTGRAY, true);
         externalRatings.setGravity(Gravity.CENTER);
         externalRatings.setSingleLine(true);
         externalRatings.setIncludeFontPadding(false);
@@ -4417,14 +4456,8 @@ public class MainActivity extends Activity {
                             preview.setOnFocusChangeListener((v, focused) ->
                                     v.setBackground(shape(focused ? Color.rgb(65, 72, 73) : PANEL,
                                             focused ? GOLD : 0)));
-                            preview.setOnClickListener(v -> {
-                                String fullUrl = data.screenshotFull.get(shotIndex);
-                                try {
-                                    startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(fullUrl)));
-                                } catch (Exception e) {
-                                    showMessage("Не удалось открыть полноразмерный скриншот.");
-                                }
-                            });
+                            preview.setClickable(false);
+                            preview.setFocusable(false);
                             LinearLayout.LayoutParams imageParams =
                                     new LinearLayout.LayoutParams(0, dp(190), 1);
                             if (col == 1) imageParams.leftMargin = dp(8);
