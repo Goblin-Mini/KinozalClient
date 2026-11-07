@@ -1452,8 +1452,50 @@ public class MainActivity extends Activity {
         addSubMenu(categoryGroup, "▣  Зарубежные сериалы", "browse.php?c=46");
         addSubMenu(categoryGroup, "▣  Российские сериалы", "browse.php?c=45");
 
-        addSubMenu(categoryGroup, "▤  Все фильмы", "browse.php?c=1002");
-        addSubMenu(categoryGroup, "▤  Советские фильмы", "browse.php?c=10");
+        Button moviesButton = button("▤  Фильмы  ▾");
+        moviesButton.setGravity(Gravity.CENTER_VERTICAL | Gravity.LEFT);
+        moviesButton.setTextSize(12);
+        moviesButton.setPadding(dp(34), 0, dp(8), 0);
+        LinearLayout.LayoutParams moviesButtonParams = new LinearLayout.LayoutParams(-1, dp(39));
+        moviesButtonParams.rightMargin = dp(5);
+        moviesButtonParams.bottomMargin = dp(2);
+        categoryGroup.addView(moviesButton, moviesButtonParams);
+
+        LinearLayout moviesGroup = new LinearLayout(this);
+        moviesGroup.setOrientation(LinearLayout.VERTICAL);
+        moviesGroup.setVisibility(View.GONE);
+        categoryGroup.addView(moviesGroup);
+
+        addSubMenu(moviesGroup, "Все фильмы", "browse.php?c=1002");
+        addSubMenu(moviesGroup, "Кино - Комедия", "browse.php?c=8");
+        addSubMenu(moviesGroup, "Кино - Боевик / Военный", "browse.php?c=6");
+        addSubMenu(moviesGroup, "Кино - Триллер / Детектив", "browse.php?c=15");
+        addSubMenu(moviesGroup, "Кино - Драма", "browse.php?c=17");
+        addSubMenu(moviesGroup, "Кино - Мелодрама", "browse.php?c=35");
+        addSubMenu(moviesGroup, "Кино - Индийское", "browse.php?c=39");
+        addSubMenu(moviesGroup, "Кино - Фантастика", "browse.php?c=13");
+        addSubMenu(moviesGroup, "Кино - Фэнтези", "browse.php?c=14");
+        addSubMenu(moviesGroup, "Кино - Ужас / Мистика", "browse.php?c=24");
+        addSubMenu(moviesGroup, "Кино - Приключения", "browse.php?c=11");
+        addSubMenu(moviesGroup, "Кино - Наше Кино", "browse.php?c=10");
+        addSubMenu(moviesGroup, "Кино - Исторический", "browse.php?c=9");
+        addSubMenu(moviesGroup, "Кино - Азиатский", "browse.php?c=47");
+        addSubMenu(moviesGroup, "Кино - Документальный", "browse.php?c=18");
+        addSubMenu(moviesGroup, "Кино - Спорт", "browse.php?c=37");
+        addSubMenu(moviesGroup, "Кино - Детский / Семейный", "browse.php?c=12");
+        addSubMenu(moviesGroup, "Кино - Классика", "browse.php?c=7");
+        addSubMenu(moviesGroup, "Кино - Концерт", "browse.php?c=48");
+        addSubMenu(moviesGroup, "Кино - Передачи / ТВ-шоу", "browse.php?c=49");
+        addSubMenu(moviesGroup, "Кино - ТВ-шоу Мир", "browse.php?c=50");
+        addSubMenu(moviesGroup, "Кино - Театр, Опера, Балет", "browse.php?c=38");
+        addSubMenu(moviesGroup, "Кино - Эротика", "browse.php?c=16");
+
+        moviesButton.setOnClickListener(v -> {
+            boolean expand = moviesGroup.getVisibility() != View.VISIBLE;
+            moviesGroup.setVisibility(expand ? View.VISIBLE : View.GONE);
+            moviesButton.setText(expand ? "▤  Фильмы  ▾" : "▤  Фильмы  ▸");
+            if (expand && moviesGroup.getChildCount() > 0) moviesGroup.getChildAt(0).requestFocus();
+        });
         addSubMenu(categoryGroup, "▧  Мультфильмы", "browse.php?c=1003");
         addSubMenu(categoryGroup, "▧  Российские мульты", "browse.php?c=22");
         addSubMenu(categoryGroup, "▧  Зарубежные мульты", "browse.php?c=21");
