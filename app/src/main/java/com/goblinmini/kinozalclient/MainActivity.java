@@ -2682,6 +2682,9 @@ public class MainActivity extends Activity {
             searchSortBar = null;
             sortDateButton = sortSizeButton = sortSeedsButton = null;
         }
+        boolean recentList = "local:recently-viewed".equals(currentPath);
+        if (recentList) addHistoryClearButton();
+
         LinearLayout header = new LinearLayout(this);
         header.setGravity(Gravity.CENTER_VERTICAL);
         header.setPadding(dp(14), dp(8), dp(14), dp(8));
@@ -2720,6 +2723,16 @@ public class MainActivity extends Activity {
             TextView leeches = text(t.leeches, 13, RED, true);
             leeches.setGravity(Gravity.CENTER);
             row.addView(leeches, new LinearLayout.LayoutParams(dp(55), -2));
+            if (recentList) {
+                android.widget.ImageButton delete = new android.widget.ImageButton(this);
+                delete.setImageResource(android.R.drawable.ic_menu_delete);
+                delete.setBackground(shape(Color.TRANSPARENT, 0));
+                delete.setColorFilter(GOLD);
+                delete.setContentDescription("Удалить из истории");
+                delete.setFocusable(true);
+                delete.setOnClickListener(v -> removeRecentlyViewed(t.href));
+                row.addView(delete, new LinearLayout.LayoutParams(dp(42), dp(46)));
+            }
             row.setFocusable(true);
             final Runnable[] prefetchTask = {null};
             row.setOnFocusChangeListener((v, f) -> {
@@ -2732,11 +2745,15 @@ public class MainActivity extends Activity {
             });
             row.setOnClickListener(v -> showTorrent(t)); list.addView(row, rp);
         }
-        LinearLayout pages = new LinearLayout(this); pages.setGravity(Gravity.RIGHT);
-        Button prev = button("← Назад"); Button next = button("Далее →");
-        pages.addView(prev); pages.addView(next);
-        LinearLayout.LayoutParams pp = new LinearLayout.LayoutParams(-1, dp(52)); pp.topMargin = dp(10); list.addView(pages, pp);
-        prev.setOnClickListener(v -> changePage(-1)); next.setOnClickListener(v -> changePage(1));
+        if (recentList) {
+            addHistoryClearButton();
+        } else {
+            LinearLayout pages = new LinearLayout(this); pages.setGravity(Gravity.RIGHT);
+            Button prev = button("← Назад"); Button next = button("Далее →");
+            pages.addView(prev); pages.addView(next);
+            LinearLayout.LayoutParams pp = new LinearLayout.LayoutParams(-1, dp(52)); pp.topMargin = dp(10); list.addView(pages, pp);
+            prev.setOnClickListener(v -> changePage(-1)); next.setOnClickListener(v -> changePage(1));
+        }
         animateContentTransition(list);
     }
 
@@ -3478,6 +3495,49 @@ public class MainActivity extends Activity {
             String oldest = recent.keySet().iterator().next();
             recent.remove(oldest);
         }
+        org.json.JSONArray array = new org.json.JSONArray();
+        java.util.List<Torrent> values = new java.util.ArrayList<>(recent.values());
+        for (int i = values.size() - 1; i >= 0; i--) {
+            Torrent t = values.get(i);
+            org.json.JSONObject o = new org.json.JSONObject();
+            try {
+                o.put("title", t.title); o.put("href", t.href); o.put("size", t.size);
+                o.put("seeds", t.seeds); o.put("leeches", t.leeches); o.put("uploaded", t.uploaded);
+                o.put("poster", t.poster == null ? "" : t.poster);
+                array.put(o);
+            } catch (Exception ignored) { }
+        }
+        getSharedPreferences(PREFS, MODE_PRIVATE).edit()
+                .putString(RECENTLY_VIEWED_KEY, array.toString()).apply();
+        TvHomeChannels.refreshContinue(this);
+    }
+
+    private void addHistoryClearButton() {
+        Button clear = button("Очистить историю");
+        clear.setAllCaps(false);
+        clear.setTextSize(14);
+        clear.setOnClickListener(v -> clearRecentlyViewed());
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-1, dp(44));
+        params.topMargin = dp(8);
+        params.bottomMargin = dp(8);
+        list.addView(clear, params);
+    }
+
+    private void removeRecentlyViewed(String href) {
+        if (href == null || href.isEmpty()) return;
+        java.util.LinkedHashMap<String, Torrent> recent = readRecentlyViewed();
+        recent.remove(href);
+        saveRecentlyViewedList(recent);
+        showRecentlyViewed();
+    }
+
+    private void clearRecentlyViewed() {
+        saveRecentlyViewedList(new java.util.LinkedHashMap<>());
+        showRecentlyViewed();
+        showMessage("История очищена");
+    }
+
+    private void saveRecentlyViewedList(java.util.LinkedHashMap<String, Torrent> recent) {
         org.json.JSONArray array = new org.json.JSONArray();
         java.util.List<Torrent> values = new java.util.ArrayList<>(recent.values());
         for (int i = values.size() - 1; i >= 0; i--) {
