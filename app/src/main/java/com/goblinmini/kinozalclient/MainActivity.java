@@ -2851,6 +2851,7 @@ public class MainActivity extends Activity {
         String imdbRating = "—", kinopoiskRating = "—", kinozalRating = "—", kinozalStars = "☆☆☆☆☆☆☆☆☆☆", kinozalVotes = "";
         final java.util.LinkedHashMap<String, String> fields = new java.util.LinkedHashMap<>();
         final java.util.List<String> screenshotThumbs = new java.util.ArrayList<>();
+        boolean screenshotsLoaded = false;
     }
 
     private void showTorrent(Torrent t) {
@@ -3174,7 +3175,9 @@ public class MainActivity extends Activity {
             detailContent.removeAllViews();
             if (active[0] == 2) {
                 if (data.screenshotThumbs.isEmpty()) {
-                    detailContent.addView(text("Загрузка скриншотов…", 15, Color.LTGRAY, false));
+                    detailContent.addView(text(data.screenshotsLoaded
+                            ? "Скриншоты на странице раздачи не найдены."
+                            : "Загрузка скриншотов…", 15, Color.LTGRAY, false));
                 } else {
                     for (int i = 0; i < data.screenshotThumbs.size(); i += 2) {
                         LinearLayout row = new LinearLayout(this);
@@ -3312,6 +3315,7 @@ public class MainActivity extends Activity {
                 if (completed[0]) return;
                 completed[0] = true;
                 web.removeJavascriptInterface("KinozalScreenshotsBridge");
+                data.screenshotsLoaded = true;
                 runOnUiThread(onLoaded);
             };
             web.addJavascriptInterface(new Object() {
@@ -3339,6 +3343,7 @@ public class MainActivity extends Activity {
                             data.screenshotThumbs.clear();
                             data.screenshotThumbs.addAll(unique);
                         } catch (Exception ignored) { }
+                        data.screenshotsLoaded = true;
                         onLoaded.run();
                     });
                 }
