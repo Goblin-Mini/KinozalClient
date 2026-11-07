@@ -1418,8 +1418,14 @@ public class MainActivity extends Activity {
         LinearLayout main = new LinearLayout(this); main.setOrientation(LinearLayout.VERTICAL);
         main.setPadding(dp(16), dp(8), dp(8), dp(8));
         root.addView(main, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1));
-        LinearLayout brand = new LinearLayout(this); brand.setGravity(Gravity.CENTER);
-        TextView logo = text("KINOZAL", 23, GOLD, true); brand.addView(logo);
+        LinearLayout brand = new LinearLayout(this);
+        brand.setGravity(Gravity.CENTER_VERTICAL | Gravity.LEFT);
+        brand.setPadding(dp(10), 0, dp(4), 0);
+        ImageView logo = new ImageView(this);
+        logo.setImageResource(R.drawable.kinozal_sidebar_logo);
+        logo.setScaleType(ImageView.ScaleType.FIT_START);
+        logo.setAdjustViewBounds(true);
+        brand.addView(logo, new LinearLayout.LayoutParams(dp(158), dp(58)));
         sidebar.addView(brand, new LinearLayout.LayoutParams(-1, dp(58)));
         ScrollView menuScroll = new ScrollView(this);
         menuScroll.setFillViewport(false);
