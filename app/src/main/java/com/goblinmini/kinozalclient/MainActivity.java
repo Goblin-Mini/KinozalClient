@@ -1466,6 +1466,7 @@ public class MainActivity extends Activity {
             getSharedPreferences(PREFS, MODE_PRIVATE).edit().putString("torrserve_url", value).apply();
             showMessage("Адрес TorrServe сохранён");
         });
+        addSettingsAction(right, "Проверить историю и позицию TorrServe", () -> checkTorrServerViewingHistory());
 
         addSettingsSection(right, "СЕТЬ И ПРОКСИ");
         addSettingsAction(right, "SOCKS5: настройки и проверка", () -> showSocks5Settings());
@@ -1488,6 +1489,93 @@ public class MainActivity extends Activity {
                     ViewGroup.LayoutParams.MATCH_PARENT);
         }
         close.setOnClickListener(v -> settingsDialog.dismiss());
+    }
+
+    private void checkTorrServerViewingHistory() {
+        String base = getSharedPreferences(PREFS, MODE_PRIVATE)
+                .getString("torrserve_url", "").trim().replaceAll("/+$", "");
+        if (base.isEmpty()) {
+            showMessage("Сначала укажите адрес внешнего TorrServe в настройках.");
+            return;
+        }
+        showMessage("Проверяем API истории TorrServer…");
+        io.execute(() -> {
+            HttpURLConnection viewedConnection = null;
+            HttpURLConnection ffprobeConnection = null;
+            try {
+                viewedConnection = (HttpURLConnection) new URL(base + "/viewed").openConnection();
+                viewedConnection.setConnectTimeout(7000);
+                viewedConnection.setReadTimeout(10000);
+                viewedConnection.setRequestMethod("POST");
+                viewedConnection.setDoOutput(true);
+                viewedConnection.setRequestProperty("Content-Type", "application/json; charset=utf-8");
+                viewedConnection.setRequestProperty("Accept", "application/json");
+                byte[] payload = "{\\"action\\":\\"list\\"}".getBytes(StandardCharsets.UTF_8);
+                try (java.io.OutputStream out = viewedConnection.getOutputStream()) { out.write(payload); }
+                int viewedCode = viewedConnection.getResponseCode();
+                java.io.InputStream viewedStream = viewedCode >= 200 && viewedCode < 300
+                        ? viewedConnection.getInputStream() : viewedConnection.getErrorStream();
+                StringBuilder viewedBody = new StringBuilder();
+                if (viewedStream != null) {
+                    try (java.io.BufferedReader reader = new java.io.BufferedReader(
+                            new java.io.InputStreamReader(viewedStream, StandardCharsets.UTF_8))) {
+                        String line;
+                        while ((line = reader.readLine()) != null) viewedBody.append(line);
+                    }
+                }
+                if (viewedCode < 200 || viewedCode >= 300)
+                    throw new java.io.IOException("/viewed: HTTP " + viewedCode + " "
+                            + viewedBody.toString().substring(0, Math.min(180, viewedBody.length())));
+                org.json.JSONArray entries = new org.json.JSONArray(viewedBody.toString());
+                int withPosition = 0;
+                for (int i = 0; i < entries.length(); i++) {
+                    org.json.JSONObject item = entries.optJSONObject(i);
+                    if (item != null && item.optDouble("timecode", 0d) > 0d) withPosition++;
+                }
+
+                String ffprobe = "не удалось проверить";
+                try {
+                    ffprobeConnection = (HttpURLConnection) new URL(base + "/ffp/status").openConnection();
+                    ffprobeConnection.setConnectTimeout(5000);
+                    ffprobeConnection.setReadTimeout(7000);
+                    ffprobeConnection.setRequestProperty("Accept", "application/json");
+                    int code = ffprobeConnection.getResponseCode();
+                    java.io.InputStream stream = code >= 200 && code < 300
+                            ? ffprobeConnection.getInputStream() : ffprobeConnection.getErrorStream();
+                    StringBuilder body = new StringBuilder();
+                    if (stream != null) {
+                        try (java.io.BufferedReader reader = new java.io.BufferedReader(
+                                new java.io.InputStreamReader(stream, StandardCharsets.UTF_8))) {
+                            String line;
+                            while ((line = reader.readLine()) != null) body.append(line);
+                        }
+                    }
+                    ffprobe = "HTTP " + code + ": " + body.toString();
+                } catch (Exception e) {
+                    ffprobe = safe(e.getMessage());
+                }
+                final String report = "API /viewed: доступен\n"
+                        + "Записей в истории TorrServer: " + entries.length() + "\n"
+                        + "Записей с позицией больше 0: " + withPosition + "\n"
+                        + "FFprobe: " + ffprobe + "\n\n"
+                        + (withPosition > 0
+                        ? "Сервер уже хранит временные позиции. Можно подключать канал «Продолжить просмотр»."
+                        : "Пока нет подтверждённых временных позиций. Запустите видео через TorrServe, "
+                        + "посмотрите 1–2 минуты, остановите воспроизведение и проверьте ещё раз.");
+                runOnUiThread(() -> new AlertDialog.Builder(this)
+                        .setTitle("Диагностика TorrServer").setMessage(report)
+                        .setPositiveButton("Закрыть", null).show());
+            } catch (Exception e) {
+                final String report = "Не удалось прочитать историю TorrServer: " + safe(e.getMessage())
+                        + "\n\nПроверьте адрес, доступность сервера и авторизацию API.";
+                runOnUiThread(() -> new AlertDialog.Builder(this)
+                        .setTitle("Диагностика TorrServer").setMessage(report)
+                        .setPositiveButton("Закрыть", null).show());
+            } finally {
+                if (viewedConnection != null) viewedConnection.disconnect();
+                if (ffprobeConnection != null) ffprobeConnection.disconnect();
+            }
+        });
     }
 
     private void addSettingsSection(LinearLayout parent, String title) {
