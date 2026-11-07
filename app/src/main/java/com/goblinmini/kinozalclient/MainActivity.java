@@ -488,61 +488,47 @@ public class MainActivity extends Activity {
     private void refreshHomeInBackground() {
         if (homeRefreshInProgress) return;
         homeRefreshInProgress = true;
-        final String[] paths = {"novinki.php", "top.php?c=0&d=0&f=0&j=&k=0&s=0&t=0",
-                "top.php?c=0&d=0&f=0&j=&k=0&s=0&t=0&w=1",
-                "top.php?c=0&d=0&f=0&j=&k=0&s=0&t=0&w=2",
-                "top.php?j=%D0%BB%D1%83%D1%87%D1%88%D0%B8%D0%B9%20%D1%84%D0%B8%D0%BB%D1%8C%D0%BC%20%D0%9E%D1%81%D0%BA%D0%B0%D1%80",
-                "top.php?j=Netflix", "top.php?j=HBO",
-                "top.php?j=Walt%20Disney%20Pictures", "top.php?j=Marvel"};
-        final String[] titles = {"Новинки", "Топ раздач", "Топ недели", "Топ месяца",
-                "Топ Оскар", "Топ Netflix", "Топ HBO", "Топ Walt Disney", "Топ Marvel"};
-        final String browserCookies = CookieManager.getInstance().getCookie(client.getMirror());
-        // Let the cached screen settle first. Refresh uses native HTTP on the
-        // I/O executor; it must never navigate the shared WebView.
-        browserHandler.postDelayed(() -> homeRefreshIo.execute(() -> {
+        homeRefreshIo.execute(() -> {
             try {
-                if (browserCookies != null && !browserCookies.isEmpty()) {
-                    client.importBrowserCookies(browserCookies);
-                }
                 java.util.Map<String, HomeSection> merged = new java.util.LinkedHashMap<>();
                 for (HomeSection old : homeSectionsMemory) merged.put(old.path, old);
-                List<HomeSection> changed = new ArrayList<>();
-                for (int i = 0; i < paths.length; i++) {
-                    try {
-                        String html = client.fetch(paths[i]);
-                        if (html == null || html.trim().isEmpty()) continue;
-                        HomeSection section = new HomeSection(titles[i], paths[i]);
-                        section.items.addAll(parseHomePosters(
-                                Jsoup.parse(html, client.getMirror() + "/")));
-                        if (section.items.isEmpty()) continue;
-                        List<HomeSection> oneFeed = new ArrayList<>();
-                        oneFeed.add(section);
-                        removeHomeDuplicates(oneFeed);
-                        if (section.items.isEmpty()) continue;
-                        diskCache.put("home|" + client.getMirror() + "|" + paths[i],
+                List<java.util.concurrent.Future<HomeSection>> jobs = new ArrayList<>();
+                for (int i = 0; i < HOME_PATHS.length; i++) {
+                    final int index = i;
+                    jobs.add(homeRefreshIo.submit(() -> {
+                        String html = client.fetchPublic(HOME_PATHS[index]);
+                        if (html == null || html.trim().isEmpty()) return null;
+                        HomeSection section = new HomeSection(HOME_TITLES[index], HOME_PATHS[index]);
+                        section.items.addAll(parseHomePosters(Jsoup.parse(html, client.getMirror() + "/")));
+                        if (section.items.isEmpty()) return null;
+                        diskCache.put("home|" + client.getMirror() + "|" + HOME_PATHS[index],
                                 html.getBytes(StandardCharsets.UTF_8));
-                        HomeSection previous = merged.get(paths[i]);
-                        if (previous == null || isHomeSectionChanged(section)) changed.add(section);
-                        merged.put(paths[i], section);
-                    } catch (Exception ignored) {
-                        // Keep the last known-good feed when a background request fails.
-                    }
+                        return section;
+                    }));
+                }
+                boolean changed = false;
+                for (java.util.concurrent.Future<HomeSection> job : jobs) {
+                    try {
+                        HomeSection section = job.get();
+                        if (section != null) {
+                            if (!merged.containsKey(section.path) || isHomeSectionChanged(section)) changed = true;
+                            merged.put(section.path, section);
+                        }
+                    } catch (Exception ignored) { }
                 }
                 List<HomeSection> refreshed = new ArrayList<>(merged.values());
                 removeHomeDuplicates(refreshed);
+                saveHomeModel(refreshed);
+                final boolean contentChanged = changed;
                 runOnUiThread(() -> {
                     homeSectionsMemory = refreshed;
-                    // Never interrupt a category screen. If Home is visible,
-                    // replace only feeds whose content actually changed.
-                    if (currentPath == null || currentPath.isEmpty()) {
-                        for (HomeSection section : changed) renderHomeSection(section);
-                    }
+                    if (contentChanged && (currentPath == null || currentPath.isEmpty())) renderHome(refreshed);
                     homeRefreshInProgress = false;
                 });
             } catch (Exception ignored) {
                 runOnUiThread(() -> homeRefreshInProgress = false);
             }
-        }), 15000);
+        });
     }
 
     private boolean isHomeSectionChanged(HomeSection updated) {
@@ -561,49 +547,42 @@ public class MainActivity extends Activity {
     }
 
     private void loadInitialCatalogFromHttp(String[] homePaths, String[] homeTitles) {
-        io.execute(() -> {
-            try {
-                List<HomeSection> sections = new ArrayList<>();
-                for (int i = 0; i < homePaths.length; i++) {
-                    String html = client.fetch(homePaths[i]);
-                    if (html == null || html.trim().isEmpty()) continue;
-                    HomeSection section = new HomeSection(homeTitles[i], homePaths[i]);
-                    try {
-                        section.items.addAll(parseHomePosters(
-                                Jsoup.parse(html, client.getMirror() + "/")));
-                        if (!section.items.isEmpty()) {
-                            List<HomeSection> oneFeed = new ArrayList<>();
-                            oneFeed.add(section);
-                            removeHomeDuplicates(oneFeed);
-                            if (!section.items.isEmpty()) {
-                                diskCache.put("home|" + client.getMirror() + "|" + homePaths[i],
-                                        html.getBytes(StandardCharsets.UTF_8));
-                                sections.add(section);
-                            }
-                        }
-                    } catch (Exception ignored) {
-                        // A malformed or challenge response must not poison the cache.
-                    }
-                }
-                removeHomeDuplicates(sections);
-                int total = countHomeCards(sections);
-                runOnUiThread(() -> {
-                    if (!sections.isEmpty()) homeSectionsMemory = new ArrayList<>(sections);
-                    progress.setVisibility(View.GONE);
-                    if (!homeCacheDisplayed) {
-                        setCatalogStatus("Постеров", total);
-                        renderHome(sections);
-                    }
-                });
-            } catch (Exception e) {
-                runOnUiThread(() -> {
-                    progress.setVisibility(View.GONE);
-                    if (!homeCacheDisplayed) {
-                        status.setText("Нет соединения");
-                        addEmpty("Не удалось загрузить главную страницу. " + safe(e.getMessage()));
-                    }
-                });
+        homeRefreshIo.execute(() -> {
+            List<java.util.concurrent.Future<HomeSection>> jobs = new ArrayList<>();
+            for (int i = 0; i < homePaths.length; i++) {
+                final int index = i;
+                jobs.add(homeRefreshIo.submit(() -> {
+                    String html = client.fetchPublic(homePaths[index]);
+                    if (html == null || html.trim().isEmpty()) return null;
+                    HomeSection section = new HomeSection(homeTitles[index], homePaths[index]);
+                    section.items.addAll(parseHomePosters(Jsoup.parse(html, client.getMirror() + "/")));
+                    if (section.items.isEmpty()) return null;
+                    diskCache.put("home|" + client.getMirror() + "|" + homePaths[index],
+                            html.getBytes(StandardCharsets.UTF_8));
+                    return section;
+                }));
             }
+            List<HomeSection> sections = new ArrayList<>();
+            for (java.util.concurrent.Future<HomeSection> job : jobs) {
+                try { HomeSection section = job.get(); if (section != null) sections.add(section); }
+                catch (Exception ignored) { }
+            }
+            removeHomeDuplicates(sections);
+            if (!sections.isEmpty()) saveHomeModel(sections);
+            int total = countHomeCards(sections);
+            runOnUiThread(() -> {
+                progress.setVisibility(View.GONE);
+                if (!sections.isEmpty()) {
+                    homeSectionsMemory = new ArrayList<>(sections);
+                    homeCacheDisplayed = true;
+                    setCatalogStatus("Постеров", total);
+                    renderHome(sections);
+                    status.setText("Показано лент: " + sections.size());
+                } else if (!homeCacheDisplayed) {
+                    status.setText("Не удалось загрузить публичные ленты");
+                    addEmpty("Не удалось загрузить главную страницу. Проверьте адрес зеркала и соединение.");
+                }
+            });
         });
     }
 
@@ -816,50 +795,31 @@ public class MainActivity extends Activity {
     }
 
     private void removeHomeDuplicates(List<HomeSection> sections) {
+        java.util.Set<String> globalIds = new java.util.HashSet<>();
+        java.util.Set<String> globalTitles = new java.util.HashSet<>();
+        java.util.Set<String> globalLinks = new java.util.HashSet<>();
         for (HomeSection section : sections) {
-            java.util.LinkedHashMap<String, HomePoster> bestByTitle = new java.util.LinkedHashMap<>();
-            java.util.Map<String, String> posterGroups = new java.util.HashMap<>();
-            java.util.Set<String> seenLinks = new java.util.HashSet<>();
             List<HomePoster> unique = new ArrayList<>();
             for (HomePoster item : section.items) {
+                if (item == null || item.torrent == null) continue;
                 String href = item.torrent.href == null ? "" : item.torrent.href;
-                String id = "";
                 java.util.regex.Matcher matcher = java.util.regex.Pattern
-                        .compile("[?&]id=(\\d+)", java.util.regex.Pattern.CASE_INSENSITIVE)
-                        .matcher(href);
-                if (matcher.find()) id = matcher.group(1);
-                if ((!id.isEmpty() && seenLinks.contains("id:" + id))
-                        || (!href.isEmpty() && seenLinks.contains("url:" + href))) continue;
-                if (!id.isEmpty()) seenLinks.add("id:" + id);
-                if (!href.isEmpty()) seenLinks.add("url:" + href);
-
+                        .compile("[?&]id=(\\d+)", java.util.regex.Pattern.CASE_INSENSITIVE).matcher(href);
+                String id = matcher.find() ? matcher.group(1) : "";
                 String titleKey = normalizeHomeTitle(item.torrent.title);
-                String posterKey = normalizeHomePosterImage(item.imageUrl);
-                // Kinozal can expose the same movie under slightly different title
-                // strings. The poster URL is a second identity signal that catches
-                // those aliases without merging unrelated seasons by title alone.
-                String groupKey = titleKey;
-                if (!posterKey.isEmpty()) {
-                    String knownGroup = posterGroups.get(posterKey);
-                    if (knownGroup != null) groupKey = knownGroup;
-                    else if (groupKey.isEmpty()) groupKey = "poster:" + posterKey;
-                    posterGroups.put(posterKey, groupKey);
-                }
-                if (groupKey.isEmpty()) {
-                    unique.add(item);
-                    continue;
-                }
-                HomePoster current = bestByTitle.get(groupKey);
-                if (current == null) {
-                    bestByTitle.put(groupKey, item);
-                } else if (homeTorrentScore(item) > homeTorrentScore(current)) {
-                    bestByTitle.put(groupKey, item);
-                }
+                if ((!id.isEmpty() && globalIds.contains(id))
+                        || (!href.isEmpty() && globalLinks.contains(href))
+                        || (!titleKey.isEmpty() && globalTitles.contains(titleKey))) continue;
+                if (!id.isEmpty()) globalIds.add(id);
+                if (!href.isEmpty()) globalLinks.add(href);
+                if (!titleKey.isEmpty()) globalTitles.add(titleKey);
+                unique.add(item);
+                if (unique.size() >= 15) break;
             }
-            unique.addAll(bestByTitle.values());
             section.items.clear();
-            section.items.addAll(unique.subList(0, Math.min(15, unique.size())));
+            section.items.addAll(unique);
         }
+        sections.removeIf(section -> section.items.isEmpty());
     }
 
     private String normalizeHomePosterImage(String imageUrl) {
@@ -918,8 +878,6 @@ public class MainActivity extends Activity {
         // alternate encodes don't fill a feed with copies of one film.
         int slash = value.indexOf(" / ");
         if (slash > 0) value = value.substring(0, slash);
-        value = value.replaceAll("\\([^)]*\\)", " ");
-        value = value.replaceAll("\\b(19|20)\\d{2}\\b", " ");
         value = value.replaceAll("\\b(2160p|1080p|720p|480p|4k|uhd|hdr10?|web[- .]?dl|webrip|blu[- .]?ray|bdrip|brrip|dvdrip|hdtv|h265|h264|x265|x264|hevc|avc|aac|dts|ac3|proper|repack|remux|extended|directors cut|theatrical|dubbed|subbed)\\b", " ");
         return value.replaceAll("[^\\p{L}\\p{N}]+", " ")
                 .replaceAll("\\s+", " ").trim();
