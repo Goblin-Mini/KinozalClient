@@ -324,7 +324,15 @@ public class MainActivity extends Activity {
         if (!startupCatalogReady || startupCatalogStarted || !hasWindowFocus()
                 || root == null || !root.isAttachedToWindow()) return;
         startupCatalogStarted = true;
-        browserHandler.postDelayed(this::loadInitialCatalog, 350);
+        browserHandler.postDelayed(this::openConfiguredStartupSource, 350);
+    }
+
+    private void openConfiguredStartupSource() {
+        String source = getSharedPreferences(PREFS, MODE_PRIVATE).getString("startup_source", "home");
+        if ("browse.php".equals(source)) load("browse.php", "Все раздачи");
+        else if ("novinki.php".equals(source)) load("novinki.php", "Новинки");
+        else if ("top.php".equals(source)) load("top.php", "Топ раздач");
+        else loadInitialCatalog();
     }
 
     private static class HomeSection {
@@ -2413,7 +2421,20 @@ public class MainActivity extends Activity {
 
     @Override protected void onActivityResult(int requestCode, int resultCode, android.content.Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
-        if (requestCode != REQUEST_VOICE_SEARCH || resultCode != RESULT_OK || data == null) return;
+        if (resultCode != RESULT_OK || data == null || data.getData() == null) return;
+        if (requestCode == REQUEST_BACKUP_EXPORT) {
+            writeBackupToUri(data.getData());
+            return;
+        }
+        if (requestCode == REQUEST_BACKUP_IMPORT) {
+            new AlertDialog.Builder(this).setTitle("Восстановить резервную копию?")
+                    .setMessage("Избранное, история и сохранённые настройки будут заменены данными из файла. Текущие данные рекомендуется предварительно сохранить.")
+                    .setNegativeButton("Отмена", null)
+                    .setPositiveButton("Восстановить", (dialog, which) -> restoreBackupFromUri(data.getData()))
+                    .show();
+            return;
+        }
+        if (requestCode != REQUEST_VOICE_SEARCH) return;
         java.util.ArrayList<String> results = data.getStringArrayListExtra(
                 android.speech.RecognizerIntent.EXTRA_RESULTS);
         if (results != null && !results.isEmpty()) {
