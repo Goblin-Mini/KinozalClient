@@ -60,6 +60,8 @@ final class TvHomeChannels {
 
     static void sync(Activity activity, File modelFile) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O || activity == null || modelFile == null) return;
+        if (!activity.getSharedPreferences(PREFS, Activity.MODE_PRIVATE)
+                .getBoolean("tv_channels_enabled", true)) return;
         EXECUTOR.execute(() -> {
             try {
                 if (!modelFile.isFile() || modelFile.length() <= 0 || modelFile.length() > 8L * 1024L * 1024L) return;
@@ -135,6 +137,24 @@ final class TvHomeChannels {
                 Log.w(TAG, "TV provider permission is unavailable on this device", e);
             } catch (Exception e) {
                 Log.w(TAG, "Channel synchronization failed", e);
+            }
+        });
+    }
+
+    static void removeAll(Activity activity) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O || activity == null) return;
+        EXECUTOR.execute(() -> {
+            try {
+                PreviewChannelHelper helper = new PreviewChannelHelper(activity);
+                for (PreviewChannel channel : helper.getAllChannels()) {
+                    if (channel.getInternalProviderId() != null
+                            && channel.getInternalProviderId().startsWith("kinozal:")) {
+                        helper.deletePreviewChannel(channel.getId());
+                        Log.i(TAG, "Deleted channel after user disabled TV channels: " + channel.getDisplayName());
+                    }
+                }
+            } catch (Exception e) {
+                Log.w(TAG, "Could not remove Kinozal preview channels", e);
             }
         });
     }
