@@ -3227,9 +3227,23 @@ public class MainActivity extends Activity {
      */
     private void openCloudflareWindow() {
         final String base = client.getMirror();
-        final String allowedHost;
-        try { allowedHost = java.net.URI.create(base).getHost().toLowerCase(java.util.Locale.ROOT); }
-        catch (Exception e) { showMessage("Некорректный адрес зеркала."); return; }
+        final java.util.Set<String> allowedHosts = new java.util.HashSet<>();
+        try {
+            for (String mirrorUrl : MIRRORS) {
+                String host = java.net.URI.create(mirrorUrl).getHost();
+                if (host != null) {
+                    host = host.toLowerCase(java.util.Locale.ROOT);
+                    allowedHosts.add(host);
+                    allowedHosts.add("www." + host);
+                }
+            }
+            String selectedHost = java.net.URI.create(base).getHost();
+            if (selectedHost != null) {
+                selectedHost = selectedHost.toLowerCase(java.util.Locale.ROOT);
+                allowedHosts.add(selectedHost);
+                allowedHosts.add("www." + selectedHost);
+            }
+        } catch (Exception e) { showMessage("Некорректный адрес зеркала."); return; }
 
         LinearLayout panel = new LinearLayout(this);
         panel.setOrientation(LinearLayout.VERTICAL);
@@ -3303,17 +3317,21 @@ public class MainActivity extends Activity {
         web.setWebViewClient(new WebViewClient() {
             private boolean allowed(Uri uri) {
                 String host = uri == null ? null : uri.getHost();
-                return host != null && host.equalsIgnoreCase(allowedHost);
+                if (host == null) return false;
+                host = host.toLowerCase(java.util.Locale.ROOT);
+                return allowedHosts.contains(host);
             }
             @Override public boolean shouldOverrideUrlLoading(WebView view, String url) {
-                if (allowed(Uri.parse(url))) return false;
+                try {
+                    if (allowed(Uri.parse(url))) return false;
+                } catch (Exception ignored) { }
                 showMessage("Переход на посторонний сайт заблокирован.");
                 return true;
             }
             @Override public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
                 if (!request.isForMainFrame()) return false;
                 if (allowed(request.getUrl())) return false;
-                showMessage("Рекламный переход заблокирован.");
+                showMessage("Переход на посторонний сайт заблокирован.");
                 return true;
             }
             @Override public void onPageFinished(WebView view, String url) {
