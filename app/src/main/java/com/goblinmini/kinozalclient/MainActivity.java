@@ -1244,7 +1244,10 @@ public class MainActivity extends Activity {
         restore.setOnClickListener(v -> chooseBackupFile());
         about.setOnClickListener(v -> showAbout());
         close.setOnClickListener(v -> settingsDialog.dismiss());
-        settingsDialog = new AlertDialog.Builder(this).setView(panel).create();
+        ScrollView settingsScroll = new ScrollView(this);
+        settingsScroll.setFillViewport(false);
+        settingsScroll.addView(panel);
+        settingsDialog = new AlertDialog.Builder(this).setView(settingsScroll).create();
         settingsDialog.show();
         if (settingsDialog.getWindow() != null) {
             settingsDialog.getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(BG));
