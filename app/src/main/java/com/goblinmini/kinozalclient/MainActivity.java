@@ -3963,6 +3963,8 @@ public class MainActivity extends Activity {
                 // TorrServer's player URL includes the selected filename in the path.
                 // Some external players fail to resolve the stream when the path is only /stream.
                 String fileName = selectedName;
+                if (fileName == null || fileName.trim().isEmpty())
+                    fileName = data.title == null ? "video" : data.title;
                 int slash = fileName.lastIndexOf('/');
                 if (slash >= 0) fileName = fileName.substring(slash + 1);
                 Uri streamUri = Uri.parse(baseUrl + "/stream/" + Uri.encode(fileName)).buildUpon()
