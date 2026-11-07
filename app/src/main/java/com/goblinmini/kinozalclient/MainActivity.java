@@ -1521,17 +1521,15 @@ public class MainActivity extends Activity {
         addMenu("★", "Избранное", () -> showFavorites());
         addMenu("◷", "Недавно смотрели", () -> showRecentlyViewed());
         addMenu("⚙", "Настройки", () -> showSettings());
+        // Keep status available for internal progress updates, but do not show
+        // diagnostic counters or connection state in the sidebar.
         status = text("Показано лент: 0", 10, TEAL, false);
-        status.setGravity(Gravity.CENTER);
-        status.setLineSpacing(dp(2), 1f);
-        LinearLayout.LayoutParams statusParams = new LinearLayout.LayoutParams(-1, dp(30));
-        statusParams.topMargin = dp(4);
-        sidebar.addView(status, statusParams);
-        sidebarConnectionInfo = text("Подключение к Kinozal: " + lastKinozalConnectionStatus, 10, TEAL, false);
-        sidebarCategoryInfo = text(currentTitle + " — загружено " + lastLoadedTorrentCount + " раздач", 10, TEAL, false);
+        status.setVisibility(View.GONE);
+        sidebarConnectionInfo = null;
+        sidebarCategoryInfo = null;
         sidebarCountryInfo = text("Страна подключения: определяется…", 10, TEAL, false);
-        sidebarVersionInfo = text("Версия приложения: " + getAppVersionName(), 10, GOLD, false);
-        TextView[] diagnosticLines = {sidebarConnectionInfo, sidebarCategoryInfo, sidebarCountryInfo, sidebarVersionInfo};
+        sidebarVersionInfo = text("Версия: " + getAppVersionName(), 10, GOLD, false);
+        TextView[] diagnosticLines = {sidebarCountryInfo, sidebarVersionInfo};
         for (TextView line : diagnosticLines) {
             line.setGravity(Gravity.CENTER);
             line.setMaxLines(2);
