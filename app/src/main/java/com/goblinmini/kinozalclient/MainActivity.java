@@ -553,6 +553,7 @@ public class MainActivity extends Activity {
                 removeHomeDuplicates(sections);
                 int total = countHomeCards(sections);
                 runOnUiThread(() -> {
+                    if (!sections.isEmpty()) homeSectionsMemory = new ArrayList<>(sections);
                     progress.setVisibility(View.GONE);
                     if (!homeCacheDisplayed) {
                         setCatalogStatus("Постеров", total);
@@ -579,6 +580,7 @@ public class MainActivity extends Activity {
             // in place, so cards discarded by final normalization disappear too.
             for (HomeSection section : sections) renderHomeSection(section);
             int total = countHomeCards(sections);
+            if (!sections.isEmpty()) homeSectionsMemory = new ArrayList<>(sections);
             progress.setVisibility(View.GONE);
             if (total == 0) {
                 status.setText("Нет соединения");
