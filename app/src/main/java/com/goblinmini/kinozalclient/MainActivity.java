@@ -66,7 +66,7 @@ public class MainActivity extends Activity {
     // Image cache reads/downloads must not block catalogue parsing or other app I/O.
     private final ExecutorService imageIo = Executors.newFixedThreadPool(3);
     // Home refresh is isolated so nine feed requests cannot starve poster loading.
-    private final ExecutorService homeRefreshIo = Executors.newSingleThreadExecutor();
+    private final ExecutorService homeRefreshIo = Executors.newFixedThreadPool(4);
     private KinozalHttpClient client;
     private Socks5ProxyBridge socks5Bridge;
     private DiskCache diskCache;
@@ -367,14 +367,18 @@ public class MainActivity extends Activity {
         loadInitialCatalog(0);
     }
 
+    private static final String[] HOME_PATHS = {"novinki.php", "top.php?c=0&d=0&f=0&j=&k=0&s=0&t=0",
+            "top.php?c=0&d=0&f=0&j=&k=0&s=0&t=0&w=1",
+            "top.php?c=0&d=0&f=0&j=&k=0&s=0&t=0&w=2",
+            "top.php?j=%D0%BB%D1%83%D1%87%D1%88%D0%B8%D0%B9%20%D1%84%D0%B8%D0%BB%D1%8C%D0%BC%20%D0%9E%D1%81%D0%BA%D0%B0%D1%80",
+            "top.php?j=Netflix", "top.php?j=HBO", "top.php?j=Walt%20Disney%20Pictures", "top.php?j=Marvel"};
+    private static final String[] HOME_TITLES = {"Новинки", "Топ раздач", "Топ недели", "Топ месяца",
+            "Топ Оскар", "Топ Netflix", "Топ HBO", "Топ Walt Disney", "Топ Marvel"};
+
     private void loadInitialCatalog(int startupRetry) {
         currentPath = "";
         currentTitle = "Главная";
         heading.setText("Главная");
-
-        // Returning to Home in the same app session must be a pure in-memory
-        // view restore. Keep the already parsed model and draw it immediately;
-        // no loading label, progress spinner, disk parsing or WebView navigation.
         if (!homeSectionsMemory.isEmpty()) {
             renderHome(homeSectionsMemory);
             progress.setVisibility(View.GONE);
@@ -382,86 +386,103 @@ public class MainActivity extends Activity {
             refreshHomeInBackground();
             return;
         }
-        showPageLoading("Подключение к Kinozal…");
-        String[] homePaths = {"novinki.php", "top.php?c=0&d=0&f=0&j=&k=0&s=0&t=0",
-                "top.php?c=0&d=0&f=0&j=&k=0&s=0&t=0&w=1",
-                "top.php?c=0&d=0&f=0&j=&k=0&s=0&t=0&w=2",
-                "top.php?j=%D0%BB%D1%83%D1%87%D1%88%D0%B8%D0%B9%20%D1%84%D0%B8%D0%BB%D1%8C%D0%BC%20%D0%9E%D1%81%D0%BA%D0%B0%D1%80",
-                "top.php?j=Netflix", "top.php?j=HBO",
-                "top.php?j=Walt%20Disney%20Pictures", "top.php?j=Marvel"};
-        String[] homeTitles = {"Новинки", "Топ раздач", "Топ недели", "Топ месяца",
-                "Топ Оскар", "Топ Netflix", "Топ HBO", "Топ Walt Disney", "Топ Marvel"};
-
-        // Cache I/O and Jsoup parsing can be expensive for large HTML files.
-        // Never do this work on Android's UI thread: it caused startup freezes
-        // and could trigger an ANR or process death on TV devices.
+        showPageLoading("Загрузка главной…");
         io.execute(() -> {
-            List<HomeSection> cached = new ArrayList<>();
-            int cachedFiles = 0;
-            long startedAt = android.os.SystemClock.elapsedRealtime();
-            for (int i = 0; i < homePaths.length; i++) {
-                byte[] bytes = diskCache.get("home|" + client.getMirror() + "|" + homePaths[i],
-                        7L * 24L * 60L * 60L * 1000L);
-                if (bytes == null || bytes.length == 0) continue;
-                cachedFiles++;
-                try {
-                    String html = new String(bytes, StandardCharsets.UTF_8);
-                    HomeSection section = new HomeSection(homeTitles[i], homePaths[i]);
-                    section.items.addAll(parseHomePosters(Jsoup.parse(html, client.getMirror() + "/")));
-                    if (!section.items.isEmpty()) cached.add(section);
-                } catch (Exception ignored) { }
-            }
-            removeHomeDuplicates(cached);
-            int total = countHomeCards(cached);
-            final int cachedFilesCount = cachedFiles;
-            long elapsed = android.os.SystemClock.elapsedRealtime() - startedAt;
-            String diagnostic = String.format(java.util.Locale.ROOT,
-                    "Главная: файлов прочитано %d из %d; лент восстановлено %d; карточек восстановлено %d; чтение %.1f мс",
-                    cachedFiles, homePaths.length, cached.size(), total, (double) elapsed);
-            runOnUiThread(() -> {
-                homeCacheDiagnostic = diagnostic;
-                homeCacheDisplayed = total > 0;
-                if (homeCacheDisplayed) {
-                    homeSectionsMemory = new ArrayList<>(cached);
-                    setCatalogStatus("Постеров в кэше", total);
-                    renderHome(cached);
+            List<HomeSection> saved = readHomeModel();
+            if (saved != null && !saved.isEmpty()) {
+                removeHomeDuplicates(saved);
+                runOnUiThread(() -> {
+                    homeSectionsMemory = saved;
+                    homeCacheDisplayed = true;
+                    renderHome(saved);
                     progress.setVisibility(View.GONE);
-                }
-
-                // The home feed cache is durable for seven days. If all feeds
-                // are present, returning from another category is a local
-                // render only: do not issue nine authenticated WebView requests.
-                if (cachedFilesCount == homePaths.length && cached.size() == homePaths.length) {
-                    status.setText("Показано лент: " + cached.size() + " · из кэша");
+                    status.setText("Показано лент: " + saved.size() + " · сохранённая главная");
                     refreshHomeInBackground();
-                    return;
-                }
-
-                // A partially populated cache is useful too: fetch only the
-                // missing feeds instead of downloading already stored pages.
-                List<String> missingPaths = new ArrayList<>();
-                List<String> missingTitles = new ArrayList<>();
-                for (int i = 0; i < homePaths.length; i++) {
-                    byte[] saved = diskCache.get("home|" + client.getMirror() + "|" + homePaths[i],
-                            7L * 24L * 60L * 60L * 1000L);
-                    if (saved == null || saved.length == 0) {
-                        missingPaths.add(homePaths[i]);
-                        missingTitles.add(homeTitles[i]);
-                    }
-                }
-                if (missingPaths.isEmpty()) {
-                    status.setText("Показано лент: " + cached.size() + " · из кэша");
-                    return;
-                }
-                String[] pathsToLoad = missingPaths.toArray(new String[0]);
-                String[] titlesToLoad = missingTitles.toArray(new String[0]);
-                if (sessionWebView != null) {
-                    loadHomeSectionsInBrowser(pathsToLoad, titlesToLoad, 0, new ArrayList<>(), startupRetry);
-                } else {
-                    loadInitialCatalogFromHttp(pathsToLoad, titlesToLoad);
-                }
-            });
+                });
+            } else {
+                loadInitialCatalogFromHttp(HOME_PATHS, HOME_TITLES);
+            }
         });
+    }
+
+    private java.io.File homeModelFile() {
+        return new java.io.File(getFilesDir(), "kinozal_home_model_v2.json");
+    }
+
+    private void saveHomeModel(List<HomeSection> sections) {
+        try {
+            org.json.JSONArray feeds = new org.json.JSONArray();
+            for (HomeSection section : sections) {
+                org.json.JSONObject feed = new org.json.JSONObject();
+                feed.put("title", section.title);
+                feed.put("path", section.path);
+                org.json.JSONArray items = new org.json.JSONArray();
+                for (HomePoster poster : section.items) {
+                    org.json.JSONObject item = new org.json.JSONObject();
+                    item.put("title", poster.torrent.title);
+                    item.put("href", poster.torrent.href);
+                    item.put("size", poster.torrent.size);
+                    item.put("seeds", poster.torrent.seeds);
+                    item.put("leeches", poster.torrent.leeches);
+                    item.put("uploaded", poster.torrent.uploaded);
+                    item.put("image", poster.imageUrl);
+                    items.put(item);
+                }
+                feed.put("items", items);
+                feeds.put(feed);
+            }
+            org.json.JSONObject rootJson = new org.json.JSONObject();
+            rootJson.put("version", 2);
+            rootJson.put("mirror", client.getMirror());
+            rootJson.put("savedAt", System.currentTimeMillis());
+            rootJson.put("feeds", feeds);
+            java.io.File target = homeModelFile();
+            java.io.File temp = new java.io.File(target.getParentFile(), target.getName() + ".tmp");
+            try (java.io.FileOutputStream out = new java.io.FileOutputStream(temp)) {
+                out.write(rootJson.toString().getBytes(StandardCharsets.UTF_8));
+                out.getFD().sync();
+            }
+            if (target.exists() && !target.delete()) throw new java.io.IOException("Cannot replace home cache");
+            if (!temp.renameTo(target)) throw new java.io.IOException("Cannot commit home cache");
+        } catch (Exception ignored) { }
+    }
+
+    private List<HomeSection> readHomeModel() {
+        java.io.File file = homeModelFile();
+        if (!file.isFile() || file.length() <= 0 || file.length() > 8L * 1024L * 1024L) return null;
+        try {
+            byte[] bytes = java.nio.file.Files.readAllBytes(file.toPath());
+            org.json.JSONObject rootJson = new org.json.JSONObject(new String(bytes, StandardCharsets.UTF_8));
+            if (rootJson.optInt("version") != 2
+                    || !client.getMirror().equals(rootJson.optString("mirror"))) return null;
+            if (System.currentTimeMillis() - rootJson.optLong("savedAt") > 7L * 24 * 60 * 60 * 1000) return null;
+            org.json.JSONArray feeds = rootJson.optJSONArray("feeds");
+            if (feeds == null) return null;
+            List<HomeSection> result = new ArrayList<>();
+            for (int i = 0; i < feeds.length(); i++) {
+                org.json.JSONObject feed = feeds.optJSONObject(i);
+                if (feed == null) continue;
+                HomeSection section = new HomeSection(feed.optString("title"), feed.optString("path"));
+                org.json.JSONArray items = feed.optJSONArray("items");
+                if (items == null) continue;
+                for (int j = 0; j < items.length(); j++) {
+                    org.json.JSONObject value = items.optJSONObject(j);
+                    if (value == null) continue;
+                    HomePoster poster = new HomePoster();
+                    poster.torrent = new Torrent();
+                    poster.torrent.title = value.optString("title");
+                    poster.torrent.href = value.optString("href");
+                    poster.torrent.size = value.optString("size", "—");
+                    poster.torrent.seeds = value.optString("seeds", "—");
+                    poster.torrent.leeches = value.optString("leeches", "—");
+                    poster.torrent.uploaded = value.optString("uploaded", "");
+                    poster.imageUrl = value.optString("image");
+                    if (!poster.torrent.title.isEmpty() && !poster.torrent.href.isEmpty()) section.items.add(poster);
+                }
+                if (!section.items.isEmpty()) result.add(section);
+            }
+            return result;
+        } catch (Exception ignored) { return null; }
     }
 
     private void refreshHomeInBackground() {
