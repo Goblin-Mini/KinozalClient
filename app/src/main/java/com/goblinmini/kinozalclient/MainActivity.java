@@ -712,13 +712,11 @@ public class MainActivity extends Activity {
 
     private void setHomeProgress(int processed, int total, int displayed) {
         status.setText("Главная · Запросов: " + processed + "/" + total
-                + "\nЛент отображено: " + displayed + "/" + total
-                + "\nВерсия: " + getAppVersionName());
+                + "\nЛент отображено: " + displayed + "/" + total);
     }
 
     private void setCatalogStatus(String itemType, int count) {
-        status.setText(currentTitle + " · Загружено: " + count + " " + itemType
-                + "\nВерсия: " + getAppVersionName());
+        status.setText(currentTitle + " · Загружено: " + count + " " + itemType);
     }
 
     private void updateSidebarExitCountry() {
