@@ -330,8 +330,10 @@ public class MainActivity extends Activity {
     private void openConfiguredStartupSource() {
         String source = getSharedPreferences(PREFS, MODE_PRIVATE).getString("startup_source", "home");
         if ("browse.php".equals(source)) load("browse.php", "Все раздачи");
-        else if ("novinki.php".equals(source)) load("novinki.php", "Новинки");
-        else if ("top.php".equals(source)) load("top.php", "Топ раздач");
+        else if ("browse.php?c=1002".equals(source)) load(source, "Все фильмы");
+        else if ("browse.php?c=1001".equals(source)) load(source, "Все сериалы");
+        else if ("browse.php?c=46".equals(source)) load(source, "Зарубежные сериалы");
+        else if ("browse.php?c=45".equals(source)) load(source, "Российские сериалы");
         else loadInitialCatalog();
     }
 
@@ -467,9 +469,7 @@ public class MainActivity extends Activity {
                 addEmpty("Не удалось получить постеры Kinozal. Проверьте авторизацию и выбранное зеркало.");
             } else {
                 setCatalogStatus("Постеров", total);
-                status.setText("Главная · Лент показано: " + sections.size() + "/" + paths.length
-                        + "\nЗапросов обработано: " + paths.length + "/" + paths.length
-                        + (homeCacheDisplayed ? "\nКэш обновлён" : ""));
+                status.setText("Показано лент: " + sections.size());
             }
             return;
         }
@@ -513,9 +513,7 @@ public class MainActivity extends Activity {
                         sections.add(section);
                         renderHomeSection(section);
                     }
-                    status.setText("Обработано " + (index + 1) + "/" + paths.length
-                            + " · показано лент " + sections.size() + " · карточек "
-                            + countHomeCards(sections));
+                    status.setText("Показано лент: " + sections.size());
                     setHomeProgress(index + 1, paths.length, sections.size());
                     browserHandler.postDelayed(() -> loadHomeSectionsInBrowser(
                             paths, titles, index + 1, sections, 0), 100);
@@ -724,9 +722,7 @@ public class MainActivity extends Activity {
     }
 
     private void setHomeProgress(int processed, int total, int displayed) {
-        status.setText("Главная · Запросов: " + processed + "/" + total
-                + " · Лент отображено: " + displayed + "/" + total
-                + "\nВерсия: " + getAppVersionName());
+        status.setText("Показано лент: " + displayed);
     }
 
     private void setCatalogStatus(String itemType, int count) {
@@ -1293,27 +1289,6 @@ public class MainActivity extends Activity {
                 : "SOCKS5 отключён", 12, proxy.enabled ? GOLD : TEAL, false);
         proxyStatus.setPadding(dp(4), dp(2), dp(4), dp(8));
         right.addView(proxyStatus);
-        addSettingsAction(right, "Диагностика сети", () -> showDiagnostics());
-
-        addSettingsSection(right, "КЭШ И ДАННЫЕ");
-        TextView cacheSummary = text(String.format(java.util.Locale.ROOT,
-                "Кэш: %.1f МБ · файлов: %d",
-                diskCache.getSizeBytes() / (1024d * 1024d), diskCache.getEntryCount()), 12, TEAL, false);
-        cacheSummary.setPadding(dp(4), dp(2), dp(4), dp(6));
-        right.addView(cacheSummary);
-        addSettingsAction(right, "Очистить кэш изображений и страниц", () -> {
-            new AlertDialog.Builder(this).setTitle("Очистить кэш?")
-                    .setMessage("Будут удалены загруженные страницы и изображения. Избранное и история останутся.")
-                    .setNegativeButton("Отмена", null)
-                    .setPositiveButton("Очистить", (d, w) -> {
-                        diskCache.clear();
-                        synchronized (pageCache) { pageCache.clear(); }
-                        infoHashCache.clear();
-                        cacheSummary.setText("Кэш очищен · 0 файлов");
-                        showMessage("Кэш очищен");
-                    }).show();
-        });
-
         Button close = button("Закрыть");
         close.setTextColor(GOLD);
         LinearLayout.LayoutParams closeParams = new LinearLayout.LayoutParams(-1, dp(44));
@@ -1358,8 +1333,10 @@ public class MainActivity extends Activity {
     }
 
     private void chooseStartupSource() {
-        String[] labels = {"Главная (Новинки и топы)", "Все раздачи", "Новинки", "Топ раздач"};
-        String[] values = {"home", "browse.php", "novinki.php", "top.php"};
+        String[] labels = {"Главная (Новинки и топы)", "Все раздачи", "Все фильмы",
+                "Все сериалы", "Зарубежные сериалы", "Российские сериалы"};
+        String[] values = {"home", "browse.php", "browse.php?c=1002", "browse.php?c=1001",
+                "browse.php?c=46", "browse.php?c=45"};
         String saved = getSharedPreferences(PREFS, MODE_PRIVATE).getString("startup_source", "home");
         int selected = 0;
         for (int i = 0; i < values.length; i++) if (values[i].equals(saved)) selected = i;
