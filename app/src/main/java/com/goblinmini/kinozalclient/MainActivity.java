@@ -1473,29 +1473,29 @@ public class MainActivity extends Activity {
         moviesGroup.setVisibility(View.GONE);
         categoryGroup.addView(moviesGroup);
 
-        addSubMenu(moviesGroup, "Все фильмы", "browse.php?c=1002");
-        addSubMenu(moviesGroup, "Кино - Комедия", "browse.php?c=8");
-        addSubMenu(moviesGroup, "Кино - Боевик / Военный", "browse.php?c=6");
-        addSubMenu(moviesGroup, "Кино - Триллер / Детектив", "browse.php?c=15");
-        addSubMenu(moviesGroup, "Кино - Драма", "browse.php?c=17");
-        addSubMenu(moviesGroup, "Кино - Мелодрама", "browse.php?c=35");
-        addSubMenu(moviesGroup, "Кино - Индийское", "browse.php?c=39");
-        addSubMenu(moviesGroup, "Кино - Фантастика", "browse.php?c=13");
-        addSubMenu(moviesGroup, "Кино - Фэнтези", "browse.php?c=14");
-        addSubMenu(moviesGroup, "Кино - Ужас / Мистика", "browse.php?c=24");
-        addSubMenu(moviesGroup, "Кино - Приключения", "browse.php?c=11");
-        addSubMenu(moviesGroup, "Кино - Наше Кино", "browse.php?c=10");
-        addSubMenu(moviesGroup, "Кино - Исторический", "browse.php?c=9");
-        addSubMenu(moviesGroup, "Кино - Азиатский", "browse.php?c=47");
-        addSubMenu(moviesGroup, "Кино - Документальный", "browse.php?c=18");
-        addSubMenu(moviesGroup, "Кино - Спорт", "browse.php?c=37");
-        addSubMenu(moviesGroup, "Кино - Детский / Семейный", "browse.php?c=12");
-        addSubMenu(moviesGroup, "Кино - Классика", "browse.php?c=7");
-        addSubMenu(moviesGroup, "Кино - Концерт", "browse.php?c=48");
-        addSubMenu(moviesGroup, "Кино - Передачи / ТВ-шоу", "browse.php?c=49");
-        addSubMenu(moviesGroup, "Кино - ТВ-шоу Мир", "browse.php?c=50");
-        addSubMenu(moviesGroup, "Кино - Театр, Опера, Балет", "browse.php?c=38");
-        addSubMenu(moviesGroup, "Кино - Эротика", "browse.php?c=16");
+        addSubMenu(moviesGroup, "▣  Все фильмы", "browse.php?c=1002");
+        addSubMenu(moviesGroup, "●  Кино - Комедия", "browse.php?c=8");
+        addSubMenu(moviesGroup, "⚑  Кино - Боевик / Военный", "browse.php?c=6");
+        addSubMenu(moviesGroup, "◈  Кино - Триллер / Детектив", "browse.php?c=15");
+        addSubMenu(moviesGroup, "▰  Кино - Драма", "browse.php?c=17");
+        addSubMenu(moviesGroup, "♥  Кино - Мелодрама", "browse.php?c=35");
+        addSubMenu(moviesGroup, "✿  Кино - Индийское", "browse.php?c=39");
+        addSubMenu(moviesGroup, "✧  Кино - Фантастика", "browse.php?c=13");
+        addSubMenu(moviesGroup, "♢  Кино - Фэнтези", "browse.php?c=14");
+        addSubMenu(moviesGroup, "☾  Кино - Ужас / Мистика", "browse.php?c=24");
+        addSubMenu(moviesGroup, "➤  Кино - Приключения", "browse.php?c=11");
+        addSubMenu(moviesGroup, "⌂  Кино - Наше Кино", "browse.php?c=10");
+        addSubMenu(moviesGroup, "◷  Кино - Исторический", "browse.php?c=9");
+        addSubMenu(moviesGroup, "✿  Кино - Азиатский", "browse.php?c=47");
+        addSubMenu(moviesGroup, "▤  Кино - Документальный", "browse.php?c=18");
+        addSubMenu(moviesGroup, "⚽  Кино - Спорт", "browse.php?c=37");
+        addSubMenu(moviesGroup, "★  Кино - Детский / Семейный", "browse.php?c=12");
+        addSubMenu(moviesGroup, "▥  Кино - Классика", "browse.php?c=7");
+        addSubMenu(moviesGroup, "♫  Кино - Концерт", "browse.php?c=48");
+        addSubMenu(moviesGroup, "▣  Кино - Передачи / ТВ-шоу", "browse.php?c=49");
+        addSubMenu(moviesGroup, "▣  Кино - ТВ-шоу Мир", "browse.php?c=50");
+        addSubMenu(moviesGroup, "♬  Кино - Театр, Опера, Балет", "browse.php?c=38");
+        addSubMenu(moviesGroup, "♥  Кино - Эротика", "browse.php?c=16");
 
         moviesButton.setOnClickListener(v -> {
             boolean expand = moviesGroup.getVisibility() != View.VISIBLE;
@@ -1639,6 +1639,17 @@ public class MainActivity extends Activity {
 
     private void addSubMenu(LinearLayout parent, String label, String path) {
         Button b = button(label);
+        // Keep every category glyph visually consistent, regardless of the
+        // Unicode symbol used for the individual category.
+        int iconEnd = label.indexOf("  ");
+        if (iconEnd > 0 && iconEnd <= 3) {
+            android.text.SpannableString menuLabel = new android.text.SpannableString(label);
+            menuLabel.setSpan(new android.text.style.RelativeSizeSpan(1.15f),
+                    0, iconEnd, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+            menuLabel.setSpan(new android.text.style.StyleSpan(android.graphics.Typeface.BOLD),
+                    0, iconEnd, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+            b.setText(menuLabel);
+        }
         b.setGravity(Gravity.CENTER_VERTICAL | Gravity.LEFT);
         b.setTextSize(12);
         b.setPadding(dp(34), 0, dp(8), 0);
