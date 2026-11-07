@@ -913,6 +913,11 @@ public class MainActivity extends Activity {
             } else {
                 item.torrent.size = item.torrent.seeds = item.torrent.leeches = "—";
             }
+            // Home poster rows must never contain blank poster tiles. Some Kinozal
+            // home-page links are text-only or carry lazy placeholders; ignore them
+            // instead of rendering empty cards in the app and Android TV channels.
+            if (image == null || image.trim().isEmpty()
+                    || !(image.startsWith("http://") || image.startsWith("https://"))) continue;
             item.imageUrl = image;
             boolean duplicate = false;
             for (HomePoster old : out) {
