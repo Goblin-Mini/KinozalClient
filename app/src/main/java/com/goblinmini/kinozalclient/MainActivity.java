@@ -1206,42 +1206,260 @@ public class MainActivity extends Activity {
         b.setOnClickListener(v -> load(path, label));
     }
 
+    private static final int REQUEST_BACKUP_EXPORT = 7510;
+    private static final int REQUEST_BACKUP_IMPORT = 7511;
+    private EditText torrServeAddressField;
+
     private void showSettings() {
-        LinearLayout panel = new LinearLayout(this);
-        panel.setOrientation(LinearLayout.VERTICAL);
-        panel.setPadding(dp(18), dp(14), dp(18), dp(12));
-        panel.setBackgroundColor(BG);
-        Button login = button("◎   Авторизация / проверка Kinozal");
-        Button mirrorButton = button("◇   Выбрать зеркало");
-        Button updates = button("↻   Проверить обновления");
-        Button diagnostics = button("▤   Диагностика / кэш");
-        Button socks5 = button("◉   SOCKS5 прокси");
-        Button jackett = button("⌕   Поиск Jackett");
-        Button about = button("ⓘ   О приложении");
+        LinearLayout page = new LinearLayout(this);
+        page.setOrientation(LinearLayout.VERTICAL);
+        page.setPadding(dp(16), dp(12), dp(16), dp(10));
+        page.setBackgroundColor(BG);
+
+        TextView heading = text("НАСТРОЙКИ KINOZAL", 22, GOLD, true);
+        page.addView(heading);
+        TextView subtitle = text("Подключения, данные пользователя и поведение приложения", 12, TEAL, false);
+        subtitle.setPadding(0, dp(3), 0, dp(10));
+        page.addView(subtitle);
+
+        LinearLayout columns = new LinearLayout(this);
+        columns.setOrientation(LinearLayout.HORIZONTAL);
+        ScrollView leftScroll = new ScrollView(this);
+        ScrollView rightScroll = new ScrollView(this);
+        leftScroll.setFillViewport(false);
+        rightScroll.setFillViewport(false);
+        LinearLayout left = new LinearLayout(this);
+        LinearLayout right = new LinearLayout(this);
+        left.setOrientation(LinearLayout.VERTICAL);
+        right.setOrientation(LinearLayout.VERTICAL);
+        left.setPadding(0, 0, dp(7), 0);
+        right.setPadding(dp(7), 0, 0, 0);
+        leftScroll.addView(left);
+        rightScroll.addView(right);
+        columns.addView(leftScroll, new LinearLayout.LayoutParams(0, -1, 1f));
+        columns.addView(rightScroll, new LinearLayout.LayoutParams(0, -1, 1f));
+        page.addView(columns, new LinearLayout.LayoutParams(-1, 0, 1f));
+
+        addSettingsSection(left, "АККАУНТ И СЕРВЕР");
+        addSettingsAction(left, "Авторизация / проверка Kinozal", () -> showLogin());
+        addSettingsAction(left, "Выбрать зеркало Kinozal", () -> chooseMirror());
+        addSettingsAction(left, "Проверить обновления", () -> new UpdateManager(this).check());
+        addSettingsAction(left, "Стартовый раздел", () -> chooseStartupSource());
+
+        addSettingsSection(left, "РЕЗЕРВНОЕ КОПИРОВАНИЕ");
+        addSettingsAction(left, "Создать резервную копию", () -> exportUserBackup());
+        addSettingsAction(left, "Восстановить из копии", () -> importUserBackup());
+        TextView backupNote = text("В копию входят избранное, история поиска, история просмотра и основные настройки. Пароль SOCKS5 не экспортируется: он защищён Android Keystore.", 11, TEAL, false);
+        backupNote.setPadding(dp(4), dp(3), dp(4), dp(8));
+        left.addView(backupNote);
+
+        addSettingsSection(left, "ДОПОЛНИТЕЛЬНО");
+        addSettingsAction(left, "Поиск Jackett", () -> showJackettSettings());
+        addSettingsAction(left, "О приложении", () -> showAbout());
+
+        addSettingsSection(right, "TORRSERVE");
+        TextView tsLabel = text("Адрес внешнего TorrServe (например, http://192.168.1.10:8090)", 12, TEAL, true);
+        tsLabel.setPadding(dp(4), dp(4), dp(4), dp(3));
+        right.addView(tsLabel);
+        torrServeAddressField = new EditText(this);
+        torrServeAddressField.setSingleLine(true);
+        torrServeAddressField.setText(getSharedPreferences(PREFS, MODE_PRIVATE).getString("torrserve_url", ""));
+        torrServeAddressField.setHint("http://адрес:8090");
+        styleSettingsEdit(torrServeAddressField);
+        right.addView(torrServeAddressField, new LinearLayout.LayoutParams(-1, dp(44)));
+        addSettingsAction(right, "Сохранить адрес TorrServe", () -> {
+            String value = torrServeAddressField.getText().toString().trim().replaceAll("/+$", "");
+            if (!value.isEmpty() && !validJackettBase(value)) {
+                showMessage("Укажите адрес с http:// или https://");
+                return;
+            }
+            getSharedPreferences(PREFS, MODE_PRIVATE).edit().putString("torrserve_url", value).apply();
+            showMessage("Адрес TorrServe сохранён");
+        });
+
+        addSettingsSection(right, "СЕТЬ И ПРОКСИ");
+        addSettingsAction(right, "SOCKS5: настройки и проверка", () -> showSocks5Settings());
+        Socks5ProxyBridge.Settings proxy = socks5Bridge.getSettings();
+        TextView proxyStatus = text(proxy.enabled
+                ? "SOCKS5 включён: " + proxy.host + ":" + proxy.port
+                : "SOCKS5 отключён", 12, proxy.enabled ? GOLD : TEAL, false);
+        proxyStatus.setPadding(dp(4), dp(2), dp(4), dp(8));
+        right.addView(proxyStatus);
+        addSettingsAction(right, "Диагностика сети", () -> showDiagnostics());
+
+        addSettingsSection(right, "КЭШ И ДАННЫЕ");
+        TextView cacheSummary = text(String.format(java.util.Locale.ROOT,
+                "Кэш: %.1f МБ · файлов: %d",
+                diskCache.getSizeBytes() / (1024d * 1024d), diskCache.getEntryCount()), 12, TEAL, false);
+        cacheSummary.setPadding(dp(4), dp(2), dp(4), dp(6));
+        right.addView(cacheSummary);
+        addSettingsAction(right, "Очистить кэш изображений и страниц", () -> {
+            new AlertDialog.Builder(this).setTitle("Очистить кэш?")
+                    .setMessage("Будут удалены загруженные страницы и изображения. Избранное и история останутся.")
+                    .setNegativeButton("Отмена", null)
+                    .setPositiveButton("Очистить", (d, w) -> {
+                        diskCache.clear();
+                        synchronized (pageCache) { pageCache.clear(); }
+                        infoHashCache.clear();
+                        cacheSummary.setText("Кэш очищен · 0 файлов");
+                        showMessage("Кэш очищен");
+                    }).show();
+        });
+
         Button close = button("Закрыть");
-        for (Button action : new Button[]{login, mirrorButton, updates, diagnostics, socks5, jackett, about, close}) {
-            action.setTextSize(15);
-            action.setGravity(Gravity.CENTER);
-            LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-1, dp(48));
-            params.bottomMargin = dp(8);
-            panel.addView(action, params);
-        }
-        login.setOnClickListener(v -> { settingsDialog.dismiss(); showLogin(); });
-        mirrorButton.setOnClickListener(v -> { settingsDialog.dismiss(); chooseMirror(); });
-        updates.setOnClickListener(v -> { settingsDialog.dismiss(); new UpdateManager(this).check(); });
-        diagnostics.setOnClickListener(v -> { settingsDialog.dismiss(); showDiagnostics(); });
-        socks5.setOnClickListener(v -> { settingsDialog.dismiss(); showSocks5Settings(); });
-        jackett.setOnClickListener(v -> showJackettSettings());
-        about.setOnClickListener(v -> showAbout());
-        close.setOnClickListener(v -> settingsDialog.dismiss());
-        settingsDialog = new AlertDialog.Builder(this).setView(panel).create();
+        close.setTextColor(GOLD);
+        LinearLayout.LayoutParams closeParams = new LinearLayout.LayoutParams(-1, dp(44));
+        closeParams.topMargin = dp(8);
+        page.addView(close, closeParams);
+        settingsDialog = new AlertDialog.Builder(this).setView(page).create();
         settingsDialog.show();
         if (settingsDialog.getWindow() != null) {
             settingsDialog.getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(BG));
-            settingsDialog.getWindow().setLayout(Math.min(dp(520), getResources().getDisplayMetrics().widthPixels - dp(48)),
-                    ViewGroup.LayoutParams.WRAP_CONTENT);
+            settingsDialog.getWindow().setLayout(ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.MATCH_PARENT);
         }
-        login.requestFocus();
+        close.setOnClickListener(v -> settingsDialog.dismiss());
+    }
+
+    private void addSettingsSection(LinearLayout parent, String title) {
+        TextView label = text(title, 13, TEAL, true);
+        label.setPadding(dp(4), dp(12), dp(4), dp(5));
+        parent.addView(label);
+        View line = new View(this);
+        line.setBackgroundColor(Color.rgb(65, 70, 74));
+        parent.addView(line, new LinearLayout.LayoutParams(-1, dp(1)));
+    }
+
+    private void addSettingsAction(LinearLayout parent, String title, Runnable action) {
+        Button button = button(title);
+        button.setTextSize(13);
+        button.setGravity(Gravity.CENTER_VERTICAL | Gravity.LEFT);
+        button.setPadding(dp(10), 0, dp(8), 0);
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-1, dp(44));
+        params.topMargin = dp(5);
+        parent.addView(button, params);
+        button.setOnClickListener(v -> action.run());
+    }
+
+    private void styleSettingsEdit(EditText field) {
+        field.setTextColor(Color.WHITE);
+        field.setHintTextColor(TEAL);
+        field.setTextSize(13);
+        field.setPadding(dp(10), dp(5), dp(10), dp(5));
+        field.setBackground(shape(PANEL, TEAL));
+    }
+
+    private void chooseStartupSource() {
+        String[] labels = {"Главная (Новинки и топы)", "Все раздачи", "Новинки", "Топ раздач"};
+        String[] values = {"home", "browse.php", "novinki.php", "top.php"};
+        String saved = getSharedPreferences(PREFS, MODE_PRIVATE).getString("startup_source", "home");
+        int selected = 0;
+        for (int i = 0; i < values.length; i++) if (values[i].equals(saved)) selected = i;
+        new AlertDialog.Builder(this).setTitle("Открывать при запуске")
+                .setSingleChoiceItems(labels, selected, (d, which) -> {
+                    getSharedPreferences(PREFS, MODE_PRIVATE).edit()
+                            .putString("startup_source", values[which]).apply();
+                    d.dismiss();
+                    showMessage("Стартовый раздел сохранён");
+                }).setNegativeButton("Отмена", null).show();
+    }
+
+    private org.json.JSONObject buildUserBackup() throws Exception {
+        org.json.JSONObject root = new org.json.JSONObject();
+        root.put("format", "kinozal-client-backup");
+        root.put("version", 1);
+        root.put("created", System.currentTimeMillis());
+        org.json.JSONObject app = new org.json.JSONObject();
+        android.content.SharedPreferences prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
+        String[] keys = {FAVORITES_KEY, RECENTLY_VIEWED_KEY, SEARCH_HISTORY_KEY,
+                "mirror", "startup_source", "torrserve_url"};
+        for (String key : keys) if (prefs.contains(key)) app.put(key, prefs.getAll().get(key));
+        root.put("app", app);
+        org.json.JSONObject jackett = new org.json.JSONObject();
+        for (java.util.Map.Entry<String, ?> entry :
+                getSharedPreferences(JACKETT_PREFS, MODE_PRIVATE).getAll().entrySet())
+            jackett.put(entry.getKey(), entry.getValue());
+        root.put("jackett", jackett);
+        Socks5ProxyBridge.Settings proxy = socks5Bridge.getSettings();
+        org.json.JSONObject socks = new org.json.JSONObject();
+        socks.put("enabled", proxy.enabled);
+        socks.put("host", proxy.host);
+        socks.put("port", proxy.port);
+        socks.put("username", proxy.username);
+        root.put("socks5", socks);
+        return root;
+    }
+
+    private void exportUserBackup() {
+        try {
+            String json = buildUserBackup().toString(2);
+            Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
+            intent.addCategory(Intent.CATEGORY_OPENABLE);
+            intent.setType("application/json");
+            intent.putExtra(Intent.EXTRA_TITLE, "kinozal-client-backup.json");
+            pendingBackupJson = json;
+            startActivityForResult(intent, REQUEST_BACKUP_EXPORT);
+        } catch (Exception e) { showMessage("Не удалось подготовить копию: " + safe(e.getMessage())); }
+    }
+
+    private String pendingBackupJson;
+
+    private void importUserBackup() {
+        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        intent.setType("*/*");
+        startActivityForResult(intent, REQUEST_BACKUP_IMPORT);
+    }
+
+    private void writeBackupToUri(Uri uri) {
+        try (java.io.OutputStream out = getContentResolver().openOutputStream(uri)) {
+            if (out == null) throw new java.io.IOException("Не удалось открыть файл");
+            out.write((pendingBackupJson == null ? "" : pendingBackupJson).getBytes(StandardCharsets.UTF_8));
+            out.flush();
+            pendingBackupJson = null;
+            showMessage("Резервная копия сохранена");
+        } catch (Exception e) { showMessage("Ошибка сохранения копии: " + safe(e.getMessage())); }
+    }
+
+    private void restoreBackupFromUri(Uri uri) {
+        try (java.io.InputStream in = getContentResolver().openInputStream(uri);
+             java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream()) {
+            if (in == null) throw new java.io.IOException("Не удалось открыть файл");
+            byte[] buffer = new byte[8192];
+            int n;
+            while ((n = in.read(buffer)) != -1) out.write(buffer, 0, n);
+            org.json.JSONObject root = new org.json.JSONObject(new String(out.toByteArray(), StandardCharsets.UTF_8));
+            if (!"kinozal-client-backup".equals(root.optString("format"))
+                    || root.optInt("version") != 1) throw new IllegalArgumentException("Неподдерживаемый формат копии");
+            org.json.JSONObject app = root.optJSONObject("app");
+            if (app != null) {
+                android.content.SharedPreferences.Editor editor = getSharedPreferences(PREFS, MODE_PRIVATE).edit();
+                String[] keys = {FAVORITES_KEY, RECENTLY_VIEWED_KEY, SEARCH_HISTORY_KEY,
+                        "mirror", "startup_source", "torrserve_url"};
+                for (String key : keys) if (app.has(key)) {
+                    Object value = app.get(key);
+                    if (value instanceof String) editor.putString(key, (String)value);
+                }
+                editor.commit();
+                mirror = getSharedPreferences(PREFS, MODE_PRIVATE).getString("mirror", MIRRORS[0]);
+                client.setMirror(mirror);
+            }
+            org.json.JSONObject jackett = root.optJSONObject("jackett");
+            if (jackett != null) {
+                android.content.SharedPreferences.Editor editor = getSharedPreferences(JACKETT_PREFS, MODE_PRIVATE).edit();
+                java.util.Iterator<String> keys = jackett.keys();
+                while (keys.hasNext()) {
+                    String key = keys.next();
+                    Object value = jackett.get(key);
+                    if (value instanceof String) editor.putString(key, (String)value);
+                }
+                editor.apply();
+            }
+            org.json.JSONObject socks = root.optJSONObject("socks5");
+            if (socks != null) {
+                showMessage("Данные восстановлены. Повторно введите пароль SOCKS5 в настройках прокси.");
+            } else showMessage("Резервная копия восстановлена");
+        } catch (Exception e) { showMessage("Не удалось восстановить копию: " + safe(e.getMessage())); }
     }
 
     private void showDiagnostics() {
