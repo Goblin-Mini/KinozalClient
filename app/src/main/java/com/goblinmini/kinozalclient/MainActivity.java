@@ -3175,40 +3175,54 @@ public class MainActivity extends Activity {
         // moves focus to the challenge frame and sends the same DPAD_CENTER/ENTER
         // activation a remote would send after focusing the widget.
         challenge.setOnClickListener(v -> {
-            // The challenge checkbox is inside a cross-origin iframe. DOM click()
-            // in the parent page cannot activate it. Ask the frame to scroll into
-            // view, obtain its viewport rectangle, then send a real WebView touch
-            // sequence at the checkbox's visible position.
+            // Cloudflare changes iframe titles and markup between challenge versions.
+            // Try broad iframe discovery first; if the frame is not exposed in the
+            // parent DOM, tap the checkbox's stable visible position in the challenge
+            // panel as rendered in this login window.
             web.evaluateJavascript("(function(){"
-                    + "var f=document.querySelector('iframe[title*=Widget],iframe[title*=challenge],#challenge-form iframe');"
-                    + "if(!f)return 'NO_FRAME';"
-                    + "f.scrollIntoView({block:'center',inline:'center'});"
-                    + "var r=f.getBoundingClientRect();"
-                    + "return JSON.stringify({x:r.left+36,y:r.top+55,d:window.devicePixelRatio||1,"
-                    + "w:r.width,h:r.height});})()", result -> {
+                    + "var fs=[].slice.call(document.querySelectorAll('iframe'));"
+                    + "var a=fs.map(function(f){var r=f.getBoundingClientRect();return {"
+                    + "src:f.src||'',title:f.title||'',x:r.left,y:r.top,w:r.width,h:r.height,"
+                    + "visible:r.width>0&&r.height>0};}).filter(function(x){return x.visible});"
+                    + "if(a.length){a.sort(function(p,q){return (q.w*q.h)-(p.w*p.h)});"
+                    + "var f=a.find(function(x){return /cloudflare|challenge|turnstile/i.test(x.src+' '+x.title)})||a[0];"
+                    + "return JSON.stringify({mode:'iframe',x:f.x+36,y:f.y+55});}"
+                    + "return JSON.stringify({mode:'fallback'});})()", result -> {
                 try {
                     String raw = result == null ? "" : result;
-                    org.json.JSONObject pos = new org.json.JSONObject(
-                            new org.json.JSONArray("[" + raw + "]").getString(0));
-                    float density = getResources().getDisplayMetrics().density;
-                    float x = (float) (pos.getDouble("x") * density);
-                    float y = (float) (pos.getDouble("y") * density);
+                    String decoded = new org.json.JSONArray("[" + raw + "]").getString(0);
+                    org.json.JSONObject pos = new org.json.JSONObject(decoded);
+                    float x;
+                    float y;
+                    boolean fallback = "fallback".equals(pos.optString("mode"));
+                    if (fallback) {
+                        // Relative to WebView viewport: checkbox is near the upper-left
+                        // of the visible Cloudflare challenge card.
+                        x = web.getWidth() * 0.055f;
+                        y = web.getHeight() * 0.65f;
+                    } else {
+                        float density = getResources().getDisplayMetrics().density;
+                        x = (float) (pos.getDouble("x") * density);
+                        y = (float) (pos.getDouble("y") * density);
+                    }
                     if (x < 0 || y < 0 || x >= web.getWidth() || y >= web.getHeight()) {
-                        showMessage("Cloudflare виджет не помещается в окно. Нажми «Обновить» и попробуй снова.");
+                        showMessage("Кнопка проверки находится вне видимой области. Нажми «Обновить» и попробуй снова.");
                         return;
                     }
-                    long now = android.os.SystemClock.uptimeMillis();
-                    android.view.MotionEvent down = android.view.MotionEvent.obtain(now, now,
+                    long downTime = android.os.SystemClock.uptimeMillis();
+                    android.view.MotionEvent down = android.view.MotionEvent.obtain(downTime, downTime,
                             android.view.MotionEvent.ACTION_DOWN, x, y, 0);
-                    android.view.MotionEvent up = android.view.MotionEvent.obtain(now, now + 90,
+                    android.view.MotionEvent up = android.view.MotionEvent.obtain(downTime, downTime + 100,
                             android.view.MotionEvent.ACTION_UP, x, y, 0);
                     web.dispatchTouchEvent(down);
                     web.dispatchTouchEvent(up);
                     down.recycle();
                     up.recycle();
-                    showMessage("Отправлено нажатие по чекбоксу Cloudflare. Подожди несколько секунд и проверь галочку.");
+                    showMessage(fallback
+                            ? "Отправлено нажатие в область чекбокса Cloudflare. Подожди несколько секунд."
+                            : "Отправлено нажатие по виджету Cloudflare. Подожди несколько секунд.");
                 } catch (Exception e) {
-                    showMessage("Не удалось определить положение чекбокса Cloudflare. Обнови страницу и попробуй снова.");
+                    showMessage("Не удалось выполнить нажатие Cloudflare. Обнови страницу и попробуй снова.");
                 }
             });
         });
