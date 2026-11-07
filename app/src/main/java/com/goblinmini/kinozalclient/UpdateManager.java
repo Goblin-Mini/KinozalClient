@@ -76,25 +76,21 @@ final class UpdateManager {
                     return;
                 }
 
-                int remoteCode = 0;
-                try {
-                    String tag = release.optString("tag_name", "");
-                    java.util.regex.Matcher matcher =
-                            java.util.regex.Pattern.compile("v?(\\d+)").matcher(tag);
-                    if (matcher.matches()) remoteCode = Integer.parseInt(matcher.group(1));
-                } catch (Exception e) {
-                    Log.w(TAG, "Cannot parse release version", e);
-                }
-
-                int localCode = activity.getPackageManager()
-                        .getPackageInfo(activity.getPackageName(), 0).versionCode;
-                if (remoteCode <= 0) {
-                    Log.e(TAG, "Invalid release tag: " + release.optString("tag_name"));
-                    if (!automatic) showMessage("Не удалось определить версию обновления.");
-                } else if (remoteCode <= localCode) {
+                // Release tags such as v19 belong to the legacy 0.5.x line.
+                // Compare semantic app versions from the release title/tag instead
+                // of comparing the Git tag number with Android versionCode.
+                String remoteVersion = extractSemanticVersion(
+                        release.optString("name", "") + " " + release.optString("tag_name", ""));
+                String localVersion = activity.getPackageManager()
+                        .getPackageInfo(activity.getPackageName(), 0).versionName;
+                if (remoteVersion == null || localVersion == null
+                        || compareSemanticVersions(remoteVersion, localVersion) <= 0) {
+                    Log.i(TAG, "No applicable update. Local=" + localVersion
+                            + ", release=" + release.optString("name")
+                            + ", tag=" + release.optString("tag_name"));
                     if (!automatic) showMessage("Установлена последняя версия.");
                 } else {
-                    if (automatic) showMessage("Найдено обновление. Загружаем…");
+                    if (automatic) showMessage("Найдено обновление " + remoteVersion + ". Загружаем…");
                     downloadAndPrompt(apkUrl, automatic);
                 }
             } catch (Exception e) {
@@ -104,6 +100,25 @@ final class UpdateManager {
                 if (c != null) c.disconnect();
             }
         }).start();
+    }
+
+    private static String extractSemanticVersion(String value) {
+        if (value == null) return null;
+        java.util.regex.Matcher matcher = java.util.regex.Pattern
+                .compile("(?<!\\d)(\\d+)\\.(\\d+)\\.(\\d+)(?!\\d)")
+                .matcher(value);
+        return matcher.find() ? matcher.group() : null;
+    }
+
+    private static int compareSemanticVersions(String first, String second) {
+        String[] a = first.split("\\.");
+        String[] b = second.split("\\.");
+        for (int i = 0; i < 3; i++) {
+            int left = Integer.parseInt(a[i]);
+            int right = Integer.parseInt(b[i]);
+            if (left != right) return Integer.compare(left, right);
+        }
+        return 0;
     }
 
     private void showMessage(String message) {
