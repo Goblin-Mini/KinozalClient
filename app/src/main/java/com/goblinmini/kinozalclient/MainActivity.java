@@ -2365,9 +2365,33 @@ public class MainActivity extends Activity {
                             view.setBackground(shape(focused ? Color.rgb(65, 72, 73) : PANEL, focused ? GOLD : 0)));
                     TextView titleView = text(name, 15, Color.WHITE, true);
                     row.addView(titleView);
-                    TextView meta = text((tracker.isEmpty() ? "" : tracker + "  ·  ")
-                            + "Размер: " + size + "  ·  Сиды: " + seeders + "  ·  Пиры: " + peers,
-                            12, TEAL, false);
+                    String metaValue = (tracker.isEmpty() ? "" : tracker + "  ·  ")
+                            + "Размер: " + size + "  ·  Сиды: " + seeders + "  ·  Пиры: " + peers;
+                    android.text.SpannableString metaText = new android.text.SpannableString(metaValue);
+                    int trackerColor = Color.rgb(170, 205, 180);
+                    int trackerStart = 0;
+                    if (!tracker.isEmpty()) {
+                        metaText.setSpan(new android.text.style.ForegroundColorSpan(trackerColor),
+                                trackerStart, tracker.length(), android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+                    }
+                    int sizeStart = metaValue.indexOf("Размер:");
+                    int sizeEnd = metaValue.indexOf("  ·  Сиды:");
+                    if (sizeStart >= 0 && sizeEnd > sizeStart) {
+                        metaText.setSpan(new android.text.style.ForegroundColorSpan(trackerColor),
+                                sizeStart, sizeEnd, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+                    }
+                    int seedsStart = metaValue.indexOf("Сиды:");
+                    int seedsEnd = metaValue.indexOf("  ·  Пиры:");
+                    if (seedsStart >= 0 && seedsEnd > seedsStart) {
+                        metaText.setSpan(new android.text.style.ForegroundColorSpan(TEAL),
+                                seedsStart, seedsEnd, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+                    }
+                    int peersStart = metaValue.indexOf("Пиры:");
+                    if (peersStart >= 0) {
+                        metaText.setSpan(new android.text.style.ForegroundColorSpan(RED),
+                                peersStart, metaValue.length(), android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+                    }
+                    TextView meta = text(metaText, 12, TEAL, false);
                     meta.setPadding(0, dp(4), 0, 0);
                     row.addView(meta);
                     if (!resultUrl.isEmpty()) row.setOnClickListener(v -> {
