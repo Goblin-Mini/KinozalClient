@@ -111,6 +111,22 @@ public final class DiskCache {
         return count;
     }
 
+    /** Remove all cached pages and images without touching user data. */
+    public synchronized void clear() {
+        File[] files = directory.listFiles();
+        if (files == null) return;
+        for (File file : files) {
+            if (file.isFile()) file.delete();
+            else if (file.isDirectory()) deleteTree(file);
+        }
+    }
+
+    private void deleteTree(File file) {
+        File[] children = file.listFiles();
+        if (children != null) for (File child : children) deleteTree(child);
+        file.delete();
+    }
+
     public long getMaxBytes() {
         return maxBytes;
     }
