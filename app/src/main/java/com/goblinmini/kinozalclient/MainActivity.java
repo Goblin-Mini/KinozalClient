@@ -103,6 +103,8 @@ public class MainActivity extends Activity {
     private final android.os.Handler browserHandler = new android.os.Handler(android.os.Looper.getMainLooper());
     private Runnable browserRequestTimeout;
     private boolean startupCatalogReady = false;
+    private String pendingTvTorrentHref = "";
+    private String pendingTvTorrentTitle = "";
     private boolean startupCatalogStarted = false;
     private boolean automaticUpdateCheckScheduled = false;
     private boolean homeCacheDisplayed = false;
@@ -133,6 +135,7 @@ public class MainActivity extends Activity {
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
+        readTvLaunchIntent(getIntent());
         mirror = getSharedPreferences(PREFS, MODE_PRIVATE).getString("mirror", MIRRORS[0]);
         client = new KinozalHttpClient(this, mirror);
         diskCache = new DiskCache(this, 200L * 1024L * 1024L);
@@ -172,6 +175,22 @@ public class MainActivity extends Activity {
     private Proxy blockedProxy() {
         // Fail closed if an enabled proxy cannot start; never silently fall back to direct traffic.
         return new Proxy(Proxy.Type.HTTP, new java.net.InetSocketAddress("127.0.0.1", 1));
+    }
+
+    @Override protected void onNewIntent(android.content.Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        readTvLaunchIntent(intent);
+        if (startupCatalogReady) browserHandler.postDelayed(this::openConfiguredStartupSource, 150);
+    }
+
+    private void readTvLaunchIntent(android.content.Intent intent) {
+        if (intent == null) return;
+        String href = intent.getStringExtra("tv_torrent_href");
+        if (href != null && !href.trim().isEmpty()) {
+            pendingTvTorrentHref = href.trim();
+            pendingTvTorrentTitle = intent.getStringExtra("tv_torrent_title");
+        }
     }
 
     private void continueStartup(String savedBrowserCookies) {
@@ -345,6 +364,17 @@ public class MainActivity extends Activity {
     }
 
     private void openConfiguredStartupSource() {
+        if (!pendingTvTorrentHref.isEmpty()) {
+            Torrent selected = new Torrent();
+            selected.href = pendingTvTorrentHref;
+            selected.title = pendingTvTorrentTitle == null || pendingTvTorrentTitle.trim().isEmpty()
+                    ? "Раздача Kinozal" : pendingTvTorrentTitle;
+            selected.size = selected.seeds = selected.leeches = "—";
+            pendingTvTorrentHref = "";
+            pendingTvTorrentTitle = "";
+            showTorrent(selected);
+            return;
+        }
         String source = getSharedPreferences(PREFS, MODE_PRIVATE).getString("startup_source", "home");
         if ("browse.php".equals(source)) load("browse.php", "Все раздачи");
         else if ("browse.php?c=1002".equals(source)) load(source, "Все фильмы");
@@ -432,6 +462,7 @@ public class MainActivity extends Activity {
             }
             if (target.exists() && !target.delete()) throw new java.io.IOException("Cannot replace home cache");
             if (!temp.renameTo(target)) throw new java.io.IOException("Cannot commit home cache");
+            runOnUiThread(() -> TvHomeChannels.sync(this, target));
         } catch (Exception ignored) { }
     }
 
