@@ -46,4 +46,5 @@ android {
 dependencies {
     implementation("org.jsoup:jsoup:1.18.3")
     implementation("androidx.webkit:webkit:1.14.0")
+    implementation("androidx.tvprovider:tvprovider:1.1.0")
 }
