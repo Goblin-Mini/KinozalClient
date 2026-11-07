@@ -581,8 +581,10 @@ public class MainActivity extends Activity {
                     renderHome(sections);
                     status.setText("Показано лент: " + sections.size());
                 } else if (!homeCacheDisplayed) {
-                    status.setText("Не удалось загрузить публичные ленты");
-                    addEmpty("Не удалось загрузить главную страницу. Проверьте адрес зеркала и соединение.");
+                    status.setText("Пробуем резервную загрузку через WebView…");
+                    if (sessionWebView == null) restoreBrowserSession("");
+                    browserHandler.postDelayed(() -> loadHomeSectionsInBrowser(
+                            homePaths, homeTitles, 0, new ArrayList<>(), 0), 250);
                 }
             });
         });
@@ -2202,10 +2204,7 @@ public class MainActivity extends Activity {
         String[] pairs = cookieHeader.split(";");
         final int[] remaining = {0};
         for (String pair : pairs) if (pair.trim().contains("=")) remaining[0]++;
-        if (remaining[0] == 0) {
-            markStartupCatalogReady();
-            return;
-        }
+        final boolean noCookies = remaining[0] == 0;
         final boolean[] started = {false};
         android.webkit.ValueCallback<Boolean> callback = accepted -> {
             remaining[0]--;
@@ -2215,10 +2214,12 @@ public class MainActivity extends Activity {
                 markStartupCatalogReady();
             }
         };
-        for (String pair : pairs) {
-            String item = pair.trim();
-            if (!item.contains("=")) continue;
-            manager.setCookie(client.getMirror(), item + "; Path=/; Secure; SameSite=Lax", callback);
+        if (!noCookies) {
+            for (String pair : pairs) {
+                String item = pair.trim();
+                if (!item.contains("=")) continue;
+                manager.setCookie(client.getMirror(), item + "; Path=/; Secure; SameSite=Lax", callback);
+            }
         }
         web.setWebViewClient(new WebViewClient() {
             private boolean isMirror(Uri uri) {
@@ -2296,6 +2297,7 @@ public class MainActivity extends Activity {
             }
         });
         web.setWebChromeClient(new WebChromeClient());
+        if (noCookies) markStartupCatalogReady();
     }
 
     private void fetchBrowserPage(String path, String postBody,
