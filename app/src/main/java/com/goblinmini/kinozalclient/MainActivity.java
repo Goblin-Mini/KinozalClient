@@ -69,6 +69,9 @@ public class MainActivity extends Activity {
     private String mirror;
     private String currentPath = "browse.php";
     private String currentTitle = "Все раздачи";
+    private TextView settingsConnectionInfo;
+    private TextView settingsCategoryInfo;
+    private TextView settingsCountryInfo;
     private String activeTorrentDetailsHref = "";
     private LinearLayout root, sidebar, content, list, menuItems;
     private TextView heading, status;
@@ -728,6 +731,20 @@ public class MainActivity extends Activity {
     private void setCatalogStatus(String itemType, int count) {
         status.setText(currentTitle + " · Загружено: " + count + " " + itemType
                 + "\nВерсия: " + getAppVersionName());
+        updateSettingsCategoryInfo(count);
+    }
+
+    private void updateSettingsCategoryInfo(int count) {
+        if (settingsCategoryInfo != null) {
+            settingsCategoryInfo.setText(currentTitle + " — загружено " + count + " раздач");
+        }
+    }
+
+    private void updateSettingsConnectionInfo() {
+        if (settingsConnectionInfo != null) {
+            settingsConnectionInfo.setText("Подключение к Kinozal: "
+                    + (sessionWebView != null ? "браузерная сессия активна" : "прямое подключение"));
+        }
     }
 
     private String getAppVersionName() {
@@ -1244,6 +1261,22 @@ public class MainActivity extends Activity {
         columns.addView(rightScroll, new LinearLayout.LayoutParams(0, -1, 1f));
         page.addView(columns, new LinearLayout.LayoutParams(-1, 0, 1f));
 
+        addSettingsSection(left, "ДИАГНОСТИКА");
+        settingsConnectionInfo = text("Подключение к Kinozal…", 12, TEAL, false);
+        settingsConnectionInfo.setPadding(dp(4), dp(3), dp(4), dp(3));
+        left.addView(settingsConnectionInfo);
+        settingsCategoryInfo = text(currentTitle + " — загружено 0 раздач", 12, TEAL, false);
+        settingsCategoryInfo.setPadding(dp(4), dp(3), dp(4), dp(3));
+        left.addView(settingsCategoryInfo);
+        settingsCountryInfo = text("Страна подключения: определяется…", 12, TEAL, false);
+        settingsCountryInfo.setPadding(dp(4), dp(3), dp(4), dp(3));
+        left.addView(settingsCountryInfo);
+        TextView settingsVersionInfo = text("Версия приложения: " + getAppVersionName(), 12, GOLD, false);
+        settingsVersionInfo.setPadding(dp(4), dp(3), dp(4), dp(10));
+        left.addView(settingsVersionInfo);
+        updateSettingsConnectionInfo();
+        loadExternalCountryInfo(settingsCountryInfo);
+
         addSettingsSection(left, "АККАУНТ И СЕРВЕР");
         addSettingsAction(left, "Авторизация / проверка Kinozal", () -> showLogin());
         addSettingsAction(left, "Выбрать зеркало Kinozal", () -> chooseMirror());
@@ -1499,7 +1532,7 @@ public class MainActivity extends Activity {
                     + String.format(java.util.Locale.ROOT, "Файлов в кэше: %d\\n", diskCache.getEntryCount())
                     + "Расположение: cache/kinozal_cache\\n"
                     + homeCacheDiagnostic);
-            loadExternalIpInfo(networkInfo);
+            loadExternalCountryInfo(networkInfo);
         });;
         dialog.show();
         if (dialog.getWindow() != null) {
@@ -1513,8 +1546,8 @@ public class MainActivity extends Activity {
         refresh.requestFocus();
     }
 
-    private void loadExternalIpInfo(TextView target) {
-        target.setText("Внешний IP и страна: проверка…");
+    private void loadExternalCountryInfo(TextView target) {
+        target.setText("Страна подключения: определяется…");
         io.execute(() -> {
             HttpURLConnection connection = null;
             try {
@@ -1541,19 +1574,10 @@ public class MainActivity extends Activity {
                 }
                 org.json.JSONObject json = new org.json.JSONObject(body.toString());
                 if (!json.optBoolean("success", false)) throw new java.io.IOException(json.optString("message", "Не удалось определить страну"));
-                String ip = json.optString("ip", "—");
                 String country = json.optString("country", "не определена");
-                String codeCountry = json.optString("country_code", "");
-                org.json.JSONObject connectionInfo = json.optJSONObject("connection");
-                String isp = connectionInfo == null ? "" : connectionInfo.optString("isp", "");
-                String result = "Маршрут: " + (cfg.enabled ? "SOCKS5" : "напрямую")
-                        + (cfg.enabled ? "\\nSOCKS5: подключение активно (" + cfg.host + ":" + cfg.port + ")" : "")
-                        + "\\nВнешний IP: " + ip
-                        + "\\nСтрана выхода: " + country + (codeCountry.isEmpty() ? "" : " (" + codeCountry + ")")
-                        + (isp.isEmpty() ? "" : "\\nПровайдер: " + isp);
-                runOnUiThread(() -> target.setText(result));
+                runOnUiThread(() -> target.setText("Страна подключения: " + country));
             } catch (Exception e) {
-                String message = "Не удалось определить внешний IP/страну: " + safe(e.getMessage());
+                String message = "Страна подключения: не определена";
                 runOnUiThread(() -> target.setText(message));
             } finally {
                 if (connection != null) connection.disconnect();
@@ -1976,10 +2000,12 @@ public class MainActivity extends Activity {
         if (sessionWebView != null) {
             fetchBrowserPage(path, postBody, html -> {
                 if (html != null && !html.isEmpty()) {
+                    updateSettingsConnectionInfo();
                     synchronized (pageCache) { pageCache.put(cacheKey, html); }
                     if (postBody == null) diskCache.put("page|" + scopedCacheKey, html.getBytes(StandardCharsets.UTF_8));
                     showLoadedPage(html);
                 } else {
+                    if (settingsConnectionInfo != null) settingsConnectionInfo.setText("Подключение к Kinozal: нет соединения");
                     progress.setVisibility(View.GONE);
                     status.setText("Нет соединения");
                     addEmpty("Не удалось загрузить каталог через браузерную сессию.");
@@ -1991,9 +2017,14 @@ public class MainActivity extends Activity {
                     String html = postBody == null ? client.fetch(path) : client.fetchPost(path, postBody);
                     synchronized (pageCache) { pageCache.put(cacheKey, html); }
                     if (postBody == null) diskCache.put("page|" + scopedCacheKey, html.getBytes(StandardCharsets.UTF_8));
-                    runOnUiThread(() -> showLoadedPage(html));
+                    runOnUiThread(() -> {
+                        updateSettingsConnectionInfo();
+                        showLoadedPage(html);
+                    });
                 } catch (Exception e) {
-                    runOnUiThread(() -> { progress.setVisibility(View.GONE); status.setText("Нет соединения");
+                    runOnUiThread(() -> {
+                        if (settingsConnectionInfo != null) settingsConnectionInfo.setText("Подключение к Kinozal: нет соединения");
+                        progress.setVisibility(View.GONE); status.setText("Нет соединения");
                         addEmpty("Не удалось загрузить каталог. " + safe(e.getMessage())); });
                 }
             });
