@@ -100,6 +100,8 @@ public class MainActivity extends Activity {
     private boolean startupCatalogStarted = false;
     private boolean automaticUpdateCheckScheduled = false;
     private boolean homeCacheDisplayed = false;
+    private boolean homeRefreshInProgress = false;
+    private List<HomeSection> homeSectionsMemory = new ArrayList<>();
     private String homeCacheDiagnostic = "Кэш главной ещё не проверялся";
 
     private volatile String lastBrowserError = "Причина пока не определена";
@@ -365,6 +367,17 @@ public class MainActivity extends Activity {
         currentPath = "";
         currentTitle = "Главная";
         heading.setText("Главная");
+
+        // Returning to Home in the same app session must be a pure in-memory
+        // view restore. Keep the already parsed model and draw it immediately;
+        // no loading label, progress spinner, disk parsing or WebView navigation.
+        if (!homeSectionsMemory.isEmpty()) {
+            renderHome(homeSectionsMemory);
+            progress.setVisibility(View.GONE);
+            status.setText("Показано лент: " + homeSectionsMemory.size());
+            refreshHomeInBackground();
+            return;
+        }
         showPageLoading("Подключение к Kinozal…");
         String[] homePaths = {"novinki.php", "top.php?c=0&d=0&f=0&j=&k=0&s=0&t=0",
                 "top.php?c=0&d=0&f=0&j=&k=0&s=0&t=0&w=1",
@@ -405,6 +418,7 @@ public class MainActivity extends Activity {
                 homeCacheDiagnostic = diagnostic;
                 homeCacheDisplayed = total > 0;
                 if (homeCacheDisplayed) {
+                    homeSectionsMemory = new ArrayList<>(cached);
                     setCatalogStatus("Постеров в кэше", total);
                     renderHome(cached);
                     progress.setVisibility(View.GONE);
@@ -415,6 +429,7 @@ public class MainActivity extends Activity {
                 // render only: do not issue nine authenticated WebView requests.
                 if (cachedFilesCount == homePaths.length && cached.size() == homePaths.length) {
                     status.setText("Показано лент: " + cached.size() + " · из кэша");
+                    refreshHomeInBackground();
                     return;
                 }
 
@@ -443,6 +458,71 @@ public class MainActivity extends Activity {
                 }
             });
         });
+    }
+
+    private void refreshHomeInBackground() {
+        if (homeRefreshInProgress || sessionWebView == null) return;
+        homeRefreshInProgress = true;
+        String[] paths = {"novinki.php", "top.php?c=0&d=0&f=0&j=&k=0&s=0&t=0",
+                "top.php?c=0&d=0&f=0&j=&k=0&s=0&t=0&w=1",
+                "top.php?c=0&d=0&f=0&j=&k=0&s=0&t=0&w=2",
+                "top.php?j=%D0%BB%D1%83%D1%87%D1%88%D0%B8%D0%B9%20%D1%84%D0%B8%D0%BB%D1%8C%D0%BC%20%D0%9E%D1%81%D0%BA%D0%B0%D1%80",
+                "top.php?j=Netflix", "top.php?j=HBO",
+                "top.php?j=Walt%20Disney%20Pictures", "top.php?j=Marvel"};
+        String[] titles = {"Новинки", "Топ раздач", "Топ недели", "Топ месяца",
+                "Топ Оскар", "Топ Netflix", "Топ HBO", "Топ Walt Disney", "Топ Marvel"};
+        fetchHomeRefresh(paths, titles, 0, new ArrayList<>());
+    }
+
+    private void fetchHomeRefresh(String[] paths, String[] titles, int index,
+            List<HomeSection> refreshed) {
+        if (index >= paths.length) {
+            removeHomeDuplicates(refreshed);
+            homeSectionsMemory = new ArrayList<>(refreshed);
+            homeRefreshInProgress = false;
+            return;
+        }
+        fetchBrowserPage(paths[index], null, html -> {
+            if (html == null || html.trim().isEmpty()) {
+                browserHandler.postDelayed(() -> fetchHomeRefresh(paths, titles,
+                        index + 1, refreshed), 120);
+                return;
+            }
+            io.execute(() -> {
+                HomeSection section = new HomeSection(titles[index], paths[index]);
+                try {
+                    section.items.addAll(parseHomePosters(Jsoup.parse(html, client.getMirror() + "/")));
+                    if (!section.items.isEmpty()) {
+                        diskCache.put("home|" + client.getMirror() + "|" + paths[index],
+                                html.getBytes(StandardCharsets.UTF_8));
+                    }
+                } catch (Exception ignored) { }
+                runOnUiThread(() -> {
+                    if (!section.items.isEmpty()) {
+                        refreshed.add(section);
+                        if (isHomeSectionChanged(section)) {
+                            if (currentPath == null || currentPath.isEmpty()) renderHomeSection(section);
+                        }
+                    }
+                    fetchHomeRefresh(paths, titles, index + 1, refreshed);
+                });
+            });
+        });
+    }
+
+    private boolean isHomeSectionChanged(HomeSection updated) {
+        for (HomeSection old : homeSectionsMemory) {
+            if (!old.path.equals(updated.path)) continue;
+            if (old.items.size() != updated.items.size()) return true;
+            for (int i = 0; i < old.items.size(); i++) {
+                HomePoster a = old.items.get(i), b = updated.items.get(i);
+                if (!a.torrent.href.equals(b.torrent.href)
+                        || !a.torrent.title.equals(b.torrent.title)
+                        || !a.imageUrl.equals(b.imageUrl)) return true;
+            }
+            return false;
+        }
+        return true;
     }
 
     private void loadInitialCatalogFromHttp(String[] homePaths, String[] homeTitles) {
