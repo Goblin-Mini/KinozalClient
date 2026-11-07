@@ -4019,7 +4019,6 @@ public class MainActivity extends Activity {
         String imdbRating = "—", kinopoiskRating = "—", kinozalRating = "—", kinozalStars = "☆☆☆☆☆☆☆☆☆☆", kinozalVotes = "";
         final java.util.LinkedHashMap<String, String> fields = new java.util.LinkedHashMap<>();
         final java.util.List<String> screenshotThumbs = new java.util.ArrayList<>();
-        final java.util.List<String> screenshotFull = new java.util.ArrayList<>();
     }
 
     // Warm the next likely details page while the user navigates the list.
@@ -4178,19 +4177,12 @@ public class MainActivity extends Activity {
         // network URL in src/data-src/data-original and resolve relative paths
         // against the torrent page. Full-size links are stored only as metadata.
         if (technical != null) {
-            for (Element link : technical.select("a:has(img)")) {
-                Element image = link.selectFirst("img");
-                if (image == null) continue;
+            for (Element image : technical.select("img")) {
                 String rawThumb = firstNonEmpty(image.attr("data-src"),
                         image.attr("data-original"), image.attr("src"));
                 String thumb = resolveDetailImageUrl(rawThumb, doc.baseUri());
-                if (thumb.isEmpty()) continue;
-                String rawFull = link.attr("href");
-                String full = resolveDetailImageUrl(rawFull, doc.baseUri());
-                if (full.isEmpty()) full = thumb;
-                if (!data.screenshotThumbs.contains(thumb)) {
+                if (!thumb.isEmpty() && !data.screenshotThumbs.contains(thumb)) {
                     data.screenshotThumbs.add(thumb);
-                    data.screenshotFull.add(full);
                 }
             }
         }
