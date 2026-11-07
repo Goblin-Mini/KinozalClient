@@ -3153,9 +3153,6 @@ public class MainActivity extends Activity {
         passParams.leftMargin = dp(6);
         credentials.addView(passwordField, passParams);
 
-        Button insert = button("Вставить");
-        Button signIn = button("Вход");
-        Button done = button("Готово");
         Button cursorToggle = button("Курсор: вкл");
         Button insert = button("Вставить");
         Button signIn = button("Вход");
@@ -3181,9 +3178,6 @@ public class MainActivity extends Activity {
         Button close = button("Закрыть");
         LinearLayout.LayoutParams actionParams = new LinearLayout.LayoutParams(0, dp(46), 1f);
         actions.addView(refresh, actionParams);
-        LinearLayout.LayoutParams cursorParams = new LinearLayout.LayoutParams(0, dp(46), 1f);
-        cursorParams.leftMargin = dp(6);
-        actions.addView(cursorToggle, cursorParams);
         LinearLayout.LayoutParams closeParams = new LinearLayout.LayoutParams(0, dp(46), 1f);
         closeParams.leftMargin = dp(6);
         actions.addView(close, closeParams);
