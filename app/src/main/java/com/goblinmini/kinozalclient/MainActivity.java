@@ -3275,35 +3275,84 @@ public class MainActivity extends Activity {
     }
 
     private void playTorrent(TorrentDetails data) {
-        // DIAGNOSTIC ONLY: deliberately do not request download.php or fetch a .torrent.
-        // The generated hash is synthetic and cannot identify the real release.
+        WebView web = sessionWebView;
+        if (web == null) {
+            showMessage("Нет авторизованной WebView-сессии Kinozal. Сначала откройте каталог.");
+            return;
+        }
         String page = data.sourcePage == null ? "" : data.sourcePage;
         java.util.regex.Matcher idMatcher = java.util.regex.Pattern
                 .compile("(?:[?&]id=)([0-9]+)").matcher(page);
         if (!idMatcher.find()) {
-            showMessage("Не удалось определить ID раздачи для тестового Magnet.");
+            showMessage("Не удалось определить ID раздачи.");
             return;
         }
-        try {
-            String releaseId = idMatcher.group(1);
-            byte[] digest = java.security.MessageDigest.getInstance("SHA-1")
-                    .digest(("kinozal-diagnostic:" + releaseId)
-                            .getBytes(java.nio.charset.StandardCharsets.UTF_8));
-            StringBuilder hash = new StringBuilder(40);
-            for (byte value : digest) {
-                hash.append(String.format(java.util.Locale.ROOT, "%02x", value & 0xff));
+        String releaseId = idMatcher.group(1);
+        Uri source = Uri.parse(page);
+        String endpoint = source.buildUpon()
+                .path("/get_srv_details.php")
+                .clearQuery()
+                .appendQueryParameter("id", releaseId)
+                .appendQueryParameter("action", "2")
+                .build().toString();
+
+        final boolean[] completed = {false};
+        final Runnable timeout = () -> {
+            if (completed[0]) return;
+            completed[0] = true;
+            web.removeJavascriptInterface("KinozalInfoHashBridge");
+            showMessage("Kinozal не ответил на запрос infohash за 15 секунд.");
+        };
+        browserHandler.postDelayed(timeout, 15000);
+        web.addJavascriptInterface(new Object() {
+            @JavascriptInterface
+            public void onInfoHashResult(int statusCode, String body) {
+                runOnUiThread(() -> {
+                    if (completed[0]) return;
+                    completed[0] = true;
+                    browserHandler.removeCallbacks(timeout);
+                    web.removeJavascriptInterface("KinozalInfoHashBridge");
+                    String response = body == null ? "" : body;
+                    java.util.regex.Matcher hashMatcher = java.util.regex.Pattern
+                            .compile("[0-9a-fA-F]{40}").matcher(response);
+                    if (statusCode < 200 || statusCode >= 300) {
+                        showMessage("get_srv_details.php вернул HTTP " + statusCode
+                                + ". Проверьте авторизацию Kinozal.");
+                        return;
+                    }
+                    if (!hashMatcher.find()) {
+                        String preview = response.replaceAll("\\s+", " ").trim();
+                        if (preview.length() > 180) preview = preview.substring(0, 180);
+                        showMessage("Ответ action=2 получен, но infohash не найден. Ответ: "
+                                + (preview.isEmpty() ? "(пусто)" : preview));
+                        return;
+                    }
+                    String hash = hashMatcher.group().toLowerCase(java.util.Locale.ROOT);
+                    String magnet = "magnet:?xt=urn:btih:" + hash
+                            + "&dn=" + Uri.encode(data.title == null ? "" : data.title);
+                    Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(magnet));
+                    intent.setPackage("ru.yourok.torrserve");
+                    intent.putExtra("poster", data.poster == null ? "" : data.poster);
+                    intent.putExtra("title", data.title == null ? "" : data.title);
+                    try {
+                        startActivity(intent);
+                        showMessage("Получен настоящий infohash Kinozal. Magnet передан в TorrServe.");
+                    } catch (Exception e) {
+                        showMessage("Infohash получен (" + hash
+                                + "), но TorrServe не открыл Magnet: " + safe(e.getMessage()));
+                    }
+                });
             }
-            String magnet = "magnet:?xt=urn:btih:" + hash
-                    + "&dn=" + android.net.Uri.encode(data.title == null ? "" : data.title);
-            Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(magnet));
-            intent.setPackage("ru.yourok.torrserve");
-            intent.putExtra("poster", data.poster == null ? "" : data.poster);
-            intent.putExtra("title", data.title == null ? "" : data.title);
-            startActivity(intent);
-            showMessage("Тестовый Magnet передан в TorrServe. Хеш искусственный: реальную раздачу он не найдёт.");
-        } catch (Exception e) {
-            showMessage("Не удалось открыть тестовый Magnet в TorrServe: " + safe(e.getMessage()));
-        }
+        }, "KinozalInfoHashBridge");
+
+        String script = "(function(){try{fetch(" + org.json.JSONObject.quote(endpoint)
+                + ",{method:'GET',credentials:'include',cache:'no-store',redirect:'follow'})"
+                + ".then(function(r){return r.text().then(function(t){"
+                + "window.KinozalInfoHashBridge.onInfoHashResult(r.status,String(t||'').slice(0,4096));"
+                + "});})"
+                + ".catch(function(e){window.KinozalInfoHashBridge.onInfoHashResult(0,String(e));});"
+                + "}catch(e){window.KinozalInfoHashBridge.onInfoHashResult(0,String(e));}})()";
+        web.evaluateJavascript(script, null);
     }
 
     private void startMagnetWebViewFetch(TorrentDetails data, WebView web, int retry) {
