@@ -3367,7 +3367,7 @@ public class MainActivity extends Activity {
                     deleteParams.leftMargin = dp(4);
                     itemRow.addView(delete, deleteParams);
                 }
-    
+                list.addView(itemRow, itemParams);
             });
         }
         Runnable[] buildNextCard = new Runnable[1];
