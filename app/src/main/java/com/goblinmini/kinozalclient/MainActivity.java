@@ -2613,12 +2613,6 @@ public class MainActivity extends Activity {
         page.setPadding(dp(16), dp(12), dp(16), dp(10));
         page.setBackgroundColor(BG);
 
-        TextView heading = text("НАСТРОЙКИ KINOZAL", 22, GOLD, true);
-        page.addView(heading);
-        TextView subtitle = text("Подключения, данные пользователя и поведение приложения", 12, TEAL, false);
-        subtitle.setPadding(0, dp(3), 0, dp(10));
-        page.addView(subtitle);
-
         LinearLayout columns = new LinearLayout(this);
         columns.setOrientation(LinearLayout.HORIZONTAL);
         ScrollView leftScroll = new ScrollView(this);
@@ -2637,27 +2631,27 @@ public class MainActivity extends Activity {
         columns.addView(rightScroll, new LinearLayout.LayoutParams(0, -1, 1f));
         page.addView(columns, new LinearLayout.LayoutParams(-1, 0, 1f));
 
-        addSettingsSection(left, "АККАУНТ И СЕРВЕР");
         addSettingsAction(left, "Авторизация / проверка Kinozal", () -> showLogin());
         addSettingsAction(left, "Выбрать зеркало Kinozal", () -> chooseMirror());
         addSettingsAction(left, "Проверить обновления", () -> new UpdateManager(this).check());
         addSettingsAction(left, "Стартовый раздел", () -> chooseStartupSource());
-
-        addSettingsSection(left, "ОФОРМЛЕНИЕ");
         addSettingsAction(left, "Цвет акцента", () -> showAccentPicker());
 
-        addSettingsSection(left, "ANDROID TV");
-        CheckBox tvChannelsEnabled = new CheckBox(this);
-        tvChannelsEnabled.setText("Включить каналы Android TV");
-        tvChannelsEnabled.setTextColor(GOLD);
-        tvChannelsEnabled.setButtonTintList(android.content.res.ColorStateList.valueOf(TEAL));
-        tvChannelsEnabled.setTextSize(13);
-        tvChannelsEnabled.setChecked(getSharedPreferences(PREFS, MODE_PRIVATE)
-                .getBoolean("tv_channels_enabled", true));
-        left.addView(tvChannelsEnabled);
-        tvChannelsEnabled.setOnCheckedChangeListener((button, enabled) -> {
+        boolean channelsOn = getSharedPreferences(PREFS, MODE_PRIVATE)
+                .getBoolean("tv_channels_enabled", true);
+        Button channelsButton = button("Каналы Android TV: " + (channelsOn ? "Вкл." : "Выкл."));
+        channelsButton.setTextSize(13);
+        channelsButton.setGravity(Gravity.CENTER_VERTICAL | Gravity.LEFT);
+        channelsButton.setPadding(dp(10), 0, dp(8), 0);
+        LinearLayout.LayoutParams channelsParams = new LinearLayout.LayoutParams(-1, dp(44));
+        channelsParams.topMargin = dp(5);
+        left.addView(channelsButton, channelsParams);
+        channelsButton.setOnClickListener(v -> {
+            boolean enabled = !getSharedPreferences(PREFS, MODE_PRIVATE)
+                    .getBoolean("tv_channels_enabled", true);
             getSharedPreferences(PREFS, MODE_PRIVATE).edit()
                     .putBoolean("tv_channels_enabled", enabled).apply();
+            channelsButton.setText("Каналы Android TV: " + (enabled ? "Вкл." : "Выкл."));
             if (enabled) {
                 browserHandler.postDelayed(this::loadTvChannelFeedsInBrowser, 150);
                 showMessage("Каналы Android TV включены");
@@ -2667,29 +2661,34 @@ public class MainActivity extends Activity {
             }
         });
 
-        addSettingsSection(left, "РЕЗЕРВНОЕ КОПИРОВАНИЕ");
-        addSettingsAction(left, "Создать резервную копию", () -> exportUserBackup());
-        addSettingsAction(left, "Восстановить из копии", () -> importUserBackup());
-        TextView backupNote = text("В копию входят избранное, история поиска, история просмотра и основные настройки. Пароль SOCKS5 не экспортируется: он защищён Android Keystore.", 11, TEAL, false);
-        backupNote.setPadding(dp(4), dp(3), dp(4), dp(8));
-        left.addView(backupNote);
-
-        addSettingsSection(left, "ДОПОЛНИТЕЛЬНО");
+        addSettingsAction(left, "Резервная копия", () -> new AlertDialog.Builder(this)
+                .setItems(new String[]{"Создать резервную копию", "Восстановить из копии"},
+                        (dialog, which) -> {
+                            if (which == 0) exportUserBackup();
+                            else importUserBackup();
+                        }).show());
         addSettingsAction(left, "Очистить кэш", () -> confirmClearCache());
         addSettingsAction(left, "Поиск Jackett", () -> showJackettSettings());
         addSettingsAction(left, "О приложении", () -> showAbout());
 
-        addSettingsSection(right, "TORRSERVE");
-        TextView tsLabel = text("Адрес внешнего TorrServe (например, http://192.168.1.10:8090)", 12, TEAL, true);
-        tsLabel.setPadding(dp(4), dp(4), dp(4), dp(3));
-        right.addView(tsLabel);
         torrServeAddressField = new EditText(this);
         torrServeAddressField.setSingleLine(true);
-        torrServeAddressField.setText(getSharedPreferences(PREFS, MODE_PRIVATE).getString("torrserve_url", ""));
-        torrServeAddressField.setHint("http://адрес:8090");
+        torrServeAddressField.setText(getSharedPreferences(PREFS, MODE_PRIVATE)
+                .getString("torrserve_url", ""));
+        torrServeAddressField.setHint("Адрес внешнего TorrServe");
         styleSettingsEdit(torrServeAddressField);
-        right.addView(torrServeAddressField, new LinearLayout.LayoutParams(-1, dp(44)));
-        addSettingsAction(right, "Сохранить адрес TorrServe", () -> {
+        LinearLayout torrRow = new LinearLayout(this);
+        torrRow.setOrientation(LinearLayout.HORIZONTAL);
+        torrRow.setGravity(Gravity.CENTER_VERTICAL);
+        LinearLayout.LayoutParams addressParams = new LinearLayout.LayoutParams(0, dp(44), 1f);
+        torrRow.addView(torrServeAddressField, addressParams);
+        Button saveTorr = button("Сохранить");
+        saveTorr.setTextSize(12);
+        LinearLayout.LayoutParams saveParams = new LinearLayout.LayoutParams(dp(112), dp(44));
+        saveParams.leftMargin = dp(6);
+        torrRow.addView(saveTorr, saveParams);
+        right.addView(torrRow);
+        saveTorr.setOnClickListener(v -> {
             String value = torrServeAddressField.getText().toString().trim().replaceAll("/+$", "");
             if (!value.isEmpty() && !validJackettBase(value)) {
                 showMessage("Укажите адрес с http:// или https://");
@@ -2698,21 +2697,9 @@ public class MainActivity extends Activity {
             getSharedPreferences(PREFS, MODE_PRIVATE).edit().putString("torrserve_url", value).apply();
             showMessage("Адрес TorrServe сохранён");
         });
-        addSettingsAction(right, "Проверить историю и позицию TorrServe", () -> checkTorrServerViewingHistory());
+        addSettingsAction(right, "Проверить соединение с TorrServe", () -> checkTorrServeConnection());
+        addSettingsAction(right, "SOCKS5", () -> showSocks5Settings());
 
-        addSettingsSection(right, "СЕТЬ И ПРОКСИ");
-        addSettingsAction(right, "SOCKS5: настройки и проверка", () -> showSocks5Settings());
-        Socks5ProxyBridge.Settings proxy = socks5Bridge.getSettings();
-        TextView proxyStatus = text(proxy.enabled
-                ? "SOCKS5 включён: " + proxy.host + ":" + proxy.port
-                : "SOCKS5 отключён", 12, proxy.enabled ? GOLD : TEAL, false);
-        proxyStatus.setPadding(dp(4), dp(2), dp(4), dp(8));
-        right.addView(proxyStatus);
-        Button close = button("Закрыть");
-        close.setTextColor(GOLD);
-        LinearLayout.LayoutParams closeParams = new LinearLayout.LayoutParams(-1, dp(44));
-        closeParams.topMargin = dp(8);
-        page.addView(close, closeParams);
         settingsDialog = new AlertDialog.Builder(this).setView(page).create();
         settingsDialog.show();
         if (settingsDialog.getWindow() != null) {
@@ -2720,9 +2707,36 @@ public class MainActivity extends Activity {
             settingsDialog.getWindow().setLayout(ViewGroup.LayoutParams.MATCH_PARENT,
                     ViewGroup.LayoutParams.MATCH_PARENT);
         }
-        close.setOnClickListener(v -> settingsDialog.dismiss());
     }
 
+    private void checkTorrServeConnection() {
+        String base = torrServeAddressField == null ? "" : torrServeAddressField.getText().toString()
+                .trim().replaceAll("/+$", "");
+        if (base.isEmpty() || !validJackettBase(base)) {
+            showMessage("Укажите корректный адрес TorrServe");
+            return;
+        }
+        showMessage("Проверяем соединение с TorrServe…");
+        io.execute(() -> {
+            HttpURLConnection connection = null;
+            try {
+                connection = (HttpURLConnection) new URL(base + "/echo").openConnection();
+                connection.setConnectTimeout(7000);
+                connection.setReadTimeout(10000);
+                connection.setRequestMethod("GET");
+                int code = connection.getResponseCode();
+                if (code < 200 || code >= 300) {
+                    throw new java.io.IOException("HTTP " + code);
+                }
+                runOnUiThread(() -> showMessage("Соединение с TorrServe установлено"));
+            } catch (Exception e) {
+                String error = safe(e.getMessage());
+                runOnUiThread(() -> showMessage("Не удалось подключиться к TorrServe: " + error));
+            } finally {
+                if (connection != null) connection.disconnect();
+            }
+        });
+    }
 
     private void confirmClearCache() {
         new AlertDialog.Builder(this)
@@ -3322,7 +3336,7 @@ public class MainActivity extends Activity {
                     String metaValue = (tracker.isEmpty() ? "" : tracker + "  ·  ")
                             + "Размер: " + size + "  ·  Сиды: " + seeders + "  ·  Пиры: " + peers;
                     android.text.SpannableString metaText = new android.text.SpannableString(metaValue);
-                    int trackerColor = Color.rgb(241, 210, 156); // pastel orange accent
+                    int trackerColor = Color.rgb(231, 186, 134); // #E7BA86 tracker accent
                     int trackerStart = 0;
                     if (!tracker.isEmpty()) {
                         metaText.setSpan(new android.text.style.ForegroundColorSpan(trackerColor),
