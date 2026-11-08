@@ -128,18 +128,20 @@ public class MainActivity extends Activity {
     private long homePerfLastFrameNanos = 0L;
     private long homePerfStartedAtMs = 0L;
     private int homePerfSlowFrames = 0;
-    private final Choreographer.FrameCallback homePerfFrameCallback = frameTimeNanos -> {
-        if (!homePerfMonitoring) return;
-        if (homePerfLastFrameNanos != 0L) {
-            long frameGapMs = (frameTimeNanos - homePerfLastFrameNanos) / 1_000_000L;
-            if (frameGapMs >= 32L) {
-                homePerfSlowFrames++;
-                Log.w("KinozalPerf", "slow frame gap=" + frameGapMs
-                        + "ms, homeLoading=true, renderedSections=" + homeRenderGeneration);
+    private final Choreographer.FrameCallback homePerfFrameCallback = new Choreographer.FrameCallback() {
+        @Override public void doFrame(long frameTimeNanos) {
+            if (!homePerfMonitoring) return;
+            if (homePerfLastFrameNanos != 0L) {
+                long frameGapMs = (frameTimeNanos - homePerfLastFrameNanos) / 1_000_000L;
+                if (frameGapMs >= 32L) {
+                    homePerfSlowFrames++;
+                    Log.w("KinozalPerf", "slow frame gap=" + frameGapMs
+                            + "ms, homeLoading=true, renderedSections=" + homeRenderGeneration);
+                }
             }
+            homePerfLastFrameNanos = frameTimeNanos;
+            Choreographer.getInstance().postFrameCallback(this);
         }
-        homePerfLastFrameNanos = frameTimeNanos;
-        Choreographer.getInstance().postFrameCallback(homePerfFrameCallback);
     };
 
     private void startHomePerformanceMonitor() {
