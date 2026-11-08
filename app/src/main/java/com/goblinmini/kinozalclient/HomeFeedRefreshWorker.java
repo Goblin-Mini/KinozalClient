@@ -48,23 +48,23 @@ public final class HomeFeedRefreshWorker extends Worker {
         boolean proxyStarted = false;
         sendRefreshState(context, group, index, path, title, bulk, total, "running", null);
         try {
-            // Background workers run outside the Activity/WebView. Restore the
-            // saved browser session (including Cloudflare clearance cookies)
-            // into this worker's isolated native cookie jar before requesting.
-            String browserCookies = client.getSavedBrowserCookies();
-            if (browserCookies != null && !browserCookies.trim().isEmpty()) {
-                client.importBrowserCookies(browserCookies);
-                Log.i(TAG, "Restored saved browser cookies for background feed refresh");
-            } else {
-                Log.w(TAG, "No saved browser cookie header; using native session cookies only");
-            }
+            // A headless WebView runs on Android's main Looper even when the
+            // Activity is closed. This lets Cloudflare execute its JS challenge.
             Socks5ProxyBridge.Settings proxySettings = bridge.getSettings();
+            Integer webViewProxyPort = null;
             if (proxySettings.enabled) {
-                Proxy proxy = bridge.start();
+                bridge.start();
                 proxyStarted = true;
-                client.setProxy(proxy);
+                webViewProxyPort = bridge.getLocalPort();
             }
-            String html = client.fetch(path);
+            BrowserFeedFetcher.Result browserResult = BrowserFeedFetcher.fetch(
+                    context, client.getMirror() + "/" + path.replaceFirst("^/+", ""),
+                    client.getUserAgent(), webViewProxyPort, 75000L);
+            String html = browserResult.html;
+            if (browserResult.cookies != null && !browserResult.cookies.trim().isEmpty()) {
+                client.saveBrowserCookies(browserResult.cookies);
+                client.importBrowserCookies(browserResult.cookies);
+            }
             if (html == null || html.trim().isEmpty()) throw new java.io.IOException("Пустой ответ Kinozal");
             JSONArray items = parseItems(html, client.getMirror());
             if (items.length() == 0) throw new java.io.IOException("В ответе нет раздач: кэш оставлен без изменений");
