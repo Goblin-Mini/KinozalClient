@@ -1295,7 +1295,7 @@ public class MainActivity extends Activity {
                     return;
                 }
                 web.evaluateJavascript("window.__kinozalParallelResult", value -> {
-                    if (value != null && !"null".equals(value) && !"\\"\\"".equals(value)) {
+                    if (value != null && !"null".equals(value) && value.length() > 2) {
                         callback.accept(value);
                     } else if (++attempts[0] >= 150) {
                         appendFeedDiagnostic("PARALLEL_TIMEOUT", "fetch batch exceeded 15 seconds");
