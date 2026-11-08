@@ -1479,17 +1479,20 @@ public class MainActivity extends Activity {
      */
     private final java.util.ArrayDeque<Runnable> homeCardBuildQueue = new java.util.ArrayDeque<>();
     private boolean homeCardBuildScheduled = false;
+    private boolean homeRowsEnqueued = false;
 
     private void renderHomeSectionsIncrementally(List<HomeSection> sections) {
         final int generation = ++homeRenderGeneration;
         homeCardBuildQueue.clear();
         homeCardBuildScheduled = false;
+        homeRowsEnqueued = false;
         final List<HomeSection> snapshot = new ArrayList<>(sections);
         final int[] index = {0};
         Runnable[] next = new Runnable[1];
         next[0] = () -> {
             if (generation != homeRenderGeneration || isFinishing()) return;
             if (index[0] >= snapshot.size()) {
+                homeRowsEnqueued = true;
                 scheduleVisibleHomePosterLoad();
                 scheduleNextHomeCardBuild(generation);
                 return;
@@ -1509,8 +1512,12 @@ public class MainActivity extends Activity {
             if (generation != homeRenderGeneration || isFinishing()) return;
             Runnable task = homeCardBuildQueue.pollFirst();
             if (task == null) {
-                scheduleVisibleHomePosterLoad();
-                stopHomePerformanceMonitor();
+                if (homeRowsEnqueued) {
+                    scheduleVisibleHomePosterLoad();
+                    stopHomePerformanceMonitor();
+                } else {
+                    browserHandler.postDelayed(() -> scheduleNextHomeCardBuild(generation), 24);
+                }
                 return;
             }
             task.run();
