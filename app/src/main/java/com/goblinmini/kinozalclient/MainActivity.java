@@ -3896,8 +3896,13 @@ public class MainActivity extends Activity {
             sortDateButton = sortSizeButton = sortSeedsButton = null;
         }
         boolean recentList = "local:recently-viewed".equals(currentPath);
+        boolean favoritesList = "local:favorites".equals(currentPath);
+        boolean localManageList = recentList || favoritesList;
         if (recentList) addHistoryClearButton();
+        if (favoritesList) addFavoritesClearButton();
 
+        LinearLayout headerRow = new LinearLayout(this);
+        headerRow.setGravity(Gravity.CENTER_VERTICAL);
         LinearLayout header = new LinearLayout(this);
         header.setGravity(Gravity.CENTER_VERTICAL);
         header.setPadding(dp(14), dp(8), dp(14), dp(8));
@@ -3915,7 +3920,9 @@ public class MainActivity extends Activity {
         TextView leechesHeader = text("ЛИЧИ", 11, TEAL, true);
         leechesHeader.setGravity(Gravity.CENTER);
         header.addView(leechesHeader, new LinearLayout.LayoutParams(dp(55), -2));
-        list.addView(header);
+        headerRow.addView(header, new LinearLayout.LayoutParams(0, -2, 1f));
+        if (localManageList) headerRow.addView(new View(this), new LinearLayout.LayoutParams(dp(52), dp(1)));
+        list.addView(headerRow);
 
         for (Torrent t : displayItems) {
             LinearLayout card = new LinearLayout(this);
@@ -3925,17 +3932,17 @@ public class MainActivity extends Activity {
             LinearLayout.LayoutParams cardParams = new LinearLayout.LayoutParams(0, dp(66), 1f);
             TextView name = text(t.title, 16, Color.WHITE, true); name.setMaxLines(2);
             card.addView(name, new LinearLayout.LayoutParams(0, -2, 1f));
-            TextView size = text(t.size, 13, GOLD, false);
+            TextView size = text(displayTorrentValue(t.size), 13, GOLD, false);
             size.setGravity(Gravity.CENTER);
             card.addView(size, new LinearLayout.LayoutParams(dp(85), -2));
-            TextView uploaded = text(t.uploaded == null ? "—" : t.uploaded, 12, Color.rgb(170, 205, 180), false);
+            TextView uploaded = text(displayTorrentValue(t.uploaded), 12, Color.rgb(170, 205, 180), false);
             uploaded.setGravity(Gravity.CENTER);
             uploaded.setMaxLines(2);
             card.addView(uploaded, new LinearLayout.LayoutParams(dp(96), -2));
-            TextView seeds = text(t.seeds, 13, TEAL, true);
+            TextView seeds = text(displayTorrentValue(t.seeds), 13, TEAL, true);
             seeds.setGravity(Gravity.CENTER);
             card.addView(seeds, new LinearLayout.LayoutParams(dp(55), -2));
-            TextView leeches = text(t.leeches, 13, RED, true);
+            TextView leeches = text(displayTorrentValue(t.leeches), 13, RED, true);
             leeches.setGravity(Gravity.CENTER);
             card.addView(leeches, new LinearLayout.LayoutParams(dp(55), -2));
             card.setFocusable(true);
@@ -3955,28 +3962,62 @@ public class MainActivity extends Activity {
             LinearLayout.LayoutParams itemParams = new LinearLayout.LayoutParams(-1, dp(66));
             itemParams.bottomMargin = dp(5);
             itemRow.addView(card, cardParams);
-            if (recentList) {
-                android.widget.ImageButton delete = new android.widget.ImageButton(this);
-                delete.setImageResource(android.R.drawable.ic_menu_delete);
-                delete.setBackground(shape(Color.TRANSPARENT, 0));
-                delete.setColorFilter(GOLD);
-                delete.setContentDescription("Удалить из истории");
+            if (localManageList) {
+                View delete = new View(this) {
+                    private final android.graphics.Paint paint = new android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG);
+                    @Override protected void onDraw(android.graphics.Canvas canvas) {
+                        super.onDraw(canvas);
+                        paint.setColor(GOLD);
+                        paint.setStyle(android.graphics.Paint.Style.STROKE);
+                        paint.setStrokeWidth(dp(3.2f));
+                        paint.setStrokeCap(android.graphics.Paint.Cap.ROUND);
+                        paint.setStrokeJoin(android.graphics.Paint.Join.ROUND);
+                        float cx = getWidth() / 2f, top = dp(7), bottom = getHeight() - dp(7);
+                        float w = dp(29), left = cx - w / 2f, right = cx + w / 2f;
+                        canvas.drawRoundRect(cx - dp(8), top, cx + dp(8), top + dp(7), dp(3), dp(3), paint);
+                        canvas.drawRoundRect(left - dp(5), top + dp(10), right + dp(5), top + dp(18), dp(7), dp(7), paint);
+                        android.graphics.Path body = new android.graphics.Path();
+                        body.moveTo(left - dp(2), top + dp(18));
+                        body.lineTo(left + dp(1), bottom - dp(5));
+                        body.quadTo(left + dp(2), bottom, left + dp(8), bottom);
+                        body.lineTo(right - dp(8), bottom);
+                        body.quadTo(right - dp(2), bottom, right - dp(1), bottom - dp(5));
+                        body.lineTo(right + dp(2), top + dp(18));
+                        canvas.drawPath(body, paint);
+                        for (int i = -1; i <= 1; i++) {
+                            float x = cx + i * dp(8);
+                            canvas.drawLine(x, top + dp(28), x, bottom - dp(5), paint);
+                        }
+                    }
+                };
+                delete.setContentDescription(recentList ? "Удалить из истории" : "Удалить из избранного");
                 delete.setFocusable(true);
-                delete.setOnClickListener(v -> removeRecentlyViewed(t.href));
-                LinearLayout.LayoutParams deleteParams = new LinearLayout.LayoutParams(dp(48), dp(54));
-                deleteParams.leftMargin = dp(4);
-                itemRow.addView(delete, deleteParams);
+                delete.setClickable(true);
+                delete.setOnFocusChangeListener((v, focused) ->
+                        v.setBackground(shape(focused ? Color.rgb(65, 72, 73) : Color.TRANSPARENT,
+                                focused ? GOLD : 0)));
+                delete.setOnClickListener(v -> {
+                    if (recentList) removeRecentlyViewed(t.href);
+                    else removeFavorite(t.href);
+                });
+                itemRow.addView(delete, new LinearLayout.LayoutParams(dp(52), dp(54)));
             }
             list.addView(itemRow, itemParams);
         }
-        if (recentList) {
-            addHistoryClearButton();
-        } else {
+        if (!recentList) {
             LinearLayout pages = new LinearLayout(this); pages.setGravity(Gravity.RIGHT);
             Button prev = button("← Назад"); Button next = button("Далее →");
-            pages.addView(prev); pages.addView(next);
+            LinearLayout.LayoutParams prevParams = new LinearLayout.LayoutParams(-2, -1);
+            prevParams.rightMargin = dp(10);
+            pages.addView(prev, prevParams);
+            pages.addView(next, new LinearLayout.LayoutParams(-2, -1));
             LinearLayout.LayoutParams pp = new LinearLayout.LayoutParams(-1, dp(52)); pp.topMargin = dp(10); list.addView(pages, pp);
-            prev.setOnClickListener(v -> changePage(-1)); next.setOnClickListener(v -> changePage(1));
+            if (favoritesList) {
+                prev.setOnClickListener(v -> showMessage("В избранном отображаются все сохранённые раздачи."));
+                next.setOnClickListener(v -> showMessage("В избранном отображаются все сохранённые раздачи."));
+            } else {
+                prev.setOnClickListener(v -> changePage(-1)); next.setOnClickListener(v -> changePage(1));
+            }
         }
         animateContentTransition(list);
     }
@@ -4878,6 +4919,34 @@ public class MainActivity extends Activity {
         params.topMargin = dp(8);
         params.bottomMargin = dp(8);
         list.addView(clear, params);
+    }
+
+    private void addFavoritesClearButton() {
+        Button clear = button("Очистить избранное");
+        clear.setAllCaps(false);
+        clear.setTextSize(14);
+        clear.setOnClickListener(v -> {
+            writeFavorites(new java.util.LinkedHashMap<>());
+            showFavorites();
+            showMessage("Избранное очищено");
+        });
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-1, dp(44));
+        params.topMargin = dp(8);
+        params.bottomMargin = dp(8);
+        list.addView(clear, params);
+    }
+
+    private void removeFavorite(String href) {
+        if (href == null || href.isEmpty()) return;
+        java.util.LinkedHashMap<String, Torrent> favorites = readFavorites();
+        favorites.remove(href);
+        writeFavorites(favorites);
+        showFavorites();
+    }
+
+    private String displayTorrentValue(String value) {
+        return value == null || value.trim().isEmpty() || "null".equalsIgnoreCase(value.trim())
+                ? "—" : value.trim();
     }
 
     private void removeRecentlyViewed(String href) {
