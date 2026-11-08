@@ -3291,6 +3291,10 @@ public class MainActivity extends Activity {
 
     private void load(String path, String title, String postBody) {
         if (deferBrowserNavigationIfBusy(() -> load(path, title, postBody))) return;
+        // All ordinary Kinozal catalogue pages share their own screen container.
+        // Without this switch activeScreenKey could still be "collections";
+        // returning to Подборки would then keep the category's old list attached.
+        activateCachedScreen("catalog");
         currentPath = path; currentTitle = title; heading.setText(title);
         showPageLoading("Загрузка каталога…");
         if (sessionWebView != null) {
