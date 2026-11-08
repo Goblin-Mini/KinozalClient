@@ -1178,8 +1178,8 @@ public class MainActivity extends Activity {
 
             long jsStarted = android.os.SystemClock.elapsedRealtime();
             String script = "(function(){try{"
-                    + "var links=document.querySelectorAll('table.t_peer td.nam > a[href*=details.php?id=]');"
-                    + "if(!links.length)links=document.querySelectorAll('a[href*=details.php?id=]');"
+                    + "var links=document.querySelectorAll('table.t_peer td.nam > a');"
+                    + "if(!links.length)links=document.querySelectorAll('a[href]');"
                     + "var out=[],seen=Object.create(null);"
                     + "function txt(e){return e?(e.innerText||e.textContent||'').replace(/\\s+/g,' ').trim():'';}"
                     + "function imgSrc(img){if(!img)return '';var a=['data-src','data-original','data-lazy-src','data-original-src','src'];"
@@ -1188,7 +1188,7 @@ public class MainActivity extends Activity {
                     + "var ss=img.getAttribute('data-srcset')||img.getAttribute('srcset')||'';"
                     + "return ss?ss.split(',')[0].trim().split(/\\s+/)[0]:'';}"
                     + "for(var i=0;i<links.length;i++){var a=links[i],rawHref=a.getAttribute('href')||'',href=a.href||rawHref;"
-                    + "if(/userdetails/i.test(rawHref)||!href||seen[href])continue;seen[href]=1;"
+                    + "if(rawHref.indexOf('details.php?id=')<0||/userdetails/i.test(rawHref)||!href||seen[href])continue;seen[href]=1;"
                     + "var row=a.closest('tr'),img=a.querySelector('img');"
                     + "if(!img&&row)img=row.querySelector('img');if(!img&&a.parentElement)img=a.parentElement.querySelector('img');"
                     + "var p=a;for(var d=0;d<4&&!img&&p;d++){p=p.parentElement;if(p)img=p.querySelector('img');}"
