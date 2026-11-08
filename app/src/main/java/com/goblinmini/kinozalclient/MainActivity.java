@@ -1547,14 +1547,7 @@ public class MainActivity extends Activity {
         refreshAll.setTextSize(12);
         refreshAll.setOnClickListener(v -> {
             String group = "collections".equals(activeFeedScreen) ? "collections" : "home";
-            int total = "collections".equals(group) ? 11 : 8;
-            try {
-                HomeFeedScheduler.refreshAll(getApplicationContext(), group);
-                showFeedRefreshQueued(group, "Все ленты", total, true);
-            } catch (Exception e) {
-                status.setText("Не удалось запустить обновление лент: " + e.getMessage());
-                android.util.Log.e("KinozalFeed", "Cannot enqueue bulk refresh", e);
-            }
+            refreshAllFeedsInBrowser(group);
         });
         buttonRow.addView(refreshAll, new LinearLayout.LayoutParams(-2, dp(36)));
         actions.addView(buttonRow, new LinearLayout.LayoutParams(-1, dp(42)));
@@ -1578,6 +1571,143 @@ public class MainActivity extends Activity {
         feedRefreshProgressViews.put(screenKey, feedRefreshProgress);
         actions.addView(feedRefreshPanel, new LinearLayout.LayoutParams(-1, -2));
         list.addView(actions, 0, new LinearLayout.LayoutParams(-1, -2));
+    }
+
+    private String[] feedPaths(String group) {
+        return "collections".equals(group) ? COLLECTION_PATHS : HOME_PATHS;
+    }
+
+    private String[] feedTitles(String group) {
+        return "collections".equals(group) ? COLLECTION_TITLES : HOME_TITLES;
+    }
+
+    /** Refresh through the already-cleared WebView session so Cloudflare JavaScript runs. */
+    private void refreshFeedInBrowser(String group, int index, String path, String title,
+            boolean bulk, int total) {
+        if (sessionWebView == null) {
+            status.setText("Браузерная сессия ещё не готова. Открой Kinozal и повтори обновление.");
+            return;
+        }
+        if (browserFeedLoading || pendingBrowserCallback != null) {
+            status.setText("Сейчас выполняется другой запрос к Kinozal. Повтори обновление чуть позже.");
+            return;
+        }
+        Intent running = new Intent();
+        running.putExtra("feed_group", group);
+        running.putExtra("feed_path", path);
+        running.putExtra("feed_title", title);
+        running.putExtra("feed_index", index);
+        running.putExtra("feed_total", total);
+        running.putExtra("feed_bulk", bulk);
+        running.putExtra("refresh_state", "running");
+        handleFeedRefreshState(running);
+
+        fetchBrowserPage(path, null, html -> {
+            if (html == null || html.trim().isEmpty()) {
+                Intent failed = new Intent();
+                failed.putExtra("feed_group", group);
+                failed.putExtra("feed_path", path);
+                failed.putExtra("feed_title", title);
+                failed.putExtra("feed_index", index);
+                failed.putExtra("feed_total", total);
+                failed.putExtra("feed_bulk", bulk);
+                failed.putExtra("refresh_state", "failure");
+                failed.putExtra("refresh_error", lastBrowserError == null
+                        ? "WebView не получил ответ Kinozal" : lastBrowserError);
+                handleFeedRefreshState(failed);
+                return;
+            }
+            io.execute(() -> {
+                HomeSection refreshed = new HomeSection(title, path);
+                String lower = html.toLowerCase(java.util.Locale.ROOT);
+                String cloudflareText = Jsoup.parse(html).text().toLowerCase(java.util.Locale.ROOT);
+                String failure = null;
+                if (cloudflareText.contains("just a moment")
+                        || cloudflareText.contains("enable javascript and cookies")
+                        || cloudflareText.contains("checking your browser")
+                        || cloudflareText.contains("attention required")) {
+                    failure = "Cloudflare ещё не завершил проверку. Открой сайт в браузере и повтори попытку.";
+                } else {
+                    try {
+                        refreshed.items.addAll(parseHomePosters(Jsoup.parse(html, client.getMirror() + "/")));
+                    } catch (Exception e) {
+                        failure = "Не удалось разобрать ленту: " + e.getMessage();
+                    }
+                    if (failure == null && refreshed.items.isEmpty()) {
+                        failure = "В ответе нет раздач; прежний кэш сохранён.";
+                    }
+                }
+                final String error = failure;
+                runOnUiThread(() -> {
+                    if (error != null) {
+                        Intent failed = new Intent();
+                        failed.putExtra("feed_group", group);
+                        failed.putExtra("feed_path", path);
+                        failed.putExtra("feed_title", title);
+                        failed.putExtra("feed_index", index);
+                        failed.putExtra("feed_total", total);
+                        failed.putExtra("feed_bulk", bulk);
+                        failed.putExtra("refresh_state", "failure");
+                        failed.putExtra("refresh_error", error);
+                        handleFeedRefreshState(failed);
+                        return;
+                    }
+                    List<HomeSection> model = "collections".equals(group)
+                            ? new ArrayList<>(collectionsSectionsMemory)
+                            : new ArrayList<>(homeSectionsMemory);
+                    int existing = -1;
+                    for (int i = 0; i < model.size(); i++) {
+                        if (path.equals(model.get(i).path)) { existing = i; break; }
+                    }
+                    if (existing >= 0) model.set(existing, refreshed);
+                    else model.add(refreshed);
+                    if ("collections".equals(group)) {
+                        collectionsSectionsMemory = model;
+                        saveCollectionsModel(model);
+                    } else {
+                        homeSectionsMemory = model;
+                        saveHomeModel(model);
+                    }
+                    if (group.equals(activeFeedScreen)) renderHomeSection(refreshed);
+                    Intent success = new Intent();
+                    success.putExtra("feed_group", group);
+                    success.putExtra("feed_path", path);
+                    success.putExtra("feed_title", title);
+                    success.putExtra("feed_index", index);
+                    success.putExtra("feed_total", total);
+                    success.putExtra("feed_bulk", bulk);
+                    success.putExtra("refresh_state", "success");
+                    handleFeedRefreshState(success);
+                    HomeFeedScheduler.scheduleNext(getApplicationContext(), group, index, path, title);
+                });
+            });
+        });
+    }
+
+    private void refreshAllFeedsInBrowser(String group) {
+        String[] paths = feedPaths(group);
+        String[] titles = feedTitles(group);
+        if (browserFeedLoading || pendingBrowserCallback != null) {
+            status.setText("Сейчас выполняется другой запрос к Kinozal. Повтори позже.");
+            return;
+        }
+        showFeedRefreshQueued(group, "Все ленты", paths.length, true);
+        final int[] current = {0};
+        final Runnable[] next = new Runnable[1];
+        next[0] = () -> {
+            if (current[0] >= paths.length || isFinishing()) {
+                TextView label = feedRefreshStatusViews.get(group);
+                ProgressBar bar = feedRefreshProgressViews.get(group);
+                if (label != null) label.setText("Обновление всех лент завершено");
+                if (bar != null) { bar.setIndeterminate(false); bar.setMax(paths.length); bar.setProgress(paths.length); }
+                return;
+            }
+            int index = current[0]++;
+            refreshFeedInBrowser(group, index, paths[index], titles[index], true, paths.length);
+            if (current[0] < paths.length) browserHandler.postDelayed(next[0], 5 * 60 * 1000L);
+        };
+        next[0] = next[0] == null ? () -> { } : next[0];
+        browserHandler.post(next[0]);
     }
 
     private String feedButtonKey(String group, String path) { return group + "|" + path; }
@@ -1759,13 +1889,7 @@ public class MainActivity extends Activity {
                 status.setText("Не найдена лента для обновления: " + section.title);
                 return;
             }
-            try {
-                HomeFeedScheduler.refreshNow(getApplicationContext(), feedGroup, feedIndex);
-                showFeedRefreshQueued(feedGroup, section.title, 1, false);
-            } catch (Exception e) {
-                status.setText("Не удалось обновить ленту: " + e.getMessage());
-                android.util.Log.e("KinozalFeed", "Cannot enqueue feed refresh: " + section.path, e);
-            }
+            refreshFeedInBrowser(feedGroup, feedIndex, section.path, section.title, false, 1);
         });
         LinearLayout.LayoutParams refreshParams = new LinearLayout.LayoutParams(dp(38), dp(38));
         refreshParams.rightMargin = dp(10);
