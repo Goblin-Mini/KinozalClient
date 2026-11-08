@@ -796,7 +796,6 @@ public class MainActivity extends Activity {
             List<HomeSection> sections, int retry) {
         if (index == 0 && retry == 0 && paths == HOME_PATHS) startHomePerformanceMonitor();
         if (index >= paths.length) {
-            if (paths == HOME_PATHS) stopHomePerformanceMonitor();
             removeHomeDuplicates(sections);
             if (paths == HOME_PATHS) {
                 List<HomeSection> channelSnapshot = new ArrayList<>(sections);
@@ -1486,22 +1485,17 @@ public class MainActivity extends Activity {
             if (generation != homeRenderGeneration || isFinishing()) return;
             if (index[0] >= snapshot.size()) {
                 scheduleVisibleHomePosterLoad();
+                stopHomePerformanceMonitor();
                 return;
             }
             HomeSection section = snapshot.get(index[0]++);
-            long renderStarted = android.os.SystemClock.elapsedRealtime();
             renderHomeSection(section);
-            long renderDuration = android.os.SystemClock.elapsedRealtime() - renderStarted;
-            if (renderDuration >= 16L) {
-                Log.w("KinozalPerf", "home row render=" + renderDuration + "ms, title="
-                        + section.title + ", cards=" + section.items.size());
-            }
             browserHandler.postDelayed(next[0], 24);
         };
         browserHandler.post(next[0]);
     }
 
-    /** Append one completed home feed without rebuilding rows already on screen. */
+    /** Append a feed shell immediately, then construct poster cards over separate UI frames. */
     private void renderHomeSection(HomeSection section) {
         if (section == null || section.items.isEmpty()) return;
 
@@ -1517,81 +1511,101 @@ public class MainActivity extends Activity {
         horizontal.setOnScrollChangeListener((View v, int x, int y, int oldX, int oldY) -> scheduleVisibleHomePosterLoad());
         LinearLayout strip = new LinearLayout(this);
         strip.setOrientation(LinearLayout.HORIZONTAL);
-
-        for (HomePoster item : section.items) {
-            LinearLayout card = new LinearLayout(this);
-            card.setOrientation(LinearLayout.VERTICAL);
-            card.setPadding(dp(5), dp(5), dp(5), dp(5));
-            card.setBackground(shape(PANEL, 0));
-            card.setFocusable(true);
-            card.setClickable(true);
-            card.setOnFocusChangeListener((v, focused) -> {
-                v.setBackground(shape(focused ? Color.rgb(57, 68, 70) : PANEL, focused ? GOLD : 0));
-                if (focused) {
-                    loadHomePosterForCard(card);
-                }
-            });
-            FrameLayout posterFrame = new FrameLayout(this);
-            posterFrame.setBackground(shape(Color.rgb(40, 45, 49), 0));
-            ImageView poster = new ImageView(this);
-            poster.setScaleType(ImageView.ScaleType.CENTER_CROP);
-            poster.setBackground(shape(Color.rgb(40, 45, 49), 0));
-            poster.setImageResource(R.drawable.kinozal_poster_placeholder);
-            posterFrame.addView(poster, new FrameLayout.LayoutParams(-1, -1));
-
-            card.addView(posterFrame, new LinearLayout.LayoutParams(dp(126), dp(178)));
-            List<String> badges = extractHomeBadges(item.torrent.title, section.title);
-            // Reserve the same metadata line on every card. Without this spacer,
-            // releases with no detectable tags become visibly shorter than neighbours.
-            LinearLayout badgeRow = new LinearLayout(this);
-            badgeRow.setOrientation(LinearLayout.HORIZONTAL);
-            badgeRow.setGravity(Gravity.CENTER_VERTICAL);
-            badgeRow.setPadding(0, dp(2), 0, dp(2));
-            for (String badge : badges) {
-                TextView chip = text(badge, 10, GOLD, true);
-                chip.setSingleLine(true);
-                chip.setGravity(Gravity.CENTER);
-                chip.setPadding(dp(6), dp(2), dp(6), dp(2));
-                chip.setBackground(shape(Color.rgb(39, 57, 61), TEAL));
-                LinearLayout.LayoutParams chipParams = new LinearLayout.LayoutParams(-2, dp(20));
-                chipParams.rightMargin = dp(3);
-                badgeRow.addView(chip, chipParams);
-            }
-            card.addView(badgeRow, new LinearLayout.LayoutParams(dp(126), dp(25)));
-            TextView name = text(item.torrent.title, 12, Color.WHITE, true);
-            name.setMaxLines(2);
-            name.setEllipsize(android.text.TextUtils.TruncateAt.END);
-            name.setPadding(dp(2), dp(6), dp(2), dp(2));
-            card.addView(name, new LinearLayout.LayoutParams(dp(126), dp(42)));
-            LinearLayout.LayoutParams cardParams = new LinearLayout.LayoutParams(dp(138), -2);
-            cardParams.rightMargin = dp(8);
-            strip.addView(card, cardParams);
-            card.setTag("home-card");
-            if (!item.imageUrl.isEmpty()) {
-                poster.setTag(new HomeImageRequest(item.imageUrl, client.getMirror() + "/" + section.path));
-            }
-            card.setOnClickListener(v -> showTorrent(item.torrent));
-        }
         horizontal.addView(strip);
         LinearLayout.LayoutParams rowParams = new LinearLayout.LayoutParams(-1, dp(260));
 
-        // If this feed was already shown from cache, replace only its own pair
-        // of views in place. Other feeds and DPAD focus remain untouched.
+        // Replace only this feed's existing views, preserving other rows and DPAD focus.
         String titleTag = "home-title:" + section.path;
+        boolean replaced = false;
         for (int i = 0; i + 1 < list.getChildCount(); i++) {
-            Object tag = list.getChildAt(i).getTag();
-            if (titleTag.equals(tag)) {
+            if (titleTag.equals(list.getChildAt(i).getTag())) {
                 list.removeViewAt(i + 1);
                 list.removeViewAt(i);
                 list.addView(sectionTitle, i, titleParams);
                 list.addView(horizontal, i + 1, rowParams);
-                horizontal.post(this::scheduleVisibleHomePosterLoad);
-                return;
+                replaced = true;
+                break;
             }
         }
-        list.addView(sectionTitle, titleParams);
-        list.addView(horizontal, rowParams);
+        if (!replaced) {
+            list.addView(sectionTitle, titleParams);
+            list.addView(horizontal, rowParams);
+        }
         horizontal.post(this::scheduleVisibleHomePosterLoad);
+
+        final long startedAt = android.os.SystemClock.elapsedRealtime();
+        final int generation = homeRenderGeneration;
+        final int[] cardIndex = {0};
+        Runnable[] addNextCard = new Runnable[1];
+        addNextCard[0] = () -> {
+            if (generation != homeRenderGeneration || isFinishing()) return;
+            if (cardIndex[0] >= section.items.size()) {
+                long duration = android.os.SystemClock.elapsedRealtime() - startedAt;
+                Log.w("KinozalPerf", "home row build=" + duration + "ms, title="
+                        + section.title + ", cards=" + section.items.size());
+                scheduleVisibleHomePosterLoad();
+                return;
+            }
+            HomePoster item = section.items.get(cardIndex[0]++);
+            strip.addView(createHomePosterCard(item, section));
+            browserHandler.postDelayed(addNextCard[0], 12);
+        };
+        browserHandler.post(addNextCard[0]);
+    }
+
+    private View createHomePosterCard(HomePoster item, HomeSection section) {
+        LinearLayout card = new LinearLayout(this);
+        card.setOrientation(LinearLayout.VERTICAL);
+        card.setPadding(dp(5), dp(5), dp(5), dp(5));
+        card.setBackground(shape(PANEL, 0));
+        card.setFocusable(true);
+        card.setClickable(true);
+        card.setOnFocusChangeListener((v, focused) -> {
+            v.setBackground(shape(focused ? Color.rgb(57, 68, 70) : PANEL, focused ? GOLD : 0));
+            if (focused) loadHomePosterForCard(card);
+        });
+
+        FrameLayout posterFrame = new FrameLayout(this);
+        posterFrame.setBackground(shape(Color.rgb(40, 45, 49), 0));
+        ImageView poster = new ImageView(this);
+        poster.setScaleType(ImageView.ScaleType.CENTER_CROP);
+        poster.setBackground(shape(Color.rgb(40, 45, 49), 0));
+        poster.setImageResource(R.drawable.kinozal_poster_placeholder);
+        posterFrame.addView(poster, new FrameLayout.LayoutParams(-1, -1));
+        card.addView(posterFrame, new LinearLayout.LayoutParams(dp(126), dp(178)));
+
+        List<String> badges = extractHomeBadges(item.torrent.title, section.title);
+        LinearLayout badgeRow = new LinearLayout(this);
+        badgeRow.setOrientation(LinearLayout.HORIZONTAL);
+        badgeRow.setGravity(Gravity.CENTER_VERTICAL);
+        badgeRow.setPadding(0, dp(2), 0, dp(2));
+        for (String badge : badges) {
+            TextView chip = text(badge, 10, GOLD, true);
+            chip.setSingleLine(true);
+            chip.setGravity(Gravity.CENTER);
+            chip.setPadding(dp(6), dp(2), dp(6), dp(2));
+            chip.setBackground(shape(Color.rgb(39, 57, 61), TEAL));
+            LinearLayout.LayoutParams chipParams = new LinearLayout.LayoutParams(-2, dp(20));
+            chipParams.rightMargin = dp(3);
+            badgeRow.addView(chip, chipParams);
+        }
+        card.addView(badgeRow, new LinearLayout.LayoutParams(dp(126), dp(25)));
+
+        TextView name = text(item.torrent.title, 12, Color.WHITE, true);
+        name.setMaxLines(2);
+        name.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        name.setPadding(dp(2), dp(6), dp(2), dp(2));
+        card.addView(name, new LinearLayout.LayoutParams(dp(126), dp(42)));
+
+        LinearLayout.LayoutParams cardParams = new LinearLayout.LayoutParams(dp(138), -2);
+        cardParams.rightMargin = dp(8);
+        card.setTag("home-card");
+        if (!item.imageUrl.isEmpty()) {
+            poster.setTag(new HomeImageRequest(item.imageUrl, client.getMirror() + "/" + section.path));
+        }
+        card.setOnClickListener(v -> showTorrent(item.torrent));
+        card.setLayoutParams(cardParams);
+        return card;
     }
 
     private static class HomeImageRequest {
