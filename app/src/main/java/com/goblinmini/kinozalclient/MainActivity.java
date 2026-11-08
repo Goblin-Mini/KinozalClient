@@ -572,22 +572,25 @@ public class MainActivity extends Activity {
             List<HomeSection> cached = readHomeModel();
             runOnUiThread(() -> {
                 homeCacheLoadFinished = true;
-                // Do not overwrite a screen the user has already navigated to.
-                if (cached != null && !cached.isEmpty()
-                        && "browse.php".equals(currentPath)
-                        && "Все раздачи".equals(currentTitle)
-                        && !isFinishing()) {
-                    currentPath = "";
-                    currentTitle = "Главная";
-                    heading.setText("Главная");
+                // Restore the persisted Home snapshot on Activity/process recreation.
+                // The previous condition accidentally restored it only while the
+                // "Все раздачи" page was open, so a normal return always refetched feeds.
+                if (cached != null && !cached.isEmpty() && !isFinishing()
+                        && (currentPath == null || currentPath.isEmpty())
+                        && "home".equals(getSharedPreferences(PREFS, MODE_PRIVATE)
+                                .getString("startup_source", "home"))) {
                     homeSectionsMemory = new ArrayList<>(cached);
                     homeCacheDisplayed = true;
+                    homeLoadedOnce = true;
                     renderHome(cached);
-                    status.setText("Главная из кэша · обновляем…");
+                    status.setText("Главная · восстановлена из кэша");
+                    HomeFeedScheduler.scheduleInitial(getApplicationContext(), "home");
                 }
                 if (initialHomeFetchPending) {
                     initialHomeFetchPending = false;
-                    if (currentPath == null || currentPath.isEmpty()) {
+                    // A valid persisted snapshot is already the ready screen.
+                    // Scheduled WorkManager refreshes update it independently.
+                    if (!homeLoadedOnce && (currentPath == null || currentPath.isEmpty())) {
                         startInitialHomeBrowserLoad();
                     }
                 }
