@@ -2,7 +2,7 @@ name: Android CI
 
 on:
   push:
-    branches: [ main, feature/magnet-playback ]
+    branches: [ main, feature/magnet-playback, feature/performance ]
   pull_request:
     branches: [ main ]
   workflow_dispatch:
@@ -38,7 +38,7 @@ jobs:
           test -d "$ANDROID_HOME/build-tools/35.0.0"
 
       - name: Build debug APK for pull requests
-        if: github.event_name == 'pull_request' || github.ref_name == 'feature/magnet-playback'
+        if: github.event_name == 'pull_request' || (github.ref_name == 'feature/magnet-playback' || github.ref_name == 'feature/performance')
         run: gradle --no-daemon assembleDebug
 
       - name: Upload debug APK
@@ -51,7 +51,7 @@ jobs:
           retention-days: 14
 
       - name: Decode release keystore
-        if: github.event_name != 'pull_request' && github.ref_name != 'feature/magnet-playback'
+        if: github.event_name != 'pull_request' && (github.ref_name != 'feature/magnet-playback' && github.ref_name != 'feature/performance')
         env:
           KEYSTORE_BASE64: ${{ secrets.KINOZAL_KEYSTORE_BASE64 }}
         shell: bash
