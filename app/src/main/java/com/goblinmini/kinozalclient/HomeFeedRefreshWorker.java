@@ -70,6 +70,12 @@ public final class HomeFeedRefreshWorker extends Worker {
                 }
             }
             Log.i(TAG, "Updated " + group + " feed " + index + ": " + title + ", cards=" + items.length());
+            android.content.Intent changed = new android.content.Intent("com.goblinmini.kinozalclient.FEED_CACHE_UPDATED");
+            changed.setPackage(context.getPackageName());
+            changed.putExtra("feed_group", group);
+            changed.putExtra("feed_index", index);
+            changed.putExtra("feed_path", path);
+            context.sendBroadcast(changed);
             HomeFeedScheduler.scheduleNext(context, group, index, path, title);
             return Result.success();
         } catch (SecurityException e) {
