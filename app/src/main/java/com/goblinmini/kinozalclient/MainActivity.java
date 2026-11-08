@@ -518,7 +518,9 @@ public class MainActivity extends Activity {
                 }
                 if (initialHomeFetchPending) {
                     initialHomeFetchPending = false;
-                    startInitialHomeBrowserLoad();
+                    if (currentPath == null || currentPath.isEmpty()) {
+                        startInitialHomeBrowserLoad();
+                    }
                 }
             });
         });
