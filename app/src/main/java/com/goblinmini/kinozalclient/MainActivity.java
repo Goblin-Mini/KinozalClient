@@ -64,6 +64,8 @@ public class MainActivity extends Activity {
     private int GOLD = Color.rgb(251, 226, 173);
     private static final int RED = Color.rgb(174, 55, 18);
     private static final int TEAL = Color.rgb(115, 164, 170);
+    private static final java.util.regex.Pattern LOGIN_PASSWORD_TYPE =
+            java.util.regex.Pattern.compile("\\btype\\s*=\\s*(['\\\"]?)password\\1");
     private static final String PREFS = "kinozal_settings";
     private static final String[] MIRRORS = {
             "https://kinozal.cloudns.nz", "https://kinozal.guru",
@@ -3805,8 +3807,7 @@ public class MainActivity extends Activity {
                 int tagEnd = lower.indexOf(">", inputStart);
                 if (tagEnd < 0 || tagEnd > formEnd) break;
                 String inputTag = lower.substring(inputStart, tagEnd + 1);
-                if (java.util.regex.Pattern.compile("\\btype\\s*=\\s*(['\\\"]?)password\\1")
-                        .matcher(inputTag).find()) return true;
+                if (LOGIN_PASSWORD_TYPE.matcher(inputTag).find()) return true;
                 inputStart = tagEnd + 1;
             }
             formStart = formEnd + 6;
