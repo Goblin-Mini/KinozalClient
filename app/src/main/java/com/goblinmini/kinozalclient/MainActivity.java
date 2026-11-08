@@ -2259,6 +2259,21 @@ public class MainActivity extends Activity {
             bar.setProgress(successCount);
         }
         status.setText("Обновлено лент: " + successCount + " из " + paths.length);
+
+        // Hide the completed bulk-refresh message automatically, but only if
+        // it has not been replaced by a newer refresh status in the meantime.
+        if (label != null) {
+            final String completedMessage = label.getText().toString();
+            browserHandler.postDelayed(() -> {
+                TextView currentLabel = feedRefreshStatusViews.get(group);
+                LinearLayout currentPanel = feedRefreshPanels.get(group);
+                if (!bulkFeedRefreshInProgress && currentLabel != null
+                        && currentPanel != null
+                        && completedMessage.contentEquals(currentLabel.getText())) {
+                    currentPanel.setVisibility(View.GONE);
+                }
+            }, 3500L);
+        }
     }
 
     private String feedButtonKey(String group, String path) { return group + "|" + path; }
