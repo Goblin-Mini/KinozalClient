@@ -1193,7 +1193,7 @@ public class MainActivity extends Activity {
             String script = buildHomeParallelExtractScript(batchPaths.toString(), feedIndex,
                     org.json.JSONObject.quote(currentHtml));
             long batchStarted = android.os.SystemClock.elapsedRealtime();
-            web.evaluateJavascript(script, value -> {
+            evaluateHomeParallelBatch(web, script, value -> {
                 try {
                     String json = new org.json.JSONArray("[" + value + "]").getString(0);
                     org.json.JSONArray results = new org.json.JSONArray(json);
@@ -1205,7 +1205,7 @@ public class MainActivity extends Activity {
                             continue;
                         }
                         int resultIndex = result.optInt("index", -1);
-                        if (resultIndex <= feedIndex || resultIndex >= batchEnd) {
+                        if (resultIndex < feedIndex || resultIndex >= batchEnd) {
                             batchOk = false;
                             continue;
                         }
@@ -1270,17 +1270,43 @@ public class MainActivity extends Activity {
                 + "return out;}catch(e){return [];}}"
                 + "var requests=" + pathsJson + ";"
                 + "var currentHtml=" + currentHtmlJson + ",currentIndex=" + currentIndex + ";"
-                + "return Promise.all(requests.map(function(r){"
+                + "window.__kinozalParallelResult=null;"
+                + "Promise.all(requests.map(function(r){"
                 + "var url=new URL(r.path,location.href).href;"
                 + "return fetch(url,{credentials:'include',cache:'no-store'}).then(function(resp){"
                 + "if(!resp.ok)throw new Error('HTTP '+resp.status+' '+r.path);"
                 + "return resp.text().then(function(html){var doc=new DOMParser().parseFromString(html,'text/html');"
                 + "return {ok:true,index:r.index,html:html,items:extract(doc,url)};});"
                 + "});})).then(function(rows){rows.unshift({ok:true,index:currentIndex,html:currentHtml,"
-                + "items:extract(document,document.baseURI)});return JSON.stringify(rows);})"
-                + ".catch(function(e){return JSON.stringify([{ok:true,index:currentIndex,html:currentHtml,"
+                + "items:extract(document,document.baseURI)});window.__kinozalParallelResult=JSON.stringify(rows);})"
+                + ".catch(function(e){window.__kinozalParallelResult=JSON.stringify([{ok:true,index:currentIndex,html:currentHtml,"
                 + "items:extract(document,document.baseURI)},{ok:false,error:String(e)}]);});"
-                + "})()";
+                + "return 'started';})()";
+    }
+
+    private void evaluateHomeParallelBatch(WebView web, String script,
+            java.util.function.Consumer<String> callback) {
+        final int[] attempts = {0};
+        web.evaluateJavascript("window.__kinozalParallelResult=null;" + script, ignored -> {
+            final Runnable[] poll = new Runnable[1];
+            poll[0] = () -> {
+                if (web != sessionWebView || isFinishing()) {
+                    callback.accept(null);
+                    return;
+                }
+                web.evaluateJavascript("window.__kinozalParallelResult", value -> {
+                    if (value != null && !"null".equals(value) && !"\\"\\"".equals(value)) {
+                        callback.accept(value);
+                    } else if (++attempts[0] >= 150) {
+                        appendFeedDiagnostic("PARALLEL_TIMEOUT", "fetch batch exceeded 15 seconds");
+                        callback.accept(null);
+                    } else {
+                        browserHandler.postDelayed(poll[0], 100);
+                    }
+                });
+            };
+            browserHandler.postDelayed(poll[0], 100);
+        });
     }
 
     private List<HomePoster> parseHomePostersFromJsonArray(org.json.JSONArray array) {
