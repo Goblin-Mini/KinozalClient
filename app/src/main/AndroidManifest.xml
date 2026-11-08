@@ -14,6 +14,14 @@
         android:banner="@drawable/kinozal_banner"
         android:theme="@style/AppTheme"
         android:usesCleartextTraffic="true">
+        <meta-data
+            android:name="com.tvvoicesearch.plugin.CAPABILITIES"
+            android:resource="@xml/plugin_capabilities" />
+        <provider
+            android:name=".KinozalSearchProvider"
+            android:authorities="ru.gm.ktv.search"
+            android:exported="true"
+            android:grantUriPermissions="true" />
         <provider
             android:name=".TorrentFileProvider"
             android:authorities="ru.gm.ktv.torrentprovider"
