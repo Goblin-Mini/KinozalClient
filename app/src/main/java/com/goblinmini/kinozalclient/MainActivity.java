@@ -1518,8 +1518,16 @@ public class MainActivity extends Activity {
 
     private void renderHome(List<HomeSection> sections) {
         list.removeAllViews();
+        LinearLayout actions = new LinearLayout(this);
+        actions.setGravity(Gravity.RIGHT | Gravity.CENTER_VERTICAL);
+        Button refreshAll = button("Обновить всё");
+        refreshAll.setTextSize(12);
+        refreshAll.setOnClickListener(v -> HomeFeedScheduler.refreshAll(getApplicationContext(),
+                "collections".equals(activeFeedScreen) ? "collections" : "home"));
+        actions.addView(refreshAll, new LinearLayout.LayoutParams(-2, dp(36)));
+        list.addView(actions, new LinearLayout.LayoutParams(-1, dp(42)));
         if (sections.isEmpty()) {
-            addEmpty("На главной пока нет подборок.");
+            addEmpty("Подборки пока не загружены.");
             return;
         }
         renderHomeSectionsIncrementally(sections);
@@ -1590,8 +1598,18 @@ public class MainActivity extends Activity {
     private void renderHomeSection(HomeSection section, int generation) {
         if (section == null || section.items.isEmpty()) return;
 
+        LinearLayout sectionHeader = new LinearLayout(this);
+        sectionHeader.setGravity(Gravity.CENTER_VERTICAL);
+        sectionHeader.setTag("home-title:" + section.path);
         TextView sectionTitle = text(section.title, 20, GOLD, true);
-        sectionTitle.setTag("home-title:" + section.path);
+        sectionHeader.addView(sectionTitle, new LinearLayout.LayoutParams(0, dp(38), 1f));
+        Button refreshFeed = button("↻");
+        refreshFeed.setTextSize(18);
+        refreshFeed.setContentDescription("Обновить ленту " + section.title);
+        refreshFeed.setOnClickListener(v -> HomeFeedScheduler.refreshNow(getApplicationContext(),
+                "collections".equals(activeFeedScreen) ? "collections" : "home",
+                getFeedIndex("collections".equals(activeFeedScreen) ? "collections" : "home", section.path)));
+        sectionHeader.addView(refreshFeed, new LinearLayout.LayoutParams(dp(42), dp(34)));
         LinearLayout.LayoutParams titleParams = new LinearLayout.LayoutParams(-1, dp(38));
         titleParams.topMargin = dp(10);
 
@@ -1612,14 +1630,14 @@ public class MainActivity extends Activity {
             if (titleTag.equals(list.getChildAt(i).getTag())) {
                 list.removeViewAt(i + 1);
                 list.removeViewAt(i);
-                list.addView(sectionTitle, i, titleParams);
+                list.addView(sectionHeader, i, titleParams);
                 list.addView(horizontal, i + 1, rowParams);
                 replaced = true;
                 break;
             }
         }
         if (!replaced) {
-            list.addView(sectionTitle, titleParams);
+            list.addView(sectionHeader, titleParams);
             list.addView(horizontal, rowParams);
         }
         horizontal.post(this::scheduleVisibleHomePosterLoad);
@@ -1648,6 +1666,12 @@ public class MainActivity extends Activity {
             });
         }
         scheduleNextHomeCardBuild(generation);
+    }
+
+    private int getFeedIndex(String group, String path) {
+        String[] paths = "collections".equals(group) ? COLLECTION_PATHS : HOME_PATHS;
+        for (int i = 0; i < paths.length; i++) if (paths[i].equals(path)) return i;
+        return -1;
     }
 
     private View createHomePosterCard(HomePoster item, HomeSection section) {
