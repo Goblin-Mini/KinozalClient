@@ -557,14 +557,16 @@ public class MainActivity extends Activity {
 
     private boolean deferBrowserNavigationIfBusy(Runnable navigation) {
         if (!browserFeedLoading && !tvChannelsRefreshInProgress) return false;
-        // Explicit user navigation has priority over background feed refresh.
-        // Invalidate the old sequence; its callback cannot schedule more pages.
+        // Do not start a second WebView navigation while a background page is
+        // still in flight. Invalidate its result, let its callback release the
+        // WebView, then run only the latest user navigation.
         browserFeedGeneration++;
         pendingFeedRefreshes.clear();
         refreshAllRunning = false;
-        browserFeedLoading = false;
-        pendingBrowserNavigation = null;
-        return false;
+        pendingBrowserNavigation = navigation;
+        progress.setVisibility(View.VISIBLE);
+        status.setText("Открываем выбранный раздел…");
+        return true;
     }
 
     private void runPendingBrowserNavigation() {
@@ -694,7 +696,11 @@ public class MainActivity extends Activity {
         progress.setVisibility(View.VISIBLE);
         status.setText("Обновляем: " + request.title);
         fetchBrowserPage(request.path, null, html -> {
-            if (generation != browserFeedGeneration) return;
+            if (generation != browserFeedGeneration) {
+                browserFeedLoading = false;
+                runPendingBrowserNavigation();
+                return;
+            }
             if (torrentDetailsOpen) {
                 browserFeedLoading = false;
                 return;
@@ -712,7 +718,11 @@ public class MainActivity extends Activity {
                     if (!parsed.items.isEmpty()) removeHomeDuplicates(java.util.Collections.singletonList(parsed));
                 } catch (Exception ignored) { }
                 runOnUiThread(() -> {
-                    if (generation != browserFeedGeneration) return;
+                    if (generation != browserFeedGeneration) {
+                        browserFeedLoading = false;
+                        runPendingBrowserNavigation();
+                        return;
+                    }
                     if (!parsed.items.isEmpty()) {
                         List<HomeSection> target = request.collection ? collectionSectionsMemory : homeSectionsMemory;
                         boolean replaced = false;
@@ -1144,7 +1154,11 @@ public class MainActivity extends Activity {
         }
 
         fetchBrowserPage(paths[index], null, html -> {
-            if (generation != browserFeedGeneration) return;
+            if (generation != browserFeedGeneration) {
+                browserFeedLoading = false;
+                runPendingBrowserNavigation();
+                return;
+            }
             // A torrent card took ownership of the authenticated WebView.
             // Stop the cancelled feed chain so it cannot restart over the detail page.
             if (torrentDetailsOpen) {
@@ -1185,7 +1199,11 @@ public class MainActivity extends Activity {
                 } catch (Exception ignored) { }
 
                 runOnUiThread(() -> {
-                    if (generation != browserFeedGeneration) return;
+                    if (generation != browserFeedGeneration) {
+                        browserFeedLoading = false;
+                        runPendingBrowserNavigation();
+                        return;
+                    }
                     if (torrentDetailsOpen) {
                         browserFeedLoading = false;
                         return;
