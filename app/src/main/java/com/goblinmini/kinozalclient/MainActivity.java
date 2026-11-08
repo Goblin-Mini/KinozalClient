@@ -104,9 +104,9 @@ public class MainActivity extends Activity {
     private List<HomeSection> homeDiskCacheSnapshot = new ArrayList<>();
     private boolean collectionsLoadedOnce = false;
     private android.content.BroadcastReceiver feedCacheReceiver;
-    private TextView feedRefreshStatus;
-    private ProgressBar feedRefreshProgress;
-    private LinearLayout feedRefreshPanel;
+    private final Map<String, TextView> feedRefreshStatusViews = new HashMap<>();
+    private final Map<String, ProgressBar> feedRefreshProgressViews = new HashMap<>();
+    private final Map<String, LinearLayout> feedRefreshPanels = new HashMap<>();
     private final Map<String, Button> feedRefreshButtons = new HashMap<>();
     private final Map<String, ObjectAnimator> feedRefreshAnimations = new HashMap<>();
     private List<HomeSection> collectionsSectionsMemory = new ArrayList<>();
@@ -1559,19 +1559,23 @@ public class MainActivity extends Activity {
         buttonRow.addView(refreshAll, new LinearLayout.LayoutParams(-2, dp(36)));
         actions.addView(buttonRow, new LinearLayout.LayoutParams(-1, dp(42)));
 
-        feedRefreshPanel = new LinearLayout(this);
+        String screenKey = "collections".equals(activeFeedScreen) ? "collections" : "home";
+        LinearLayout feedRefreshPanel = new LinearLayout(this);
         feedRefreshPanel.setOrientation(LinearLayout.VERTICAL);
         feedRefreshPanel.setPadding(dp(2), dp(3), dp(2), dp(8));
         feedRefreshPanel.setVisibility(View.GONE);
-        feedRefreshStatus = text("", 12, TEAL, false);
+        TextView feedRefreshStatus = text("", 12, TEAL, false);
         feedRefreshStatus.setSingleLine(false);
         feedRefreshPanel.addView(feedRefreshStatus, new LinearLayout.LayoutParams(-1, -2));
-        feedRefreshProgress = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
+        ProgressBar feedRefreshProgress = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
         feedRefreshProgress.setMax(100);
         feedRefreshProgress.setProgress(0);
         LinearLayout.LayoutParams progressParams = new LinearLayout.LayoutParams(-1, dp(4));
         progressParams.topMargin = dp(5);
         feedRefreshPanel.addView(feedRefreshProgress, progressParams);
+        feedRefreshPanels.put(screenKey, feedRefreshPanel);
+        feedRefreshStatusViews.put(screenKey, feedRefreshStatus);
+        feedRefreshProgressViews.put(screenKey, feedRefreshProgress);
         actions.addView(feedRefreshPanel, new LinearLayout.LayoutParams(-1, -2));
         list.addView(actions, 0, new LinearLayout.LayoutParams(-1, -2));
     }
@@ -1579,12 +1583,15 @@ public class MainActivity extends Activity {
     private String feedButtonKey(String group, String path) { return group + "|" + path; }
 
     private void showFeedRefreshQueued(String group, String title, int total, boolean bulk) {
-        if (!group.equals(activeFeedScreen) || feedRefreshPanel == null) return;
-        feedRefreshPanel.setVisibility(View.VISIBLE);
-        feedRefreshStatus.setText(bulk
+        LinearLayout panel = feedRefreshPanels.get(group);
+        TextView label = feedRefreshStatusViews.get(group);
+        ProgressBar bar = feedRefreshProgressViews.get(group);
+        if (panel == null || label == null || bar == null) return;
+        panel.setVisibility(View.VISIBLE);
+        label.setText(bulk
                 ? "В очереди " + total + " лент. Ожидаем запуск первой…"
                 : "Лента «" + title + "» поставлена в очередь…");
-        feedRefreshProgress.setIndeterminate(true);
+        bar.setIndeterminate(true);
     }
 
     private void stopFeedRefreshAnimation(String key) {
@@ -1618,40 +1625,43 @@ public class MainActivity extends Activity {
         int index = intent.getIntExtra("feed_index", 0);
         int total = Math.max(1, intent.getIntExtra("feed_total", 1));
         boolean bulk = intent.getBooleanExtra("feed_bulk", false);
+        LinearLayout panel = feedRefreshPanels.get(group);
+        TextView label = feedRefreshStatusViews.get(group);
+        ProgressBar bar = feedRefreshProgressViews.get(group);
         if ("running".equals(state)) {
-            if (visibleGroup && feedRefreshPanel != null) {
-                feedRefreshPanel.setVisibility(View.VISIBLE);
-                feedRefreshStatus.setText(bulk
+            if (visibleGroup && panel != null && label != null && bar != null) {
+                panel.setVisibility(View.VISIBLE);
+                label.setText(bulk
                         ? "Обновление лент: " + (index + 1) + " из " + total + " — " + title
                         : "Обновляется лента: " + title);
-                feedRefreshProgress.setIndeterminate(false);
-                feedRefreshProgress.setMax(total);
-                feedRefreshProgress.setProgress(index);
+                bar.setIndeterminate(false);
+                bar.setMax(total);
+                bar.setProgress(index);
             }
             startFeedRefreshAnimation(key);
         } else if ("success".equals(state)) {
             stopFeedRefreshAnimation(key);
-            if (visibleGroup && feedRefreshPanel != null) {
-                feedRefreshPanel.setVisibility(View.VISIBLE);
-                feedRefreshProgress.setIndeterminate(false);
-                feedRefreshProgress.setMax(total);
-                feedRefreshProgress.setProgress(Math.min(total, index + 1));
+            if (visibleGroup && panel != null && label != null && bar != null) {
+                panel.setVisibility(View.VISIBLE);
+                bar.setIndeterminate(false);
+                bar.setMax(total);
+                bar.setProgress(Math.min(total, index + 1));
                 if (bulk && index + 1 >= total) {
-                    feedRefreshStatus.setText("Все " + total + " лент обновлены");
+                    label.setText("Все " + total + " лент обновлены");
                 } else if (bulk) {
-                    feedRefreshStatus.setText("Готово " + (index + 1) + " из " + total
+                    label.setText("Готово " + (index + 1) + " из " + total
                             + ". Следующая лента будет обновляться по очереди");
                 } else {
-                    feedRefreshStatus.setText("Лента обновлена: " + title);
+                    label.setText("Лента обновлена: " + title);
                 }
             }
         } else if ("failure".equals(state)) {
             stopFeedRefreshAnimation(key);
-            if (visibleGroup && feedRefreshPanel != null) {
-                feedRefreshPanel.setVisibility(View.VISIBLE);
-                feedRefreshProgress.setIndeterminate(false);
-                feedRefreshProgress.setProgress(0);
-                feedRefreshStatus.setText("Ошибка обновления «" + title + "»: "
+            if (visibleGroup && panel != null && label != null && bar != null) {
+                panel.setVisibility(View.VISIBLE);
+                bar.setIndeterminate(false);
+                bar.setProgress(0);
+                label.setText("Ошибка обновления «" + title + "»: "
                         + intent.getStringExtra("refresh_error"));
             }
         }
