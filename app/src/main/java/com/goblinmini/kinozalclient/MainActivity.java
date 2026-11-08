@@ -2375,7 +2375,7 @@ public class MainActivity extends Activity {
         Button history = button("История");
         history.setTextSize(12);
         LinearLayout.LayoutParams historyParams = new LinearLayout.LayoutParams(dp(82), dp(48));
-        historyParams.rightMargin = dp(6);
+        historyParams.rightMargin = dp(10);
         searchBar.addView(history, historyParams);
         history.setOnClickListener(v -> showSearchHistory());
         Button find = button("Найти");
@@ -2699,7 +2699,7 @@ public class MainActivity extends Activity {
         bottomRow.addView(channelsButton, new LinearLayout.LayoutParams(0, dp(48), 1f));
         Button aboutButton = settingsPillButton("О приложении");
         LinearLayout.LayoutParams aboutParams = new LinearLayout.LayoutParams(0, dp(48), 1f);
-        aboutParams.leftMargin = dp(18);
+        aboutParams.leftMargin = dp(10);
         bottomRow.addView(aboutButton, aboutParams);
         page.addView(columns, new LinearLayout.LayoutParams(-1, 0, 1f));
         page.addView(bottomRow, new LinearLayout.LayoutParams(-1, dp(56)));
@@ -5439,7 +5439,7 @@ public class MainActivity extends Activity {
         Button[] tabButtons = {descriptionTab, technicalTab, screenshotsTab, commentsTab, jackettTab};
         for (int tabIndex = 0; tabIndex < tabButtons.length; tabIndex++) {
             LinearLayout.LayoutParams tabParams = new LinearLayout.LayoutParams(0, dp(44), 1);
-            if (tabIndex > 0) tabParams.leftMargin = dp(5);
+            if (tabIndex > 0) tabParams.leftMargin = dp(10);
             tabs.addView(tabButtons[tabIndex], tabParams);
         }
         detailsColumn.addView(tabs);
