@@ -2812,6 +2812,7 @@ public class MainActivity extends Activity {
                             else importUserBackup();
                         }).show());
         addSettingsAction(right, "Обновления", () -> new UpdateManager(this).check());
+        addSettingsAction(right, "Сохранить диагностику загрузки", () -> saveFeedDiagnostics());
 
         LinearLayout bottomRow = new LinearLayout(this);
         bottomRow.setOrientation(LinearLayout.HORIZONTAL);
