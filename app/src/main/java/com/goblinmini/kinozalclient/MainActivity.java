@@ -2610,42 +2610,56 @@ public class MainActivity extends Activity {
     private void showSettings() {
         LinearLayout page = new LinearLayout(this);
         page.setOrientation(LinearLayout.VERTICAL);
-        page.setPadding(dp(16), dp(12), dp(16), dp(10));
+        page.setPadding(dp(18), dp(16), dp(18), dp(14));
         page.setBackgroundColor(BG);
+
+        TextView heading = text("Настройки", 24, GOLD, true);
+        heading.setPadding(dp(4), 0, 0, dp(12));
+        page.addView(heading);
 
         LinearLayout columns = new LinearLayout(this);
         columns.setOrientation(LinearLayout.HORIZONTAL);
-        ScrollView leftScroll = new ScrollView(this);
-        ScrollView rightScroll = new ScrollView(this);
-        leftScroll.setFillViewport(false);
-        rightScroll.setFillViewport(false);
         LinearLayout left = new LinearLayout(this);
         LinearLayout right = new LinearLayout(this);
         left.setOrientation(LinearLayout.VERTICAL);
         right.setOrientation(LinearLayout.VERTICAL);
-        left.setPadding(0, 0, dp(7), 0);
-        right.setPadding(dp(7), 0, 0, 0);
-        leftScroll.addView(left);
-        rightScroll.addView(right);
-        columns.addView(leftScroll, new LinearLayout.LayoutParams(0, -1, 1f));
-        columns.addView(rightScroll, new LinearLayout.LayoutParams(0, -1, 1f));
-        page.addView(columns, new LinearLayout.LayoutParams(-1, 0, 1f));
+        left.setPadding(0, 0, dp(9), 0);
+        right.setPadding(dp(9), 0, 0, 0);
+        columns.addView(left, new LinearLayout.LayoutParams(0, -2, 1f));
+        columns.addView(right, new LinearLayout.LayoutParams(0, -2, 1f));
 
-        addSettingsAction(left, "Авторизация / проверка Kinozal", () -> showLogin());
-        addSettingsAction(left, "Выбрать зеркало Kinozal", () -> chooseMirror());
-        addSettingsAction(left, "Проверить обновления", () -> new UpdateManager(this).check());
-        addSettingsAction(left, "Стартовый раздел", () -> chooseStartupSource());
-        addSettingsAction(left, "Цвет акцента", () -> showAccentPicker());
+        addSettingsAction(left, "Авторизация", () -> showLogin());
+        addSettingsAction(left, "Синхронизация", () -> chooseStartupSource());
+        addSettingsAction(left, "Поиск Jackett", () -> showJackettSettings());
+        addSettingsAction(left, "Прокси", () -> showSocks5Settings());
+        addSettingsAction(left, "Очистить кэш", () -> confirmClearCache());
 
+        addSettingsAction(right, "Зеркало", () -> chooseMirror());
+        addSettingsAction(right, "Цвет акцента", () -> showAccentPicker());
+        addSettingsAction(right, "TorrServe", () -> showTorrServeSettings());
+        addSettingsAction(right, "Резервная копия", () -> new AlertDialog.Builder(this)
+                .setItems(new String[]{"Создать резервную копию", "Восстановить из копии"},
+                        (dialog, which) -> {
+                            if (which == 0) exportUserBackup();
+                            else importUserBackup();
+                        }).show());
+        addSettingsAction(right, "Обновления", () -> new UpdateManager(this).check());
+
+        LinearLayout bottomRow = new LinearLayout(this);
+        bottomRow.setOrientation(LinearLayout.HORIZONTAL);
+        bottomRow.setPadding(0, dp(8), 0, 0);
+        Button channelsButton = settingsPillButton("Каналы Android TV");
         boolean channelsOn = getSharedPreferences(PREFS, MODE_PRIVATE)
                 .getBoolean("tv_channels_enabled", true);
-        Button channelsButton = button("Каналы Android TV: " + (channelsOn ? "Вкл." : "Выкл."));
-        channelsButton.setTextSize(13);
-        channelsButton.setGravity(Gravity.CENTER_VERTICAL | Gravity.LEFT);
-        channelsButton.setPadding(dp(10), 0, dp(8), 0);
-        LinearLayout.LayoutParams channelsParams = new LinearLayout.LayoutParams(-1, dp(44));
-        channelsParams.topMargin = dp(5);
-        left.addView(channelsButton, channelsParams);
+        channelsButton.setText("Каналы Android TV: " + (channelsOn ? "Вкл." : "Выкл."));
+        bottomRow.addView(channelsButton, new LinearLayout.LayoutParams(0, dp(48), 1f));
+        Button aboutButton = settingsPillButton("О приложении");
+        LinearLayout.LayoutParams aboutParams = new LinearLayout.LayoutParams(0, dp(48), 1f);
+        aboutParams.leftMargin = dp(18);
+        bottomRow.addView(aboutButton, aboutParams);
+        page.addView(columns, new LinearLayout.LayoutParams(-1, 0, 1f));
+        page.addView(bottomRow, new LinearLayout.LayoutParams(-1, dp(56)));
+
         channelsButton.setOnClickListener(v -> {
             boolean enabled = !getSharedPreferences(PREFS, MODE_PRIVATE)
                     .getBoolean("tv_channels_enabled", true);
@@ -2660,35 +2674,50 @@ public class MainActivity extends Activity {
                 showMessage("Каналы Android TV отключены");
             }
         });
+        aboutButton.setOnClickListener(v -> showAbout());
 
-        addSettingsAction(left, "Резервная копия", () -> new AlertDialog.Builder(this)
-                .setItems(new String[]{"Создать резервную копию", "Восстановить из копии"},
-                        (dialog, which) -> {
-                            if (which == 0) exportUserBackup();
-                            else importUserBackup();
-                        }).show());
-        addSettingsAction(left, "Очистить кэш", () -> confirmClearCache());
-        addSettingsAction(left, "Поиск Jackett", () -> showJackettSettings());
-        addSettingsAction(left, "О приложении", () -> showAbout());
+        settingsDialog = new AlertDialog.Builder(this).setView(page).create();
+        settingsDialog.show();
+        if (settingsDialog.getWindow() != null) {
+            settingsDialog.getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(BG));
+            settingsDialog.getWindow().setLayout(ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.MATCH_PARENT);
+        }
+    }
 
+    private Button settingsPillButton(String title) {
+        Button b = button(title);
+        b.setTextSize(13);
+        b.setGravity(Gravity.CENTER);
+        return b;
+    }
+
+    private void showTorrServeSettings() {
+        LinearLayout panel = new LinearLayout(this);
+        panel.setOrientation(LinearLayout.VERTICAL);
+        panel.setPadding(dp(18), dp(12), dp(18), dp(10));
+        panel.setBackgroundColor(BG);
         torrServeAddressField = new EditText(this);
         torrServeAddressField.setSingleLine(true);
         torrServeAddressField.setText(getSharedPreferences(PREFS, MODE_PRIVATE)
                 .getString("torrserve_url", ""));
-        torrServeAddressField.setHint("Адрес внешнего TorrServe");
+        torrServeAddressField.setHint("http://адрес:8090");
         styleSettingsEdit(torrServeAddressField);
-        LinearLayout torrRow = new LinearLayout(this);
-        torrRow.setOrientation(LinearLayout.HORIZONTAL);
-        torrRow.setGravity(Gravity.CENTER_VERTICAL);
-        LinearLayout.LayoutParams addressParams = new LinearLayout.LayoutParams(0, dp(44), 1f);
-        torrRow.addView(torrServeAddressField, addressParams);
-        Button saveTorr = button("Сохранить");
-        saveTorr.setTextSize(12);
-        LinearLayout.LayoutParams saveParams = new LinearLayout.LayoutParams(dp(112), dp(44));
-        saveParams.leftMargin = dp(6);
-        torrRow.addView(saveTorr, saveParams);
-        right.addView(torrRow);
-        saveTorr.setOnClickListener(v -> {
+        panel.addView(torrServeAddressField, new LinearLayout.LayoutParams(-1, dp(46)));
+
+        LinearLayout actions = new LinearLayout(this);
+        actions.setOrientation(LinearLayout.HORIZONTAL);
+        Button save = settingsPillButton("Сохранить");
+        Button test = settingsPillButton("Проверить соединение");
+        actions.addView(save, new LinearLayout.LayoutParams(0, dp(46), 1f));
+        LinearLayout.LayoutParams testParams = new LinearLayout.LayoutParams(0, dp(46), 1f);
+        testParams.leftMargin = dp(8);
+        actions.addView(test, testParams);
+        panel.addView(actions);
+
+        AlertDialog dialog = new AlertDialog.Builder(this).setTitle("TorrServe")
+                .setView(panel).create();
+        save.setOnClickListener(v -> {
             String value = torrServeAddressField.getText().toString().trim().replaceAll("/+$", "");
             if (!value.isEmpty() && !validJackettBase(value)) {
                 showMessage("Укажите адрес с http:// или https://");
@@ -2697,15 +2726,12 @@ public class MainActivity extends Activity {
             getSharedPreferences(PREFS, MODE_PRIVATE).edit().putString("torrserve_url", value).apply();
             showMessage("Адрес TorrServe сохранён");
         });
-        addSettingsAction(right, "Проверить соединение с TorrServe", () -> checkTorrServeConnection());
-        addSettingsAction(right, "SOCKS5", () -> showSocks5Settings());
-
-        settingsDialog = new AlertDialog.Builder(this).setView(page).create();
-        settingsDialog.show();
-        if (settingsDialog.getWindow() != null) {
-            settingsDialog.getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(BG));
-            settingsDialog.getWindow().setLayout(ViewGroup.LayoutParams.MATCH_PARENT,
-                    ViewGroup.LayoutParams.MATCH_PARENT);
+        test.setOnClickListener(v -> checkTorrServeConnection());
+        dialog.show();
+        if (dialog.getWindow() != null) {
+            dialog.getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(BG));
+            dialog.getWindow().setLayout(Math.min(dp(680),
+                    getResources().getDisplayMetrics().widthPixels - dp(48)), -2);
         }
     }
 
@@ -2725,9 +2751,7 @@ public class MainActivity extends Activity {
                 connection.setReadTimeout(10000);
                 connection.setRequestMethod("GET");
                 int code = connection.getResponseCode();
-                if (code < 200 || code >= 300) {
-                    throw new java.io.IOException("HTTP " + code);
-                }
+                if (code < 200 || code >= 300) throw new java.io.IOException("HTTP " + code);
                 runOnUiThread(() -> showMessage("Соединение с TorrServe установлено"));
             } catch (Exception e) {
                 String error = safe(e.getMessage());
