@@ -2010,7 +2010,12 @@ public class MainActivity extends Activity {
             chip.setSingleLine(true);
             chip.setGravity(Gravity.CENTER);
             chip.setPadding(dp(8), dp(2), dp(8), dp(2));
-            chip.setBackground(shape(Color.rgb(39, 57, 61), dp(5)));
+            android.graphics.drawable.GradientDrawable chipBackground =
+                    new android.graphics.drawable.GradientDrawable();
+            chipBackground.setColor(Color.rgb(39, 57, 61));
+            chipBackground.setCornerRadius(dp(4));
+            chipBackground.setStroke(dp(1), TEAL);
+            chip.setBackground(chipBackground);
             LinearLayout.LayoutParams chipParams = new LinearLayout.LayoutParams(-2, dp(20));
             chipParams.rightMargin = dp(3);
             badgeRow.addView(chip, chipParams);
