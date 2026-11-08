@@ -3323,30 +3323,39 @@ public class MainActivity extends Activity {
         // Keep the selected category name visible while the old rows are gone
         // and the new page is being fetched.
         showPageLoading("Загрузка: " + title + "…");
-        // Catalogue requests use the authenticated native HTTP cookie jar,
-        // not the shared WebView navigation callback. This makes rapid category
-        // switches independent: responses are accepted only for the latest
-        // selection, while the HTTP client serializes access to its cookie jar.
-        io.execute(() -> {
-            try {
-                String html = postBody == null ? client.fetch(path) : client.fetchPost(path, postBody);
-                runOnUiThread(() -> {
-                    if (requestGeneration != catalogLoadGeneration) return;
-                    lastKinozalConnectionStatus = "установлено";
-                    updateSidebarConnectionInfo();
-                    showLoadedPage(html, path);
-                });
-            } catch (Exception e) {
-                runOnUiThread(() -> {
-                    if (requestGeneration != catalogLoadGeneration) return;
-                    lastKinozalConnectionStatus = "нет соединения";
-                    if (sidebarConnectionInfo != null) sidebarConnectionInfo.setText("Подключение к Kinozal: нет соединения");
-                    progress.setVisibility(View.GONE);
-                    status.setText("Нет соединения");
-                    addEmpty("Не удалось загрузить каталог. " + safe(e.getMessage()));
-                });
-            }
-        });
+        // Keep catalogue traffic inside the authenticated browser session.
+        // WebView navigation is serialized: while one category is loading, only
+        // the most recently selected category is queued. This prevents a late
+        // onPageFinished from an older navigation being assigned to a newer callback.
+        Runnable request = () -> {
+            if (requestGeneration != catalogLoadGeneration || isFinishing()) return;
+            catalogBrowserRequestInFlight = true;
+            fetchBrowserPage(path, postBody, html -> {
+                catalogBrowserRequestInFlight = false;
+                if (requestGeneration == catalogLoadGeneration) {
+                    if (html != null && !html.isEmpty()) {
+                        lastKinozalConnectionStatus = "установлено";
+                        updateSidebarConnectionInfo();
+                        showLoadedPage(html, path);
+                    } else {
+                        lastKinozalConnectionStatus = "нет соединения";
+                        if (sidebarConnectionInfo != null) sidebarConnectionInfo.setText("Подключение к Kinozal: нет соединения");
+                        progress.setVisibility(View.GONE);
+                        status.setText("Нет соединения");
+                        addEmpty("Не удалось загрузить каталог через браузерную сессию. " + safe(lastBrowserError));
+                    }
+                }
+                Runnable next = pendingCatalogBrowserRequest;
+                pendingCatalogBrowserRequest = null;
+                if (next != null) browserHandler.post(next);
+            });
+        };
+        if (catalogBrowserRequestInFlight) {
+            // Replace any queued intermediate choice; the last selection wins.
+            pendingCatalogBrowserRequest = request;
+        } else {
+            request.run();
+        }
     }
 
     private void restoreBrowserSession(String cookieHeader) {
@@ -3632,6 +3641,9 @@ public class MainActivity extends Activity {
     // Separates category requests so a slow response from the previous page
     // cannot replace the category the user selected most recently.
     private int catalogLoadGeneration = 0;
+    // Only one catalogue navigation may own the shared authenticated WebView at a time.
+    private boolean catalogBrowserRequestInFlight = false;
+    private Runnable pendingCatalogBrowserRequest;
 
     private String catalogCacheKey(String path) {
         return "catalog_page_" + Integer.toHexString((client.getMirror() + "|" + path).hashCode());
