@@ -1053,9 +1053,15 @@ public class MainActivity extends Activity {
         if (index == 0 && retry == 0 && paths == HOME_PATHS) startHomePerformanceMonitor();
         if (index >= paths.length) {
             removeHomeDuplicates(sections);
-            if (paths == HOME_PATHS) {
+            if (paths == HOME_PATHS || paths == COLLECTION_PATHS) {
                 List<HomeSection> channelSnapshot = new ArrayList<>(sections);
-                io.execute(() -> saveHomeModel(channelSnapshot));
+                if (paths == HOME_PATHS) {
+                    homeSectionsMemory = new ArrayList<>(sections);
+                    io.execute(() -> saveHomeModel(channelSnapshot));
+                } else {
+                    collectionSectionsMemory = new ArrayList<>(sections);
+                    io.execute(() -> saveFeedModel(channelSnapshot, true));
+                }
             }
             // Re-render the final de-duplicated model. This replaces each row
             // in place, so cards discarded by final normalization disappear too.
@@ -1120,8 +1126,8 @@ public class MainActivity extends Activity {
 
                 runOnUiThread(() -> {
                     if (!section.items.isEmpty()) {
-                        // Keep parsing/network refresh independent from UI construction.
-                        // The final normalized snapshot is rendered once below.
+                        // Only a successfully parsed feed advances its own refresh clock.
+                        markScreenRefreshed("feed:" + (paths == COLLECTION_PATHS ? "c:" : "h:") + paths[index]);
                         sections.add(section);
                     }
                     status.setText("Показано лент: " + sections.size());
@@ -1735,6 +1741,11 @@ public class MainActivity extends Activity {
 
     private void renderHome(List<HomeSection> sections) {
         list.removeAllViews();
+        Button refreshAll = button("Обновить всё");
+        refreshAll.setOnClickListener(v -> refreshAllFeeds());
+        LinearLayout.LayoutParams refreshParams = new LinearLayout.LayoutParams(-2, dp(42));
+        refreshParams.topMargin = dp(4); refreshParams.bottomMargin = dp(6);
+        list.addView(refreshAll, refreshParams);
         if (sections.isEmpty()) {
             addEmpty("На главной пока нет подборок.");
             return;
@@ -1807,9 +1818,17 @@ public class MainActivity extends Activity {
     private void renderHomeSection(HomeSection section, int generation) {
         if (section == null || section.items.isEmpty()) return;
 
+        LinearLayout sectionHeader = new LinearLayout(this);
+        sectionHeader.setGravity(Gravity.CENTER_VERTICAL);
+        sectionHeader.setTag("home-title:" + section.path);
         TextView sectionTitle = text(section.title, 20, GOLD, true);
-        sectionTitle.setTag("home-title:" + section.path);
-        LinearLayout.LayoutParams titleParams = new LinearLayout.LayoutParams(-1, dp(38));
+        sectionHeader.addView(sectionTitle, new LinearLayout.LayoutParams(0, dp(38), 1f));
+        Button refreshOne = button("Обновить");
+        refreshOne.setTextSize(11);
+        refreshOne.setOnClickListener(v -> refreshSingleFeed(section.path, section.title,
+                COLLECTION_PATHS != null && java.util.Arrays.asList(COLLECTION_PATHS).contains(section.path)));
+        sectionHeader.addView(refreshOne, new LinearLayout.LayoutParams(-2, dp(34)));
+        LinearLayout.LayoutParams titleParams = new LinearLayout.LayoutParams(-1, dp(40));
         titleParams.topMargin = dp(10);
 
         android.widget.HorizontalScrollView horizontal = new android.widget.HorizontalScrollView(this);
@@ -1829,14 +1848,14 @@ public class MainActivity extends Activity {
             if (titleTag.equals(list.getChildAt(i).getTag())) {
                 list.removeViewAt(i + 1);
                 list.removeViewAt(i);
-                list.addView(sectionTitle, i, titleParams);
+                list.addView(sectionHeader, i, titleParams);
                 list.addView(horizontal, i + 1, rowParams);
                 replaced = true;
                 break;
             }
         }
         if (!replaced) {
-            list.addView(sectionTitle, titleParams);
+            list.addView(sectionHeader, titleParams);
             list.addView(horizontal, rowParams);
         }
         horizontal.post(this::scheduleVisibleHomePosterLoad);
