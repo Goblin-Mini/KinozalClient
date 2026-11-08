@@ -3217,11 +3217,13 @@ public class MainActivity extends Activity {
         results.setOrientation(LinearLayout.VERTICAL);
         scroll.addView(results);
         panel.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1));
-        AlertDialog dialog = new AlertDialog.Builder(this).setTitle("Другие раздачи")
-                .setView(panel).setNegativeButton("Закрыть", null).create();
-        dialog.setOnShowListener(ignored -> {
-            dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setTextColor(GOLD);
-        });
+        TextView dialogTitle = text("Другие раздачи", 20, GOLD, true);
+        dialogTitle.setTypeface(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.BOLD);
+        dialogTitle.setPadding(dp(4), dp(6), dp(4), dp(10));
+        panel.addView(dialogTitle, 0);
+        // No bottom Close button: Android TV Back dismisses this dialog.
+        AlertDialog dialog = new AlertDialog.Builder(this)
+                .setView(panel).create();
         dialog.show();
         if (dialog.getWindow() != null) {
             dialog.getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(BG));
@@ -3320,7 +3322,7 @@ public class MainActivity extends Activity {
                     String metaValue = (tracker.isEmpty() ? "" : tracker + "  ·  ")
                             + "Размер: " + size + "  ·  Сиды: " + seeders + "  ·  Пиры: " + peers;
                     android.text.SpannableString metaText = new android.text.SpannableString(metaValue);
-                    int trackerColor = Color.rgb(170, 205, 180);
+                    int trackerColor = Color.rgb(241, 210, 156); // pastel orange accent
                     int trackerStart = 0;
                     if (!tracker.isEmpty()) {
                         metaText.setSpan(new android.text.style.ForegroundColorSpan(trackerColor),
@@ -5015,6 +5017,9 @@ public class MainActivity extends Activity {
         java.util.LinkedHashSet<String> uniqueComments = new java.util.LinkedHashSet<>();
         for (Element comment : doc.select("div.tx")) {
             String value = comment.wholeText().replace('\u00a0', ' ')
+                    // Some page fragments contain escaped line breaks as literal characters.
+                    .replace("\\\\n", "\\n")
+                    .replace("\\\\r", "\\n")
                     .replaceAll("[\\t\\x0B\\f\\r]+", " ")
                     .replaceAll(" *\\n *", "\\n")
                     .replaceAll(" {2,}", " ").trim();
