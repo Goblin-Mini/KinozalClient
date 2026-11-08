@@ -1880,7 +1880,7 @@ public class MainActivity extends Activity {
         refreshFeed.setGravity(Gravity.CENTER);
         refreshFeed.setIncludeFontPadding(false);
         refreshFeed.setPadding(0, 0, 0, 0);
-        refreshFeed.setTranslationY(0f);
+        refreshFeed.setTranslationY(-dp(5));
         refreshFeed.setContentDescription("Обновить ленту " + section.title);
         refreshFeed.setOnClickListener(v -> {
             int feedIndex = getFeedIndex(feedGroup, section.path);
@@ -2300,6 +2300,9 @@ public class MainActivity extends Activity {
                 iconPaint.setStrokeWidth(dp(2.1f));
                 iconPaint.setStrokeCap(android.graphics.Paint.Cap.ROUND);
                 float cx = getWidth() / 2f;
+                canvas.save();
+                canvas.translate(0, -dp(5));
+                canvas.scale(0.85f, 0.85f, cx, getHeight() / 2f);
                 float top = getHeight() / 2f - dp(10);
                 float bottom = getHeight() / 2f + dp(2);
                 float micWidth = dp(6);
@@ -2309,6 +2312,7 @@ public class MainActivity extends Activity {
                         0, 180, false, iconPaint);
                 canvas.drawLine(cx, bottom + dp(9), cx, bottom + dp(14), iconPaint);
                 canvas.drawLine(cx - dp(6), bottom + dp(14), cx + dp(6), bottom + dp(14), iconPaint);
+                canvas.restore();
             }
         };
         voiceSearch.setContentDescription("Голосовой поиск");
