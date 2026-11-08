@@ -68,6 +68,8 @@ public final class KinozalHttpClient {
                 .putString(USER_AGENT_KEY, userAgent).apply();
     }
 
+    public String getUserAgent() { return userAgent; }
+
     /** Route native HTTP requests through the app-owned local SOCKS5 bridge. */
     public void setProxy(java.net.Proxy proxy) {
         networkProxy = proxy == null ? java.net.Proxy.NO_PROXY : proxy;
