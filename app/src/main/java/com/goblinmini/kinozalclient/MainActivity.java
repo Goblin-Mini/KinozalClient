@@ -104,13 +104,15 @@ public class MainActivity extends Activity {
         boolean rendered;
         boolean viewBuilt;
         boolean loading;
+        final String postBody;
         List<Torrent> items = new ArrayList<>();
-        ScreenState(String key, String title, ScrollView scroll, LinearLayout list) {
-            this.key = key; this.title = title; this.scroll = scroll; this.list = list;
+        ScreenState(String key, String title, ScrollView scroll, LinearLayout list, String postBody) {
+            this.key = key; this.title = title; this.scroll = scroll; this.list = list; this.postBody = postBody;
             this.catalog = !"home".equals(key) && !"collections".equals(key);
         }
     }
     private TextView heading, status;
+    private Button screenRefreshButton;
     private ProgressBar progress;
     private EditText search;
     private View focusedTorrentSource;
@@ -219,6 +221,7 @@ public class MainActivity extends Activity {
             }
         };
         buildShell();
+        browserHandler.postDelayed(screenTtlRefresh, SCREEN_TTL_MS);
         // Read the last successful home snapshot off the UI thread. This runs
         // alongside proxy/session initialization so a returning user sees
         // useful content before the sequential WebView refresh begins.
@@ -1944,10 +1947,19 @@ public class MainActivity extends Activity {
             sidebar.addView(line, new LinearLayout.LayoutParams(-1, -2));
         }
 
+        LinearLayout headingBar = new LinearLayout(this);
+        headingBar.setGravity(Gravity.CENTER_VERTICAL);
         heading = text("Главная", 25, GOLD, true);
+        LinearLayout.LayoutParams headingTextParams = new LinearLayout.LayoutParams(0, dp(42), 1f);
+        headingBar.addView(heading, headingTextParams);
+        screenRefreshButton = button("↻");
+        screenRefreshButton.setTextSize(22);
+        screenRefreshButton.setContentDescription("Обновить текущий экран");
+        headingBar.addView(screenRefreshButton, new LinearLayout.LayoutParams(dp(48), dp(38)));
+        screenRefreshButton.setOnClickListener(v -> refreshActiveScreen());
         LinearLayout.LayoutParams headingParams = new LinearLayout.LayoutParams(-1, dp(42));
         headingParams.bottomMargin = dp(4);
-        main.addView(heading, headingParams);
+        main.addView(headingBar, headingParams);
 
         LinearLayout searchBar = new LinearLayout(this); searchBar.setGravity(Gravity.CENTER_VERTICAL);
         search = new EditText(this);
@@ -2044,7 +2056,7 @@ public class MainActivity extends Activity {
         screenHost.addView(homeScrollView, new FrameLayout.LayoutParams(-1, -1));
         main.addView(screenHost, new LinearLayout.LayoutParams(-1, 0, 1));
         homeScreenList = list;
-        activeScreen = new ScreenState("home", "Главная", homeScrollView, list);
+        activeScreen = new ScreenState("home", "Главная", homeScrollView, list, null);
         screenCache.put("home", activeScreen);
         homeScrollView.setOnScrollChangeListener((View v, int x, int y, int oldX, int oldY) -> {
             if (y != oldY) scheduleVisibleHomePosterLoad();
@@ -3022,7 +3034,7 @@ public class MainActivity extends Activity {
             LinearLayout screenList = new LinearLayout(this);
             screenList.setOrientation(LinearLayout.VERTICAL);
             scroll.addView(screenList);
-            state = new ScreenState(key, title, scroll, screenList);
+            state = new ScreenState(key, title, scroll, screenList, postBody);
             screenCache.put(key, state);
             screenHost.addView(scroll, new FrameLayout.LayoutParams(-1, -1));
             scroll.setVisibility(View.GONE);
@@ -3053,6 +3065,27 @@ public class MainActivity extends Activity {
         }
         if ("home".equals(state.key)) scheduleVisibleHomePosterLoad();
     }
+
+    private void refreshActiveScreen() {
+        ScreenState state = activeScreen;
+        if (state == null) return;
+        state.loadedAt = 0L;
+        if ("home".equals(state.key)) loadInitialCatalog(0);
+        else if ("collections".equals(state.key)) loadCollections();
+        else load(currentPath, currentTitle, state.postBody);
+    }
+
+    private final Runnable screenTtlRefresh = new Runnable() {
+        @Override public void run() {
+            if (isFinishing()) return;
+            ScreenState state = activeScreen;
+            if (state != null && state.rendered && state.loadedAt > 0L
+                    && System.currentTimeMillis() - state.loadedAt >= SCREEN_TTL_MS) {
+                refreshActiveScreen();
+            }
+            browserHandler.postDelayed(this, SCREEN_TTL_MS);
+        }
+    };
 
     private void load(String path, String title) { load(path, title, null); }
 
@@ -5439,5 +5472,5 @@ public class MainActivity extends Activity {
     private String safe(String s) { return s == null ? "Ошибка сети" : s; }
 
     @Override public void onBackPressed() { finish(); }
-    @Override protected void onDestroy() { if (socks5Bridge != null) socks5Bridge.stop(); io.shutdownNow(); imageIo.shutdownNow(); homeRefreshIo.shutdownNow(); super.onDestroy(); }
+    @Override protected void onDestroy() { browserHandler.removeCallbacks(screenTtlRefresh); if (socks5Bridge != null) socks5Bridge.stop(); io.shutdownNow(); imageIo.shutdownNow(); homeRefreshIo.shutdownNow(); super.onDestroy(); }
 }
