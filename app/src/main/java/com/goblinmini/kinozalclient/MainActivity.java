@@ -98,6 +98,7 @@ public class MainActivity extends Activity {
     private ScrollView activeFeedScrollView;
     private String activeFeedScreen = "home";
     private boolean homeLoadedOnce = false;
+    private List<HomeSection> homeDiskCacheSnapshot = new ArrayList<>();
     private boolean collectionsLoadedOnce = false;
     private android.content.BroadcastReceiver feedCacheReceiver;
     private List<HomeSection> collectionsSectionsMemory = new ArrayList<>();
@@ -562,9 +563,7 @@ public class MainActivity extends Activity {
     }
 
     private void preloadHomeCache() {
-        String startupSource = getSharedPreferences(PREFS, MODE_PRIVATE)
-                .getString("startup_source", "home");
-        if (!"home".equals(startupSource) || !pendingTvTorrentHref.isEmpty()) {
+        if (!pendingTvTorrentHref.isEmpty()) {
             homeCacheLoadFinished = true;
             return;
         }
@@ -572,24 +571,22 @@ public class MainActivity extends Activity {
             List<HomeSection> cached = readHomeModel();
             runOnUiThread(() -> {
                 homeCacheLoadFinished = true;
-                // Restore the persisted Home snapshot on Activity/process recreation.
-                // The previous condition accidentally restored it only while the
-                // "Все раздачи" page was open, so a normal return always refetched feeds.
-                if (cached != null && !cached.isEmpty() && !isFinishing()
-                        && (currentPath == null || currentPath.isEmpty())
-                        && "home".equals(getSharedPreferences(PREFS, MODE_PRIVATE)
-                                .getString("startup_source", "home"))) {
-                    homeSectionsMemory = new ArrayList<>(cached);
+                homeDiskCacheSnapshot = cached == null ? new ArrayList<>() : new ArrayList<>(cached);
+                if (!homeDiskCacheSnapshot.isEmpty()) {
+                    homeSectionsMemory = new ArrayList<>(homeDiskCacheSnapshot);
                     homeCacheDisplayed = true;
                     homeLoadedOnce = true;
-                    renderHome(cached);
-                    status.setText("Главная · восстановлена из кэша");
-                    HomeFeedScheduler.scheduleInitial(getApplicationContext(), "home");
+                    // Only attach Home when it is the currently selected startup page.
+                    if ((currentPath == null || currentPath.isEmpty())
+                            && "home".equals(getSharedPreferences(PREFS, MODE_PRIVATE)
+                                    .getString("startup_source", "home"))) {
+                        renderCachedHomeIfNeeded();
+                        status.setText("Главная · восстановлена из кэша");
+                        HomeFeedScheduler.scheduleInitial(getApplicationContext(), "home");
+                    }
                 }
                 if (initialHomeFetchPending) {
                     initialHomeFetchPending = false;
-                    // A valid persisted snapshot is already the ready screen.
-                    // Scheduled WorkManager refreshes update it independently.
                     if (!homeLoadedOnce && (currentPath == null || currentPath.isEmpty())) {
                         startInitialHomeBrowserLoad();
                     }
@@ -598,12 +595,21 @@ public class MainActivity extends Activity {
         });
     }
 
+    private void renderCachedHomeIfNeeded() {
+        if (homeList == null || homeSectionsMemory.isEmpty() || homeList.getChildCount() > 0) return;
+        LinearLayout previous = list;
+        list = homeList;
+        renderHome(homeSectionsMemory);
+        list = previous;
+    }
+
     private void loadInitialCatalog(int startupRetry) {
         activateFeedScreen("home");
         currentPath = "";
         currentTitle = "Главная";
         heading.setText("Главная");
         if (homeLoadedOnce) {
+            renderCachedHomeIfNeeded();
             status.setText("Главная · сохранённый экран");
             return;
         }
