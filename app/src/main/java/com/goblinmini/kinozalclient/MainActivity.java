@@ -93,6 +93,7 @@ public class MainActivity extends Activity {
     private ScrollView collectionsScrollView;
     private LinearLayout homeList, collectionsList;
     private ViewGroup feedScreenParent;
+    private ScrollView activeFeedScrollView;
     private String activeFeedScreen = "home";
     private boolean homeLoadedOnce = false;
     private boolean collectionsLoadedOnce = false;
@@ -2030,6 +2031,7 @@ public class MainActivity extends Activity {
         homeScrollView.addView(homeList);
         main.addView(homeScrollView, new LinearLayout.LayoutParams(-1, 0, 1));
         feedScreenParent = main;
+        activeFeedScrollView = homeScrollView;
         homeScrollView.setOnScrollChangeListener((View v, int x, int y, int oldX, int oldY) -> {
             if (y != oldY) scheduleVisibleHomePosterLoad();
         });
@@ -2053,11 +2055,10 @@ public class MainActivity extends Activity {
             });
         }
         ScrollView target = collections ? collectionsScrollView : homeScrollView;
-        if (target == null || target == (collections ? homeScrollView : collectionsScrollView)) return;
-        View current = "collections".equals(activeFeedScreen) ? collectionsScrollView : homeScrollView;
+        if (target == null) return;
+        View current = activeFeedScrollView;
         if (current == target) {
             list = collections ? collectionsList : homeList;
-            homeScrollView = target;
             activeFeedScreen = screen;
             return;
         }
@@ -2067,7 +2068,7 @@ public class MainActivity extends Activity {
         if (target.getParent() instanceof ViewGroup) ((ViewGroup) target.getParent()).removeView(target);
         feedScreenParent.addView(target, params);
         list = collections ? collectionsList : homeList;
-        homeScrollView = target;
+        activeFeedScrollView = target;
         activeFeedScreen = screen;
         scheduleVisibleHomePosterLoad();
     }
