@@ -1667,7 +1667,9 @@ public class MainActivity extends Activity {
                         homeSectionsMemory = model;
                         saveHomeModel(model);
                     }
-                    if (group.equals(activeFeedScreen)) renderHomeSection(refreshed);
+                    if (group.equals(activeFeedScreen)) {
+                        renderHomeSection(refreshed, homeRenderGeneration, true);
+                    }
                     Intent success = new Intent();
                     success.putExtra("feed_group", group);
                     success.putExtra("feed_path", path);
@@ -1863,10 +1865,15 @@ public class MainActivity extends Activity {
 
     /** Append a feed shell immediately, then construct poster cards over separate UI frames. */
     private void renderHomeSection(HomeSection section) {
-        renderHomeSection(section, homeRenderGeneration);
+        renderHomeSection(section, homeRenderGeneration, false);
     }
 
     private void renderHomeSection(HomeSection section, int generation) {
+        renderHomeSection(section, generation, false);
+    }
+
+    /** Build a refreshed row independently of the shared initial-screen card queue. */
+    private void renderHomeSection(HomeSection section, int generation, boolean immediate) {
         if (section == null || section.items.isEmpty()) return;
 
         LinearLayout sectionHeader = new LinearLayout(this);
@@ -1933,30 +1940,38 @@ public class MainActivity extends Activity {
         }
         horizontal.post(this::scheduleVisibleHomePosterLoad);
 
-        final long[] startedAt = {0L};
-        final int[] cardIndex = {0};
-        final int cardCount = section.items.size();
-        for (HomePoster item : section.items) {
-            homeCardBuildQueue.addLast(() -> {
-                if (generation != homeRenderGeneration || isFinishing()) return;
-                long cardStartedAt = android.os.SystemClock.elapsedRealtime();
-                if (startedAt[0] == 0L) startedAt[0] = cardStartedAt;
+        if (immediate) {
+            // Replace and build only this feed. Other rows and their pending work remain intact.
+            for (HomePoster item : section.items) {
                 strip.addView(createHomePosterCard(item, section));
-                long cardDuration = android.os.SystemClock.elapsedRealtime() - cardStartedAt;
-                if (cardDuration >= 32L) {
-                    Log.w("KinozalPerf", "home card build=" + cardDuration
-                            + "ms, title=" + section.title);
-                }
-                cardIndex[0]++;
-                if (cardIndex[0] == cardCount) {
-                    long duration = android.os.SystemClock.elapsedRealtime() - startedAt[0];
-                    Log.i("KinozalPerf", "home row complete=" + duration + "ms, title="
-                            + section.title + ", cards=" + cardCount);
-                    scheduleVisibleHomePosterLoad();
-                }
-            });
+            }
+            horizontal.post(this::scheduleVisibleHomePosterLoad);
+        } else {
+            final long[] startedAt = {0L};
+            final int[] cardIndex = {0};
+            final int cardCount = section.items.size();
+            for (HomePoster item : section.items) {
+                homeCardBuildQueue.addLast(() -> {
+                    if (generation != homeRenderGeneration || isFinishing()) return;
+                    long cardStartedAt = android.os.SystemClock.elapsedRealtime();
+                    if (startedAt[0] == 0L) startedAt[0] = cardStartedAt;
+                    strip.addView(createHomePosterCard(item, section));
+                    long cardDuration = android.os.SystemClock.elapsedRealtime() - cardStartedAt;
+                    if (cardDuration >= 32L) {
+                        Log.w("KinozalPerf", "home card build=" + cardDuration
+                                + "ms, title=" + section.title);
+                    }
+                    cardIndex[0]++;
+                    if (cardIndex[0] == cardCount) {
+                        long duration = android.os.SystemClock.elapsedRealtime() - startedAt[0];
+                        Log.i("KinozalPerf", "home row complete=" + duration
+                                + "ms, title=" + section.title + ", cards=" + cardCount);
+                        scheduleVisibleHomePosterLoad();
+                    }
+                });
+            }
+            scheduleNextHomeCardBuild(generation);
         }
-        scheduleNextHomeCardBuild(generation);
     }
 
     private int getFeedIndex(String group, String path) {
