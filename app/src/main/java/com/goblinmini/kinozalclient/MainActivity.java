@@ -1148,11 +1148,16 @@ public class MainActivity extends Activity {
                         // Only a successfully parsed feed advances its own refresh clock.
                         markScreenRefreshed("feed:" + (paths == COLLECTION_PATHS ? "c:" : "h:") + paths[index]);
                         sections.add(section);
+                        // Show each completed row immediately instead of leaving the
+                        // entire screen blank until every feed has been fetched.
+                        renderHomeSection(section);
                     }
                     status.setText("Показано лент: " + sections.size());
                     setHomeProgress(index + 1, paths.length, sections.size());
+                    // Keep requests serialized to avoid triggering Kinozal rate limits,
+                    // but a five-minute gap made the initial screen look permanently empty.
                     browserHandler.postDelayed(() -> loadHomeSectionsInBrowser(
-                            paths, titles, index + 1, sections, 0), 5L * 60L * 1000L);
+                            paths, titles, index + 1, sections, 0), 1800);
                 });
             });
         });
