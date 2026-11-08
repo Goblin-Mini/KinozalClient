@@ -206,10 +206,6 @@ public class MainActivity extends Activity {
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
-        // Cloudflare requires a live JavaScript browser context. Cancel legacy
-        // native HTTP WorkManager jobs; manual refreshes now run in sessionWebView.
-        androidx.work.WorkManager.getInstance(this).cancelAllWorkByTag("kinozal-feed-home");
-        androidx.work.WorkManager.getInstance(this).cancelAllWorkByTag("kinozal-feed-collections");
         GOLD = getAccentColor(getSharedPreferences(PREFS, MODE_PRIVATE).getString("accent_color", "gold"));
         readTvLaunchIntent(getIntent());
         mirror = getSharedPreferences(PREFS, MODE_PRIVATE).getString("mirror", MIRRORS[0]);
@@ -562,6 +558,7 @@ public class MainActivity extends Activity {
             collectionsLoadedOnce = true;
             renderHome(cached);
             status.setText("Подборки из кэша");
+            HomeFeedScheduler.scheduleInitial(getApplicationContext(), "collections");
             return;
         }
         if (collectionsLoadedOnce) return;
@@ -593,6 +590,7 @@ public class MainActivity extends Activity {
                                     .getString("startup_source", "home"))) {
                         renderCachedHomeIfNeeded();
                         status.setText("Главная · восстановлена из кэша");
+                        HomeFeedScheduler.scheduleInitial(getApplicationContext(), "home");
                     }
                 }
                 if (initialHomeFetchPending) {
@@ -864,9 +862,11 @@ public class MainActivity extends Activity {
             if (!sections.isEmpty() && paths == HOME_PATHS) {
                 homeSectionsMemory = new ArrayList<>(sections);
                 homeLoadedOnce = true;
+                HomeFeedScheduler.scheduleInitial(getApplicationContext(), "home");
             } else if (!sections.isEmpty() && paths == COLLECTION_PATHS) {
                 collectionsSectionsMemory = new ArrayList<>(sections);
                 collectionsLoadedOnce = true;
+                HomeFeedScheduler.scheduleInitial(getApplicationContext(), "collections");
             }
             progress.setVisibility(View.GONE);
             browserFeedLoading = false;
