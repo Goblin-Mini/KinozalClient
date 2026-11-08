@@ -121,6 +121,14 @@ public class MainActivity extends Activity {
     private boolean browserFeedLoading = false;
     private Runnable pendingBrowserNavigation;
     private List<HomeSection> homeSectionsMemory = new ArrayList<>();
+    private List<HomeSection> collectionSectionsMemory = new ArrayList<>();
+    private boolean refreshAllRunning = false;
+    private final java.util.ArrayDeque<FeedRefreshRequest> pendingFeedRefreshes = new java.util.ArrayDeque<>();
+    private static final class FeedRefreshRequest {
+        final String path, title;
+        final boolean collection;
+        FeedRefreshRequest(String p, String t, boolean c) { path=p; title=t; collection=c; }
+    }
     // Keep already-built native screens attached to their own cache entry.
     // Switching feeds swaps the existing view instead of rebuilding its cards.
     private final java.util.LinkedHashMap<String, LinearLayout> screenViewCache =
@@ -551,9 +559,16 @@ public class MainActivity extends Activity {
         currentPath = "collections";
         currentTitle = "Подборки";
         heading.setText("Подборки");
-        if (isScreenFresh("collections", COLLECTION_REFRESH_INTERVAL_MS)) {
+        if (!collectionSectionsMemory.isEmpty() && list.getChildCount() == 0) {
+            renderHome(collectionSectionsMemory);
+        }
+        if (!collectionSectionsMemory.isEmpty() && areAllFeedsFresh(COLLECTION_PATHS, true)) {
             progress.setVisibility(View.GONE);
-            status.setText("Подборки · сохранённые ленты");
+            status.setText("Подборки · все ленты актуальны");
+            return;
+        }
+        if (!collectionSectionsMemory.isEmpty()) {
+            queueDueFeeds(true);
             return;
         }
         browserFeedLoading = true;
@@ -584,6 +599,163 @@ public class MainActivity extends Activity {
         getSharedPreferences(PREFS, MODE_PRIVATE).edit()
                 .putLong(refreshPreferenceKey(key), now).apply();
         feedRefreshTimes.put(key, now);
+    }
+
+    private boolean areAllFeedsFresh(String[] paths, boolean collection) {
+        long ttl = collection ? COLLECTION_REFRESH_INTERVAL_MS : HOME_REFRESH_INTERVAL_MS;
+        for (String path : paths) if (!isScreenFresh("feed:" + (collection ? "c:" : "h:") + path, ttl)) return false;
+        return true;
+    }
+
+    private void queueDueFeeds(boolean collection) {
+        if (refreshAllRunning || browserFeedLoading) return;
+        String[] paths = collection ? COLLECTION_PATHS : HOME_PATHS;
+        String[] titles = collection ? COLLECTION_TITLES : HOME_TITLES;
+        long ttl = collection ? COLLECTION_REFRESH_INTERVAL_MS : HOME_REFRESH_INTERVAL_MS;
+        pendingFeedRefreshes.clear();
+        for (int i = 0; i < paths.length; i++) {
+            if (!isScreenFresh("feed:" + (collection ? "c:" : "h:") + paths[i], ttl))
+                pendingFeedRefreshes.addLast(new FeedRefreshRequest(paths[i], titles[i], collection));
+        }
+        runNextQueuedFeedRefresh();
+    }
+
+    private void refreshSingleFeed(String path, String title, boolean collection) {
+        pendingFeedRefreshes.clear();
+        pendingFeedRefreshes.addLast(new FeedRefreshRequest(path, title, collection));
+        runNextQueuedFeedRefresh();
+    }
+
+    private void refreshAllFeeds() {
+        if (refreshAllRunning || browserFeedLoading) return;
+        pendingFeedRefreshes.clear();
+        for (int i = 0; i < HOME_PATHS.length; i++)
+            pendingFeedRefreshes.addLast(new FeedRefreshRequest(HOME_PATHS[i], HOME_TITLES[i], false));
+        for (int i = 0; i < COLLECTION_PATHS.length; i++)
+            pendingFeedRefreshes.addLast(new FeedRefreshRequest(COLLECTION_PATHS[i], COLLECTION_TITLES[i], true));
+        refreshAllRunning = true;
+        runNextQueuedFeedRefresh();
+    }
+
+    private void runNextQueuedFeedRefresh() {
+        if (browserFeedLoading) return;
+        FeedRefreshRequest request = pendingFeedRefreshes.pollFirst();
+        if (request == null) {
+            refreshAllRunning = false;
+            progress.setVisibility(View.GONE);
+            status.setText("Обновление завершено");
+            return;
+        }
+        browserFeedLoading = true;
+        if (sessionWebView == null) restoreBrowserSession("");
+        progress.setVisibility(View.VISIBLE);
+        status.setText("Обновляем: " + request.title);
+        fetchBrowserPage(request.path, null, html -> {
+            if (html == null || html.isEmpty()) {
+                browserFeedLoading = false;
+                status.setText("Не удалось обновить «" + request.title + "» · сохранённые данные оставлены");
+                scheduleNextQueuedFeedRefresh();
+                return;
+            }
+            io.execute(() -> {
+                HomeSection parsed = new HomeSection(request.title, request.path);
+                try {
+                    parsed.items.addAll(parseHomePosters(Jsoup.parse(html, client.getMirror() + "/")));
+                    if (!parsed.items.isEmpty()) removeHomeDuplicates(java.util.Collections.singletonList(parsed));
+                } catch (Exception ignored) { }
+                runOnUiThread(() -> {
+                    if (!parsed.items.isEmpty()) {
+                        List<HomeSection> target = request.collection ? collectionSectionsMemory : homeSectionsMemory;
+                        boolean replaced = false;
+                        for (int i = 0; i < target.size(); i++) if (request.path.equals(target.get(i).path)) {
+                            target.set(i, parsed); replaced = true; break;
+                        }
+                        if (!replaced) target.add(parsed);
+                        if ((request.collection && "collections".equals(currentPath))
+                                || (!request.collection && (currentPath == null || currentPath.isEmpty()))) {
+                            renderHomeSection(parsed, ++homeRenderGeneration);
+                        }
+                        List<HomeSection> snapshot = new ArrayList<>(target);
+                        io.execute(() -> saveFeedModel(snapshot, request.collection));
+                        markScreenRefreshed("feed:" + (request.collection ? "c:" : "h:") + request.path);
+                    }
+                    browserFeedLoading = false;
+                    scheduleNextQueuedFeedRefresh();
+                });
+            });
+        });
+    }
+
+    private void scheduleNextQueuedFeedRefresh() {
+        if (pendingFeedRefreshes.isEmpty()) {
+            refreshAllRunning = false;
+            progress.setVisibility(View.GONE);
+            status.setText("Обновление завершено");
+            return;
+        }
+        // Kinozal is rate-limited: keep a five-minute gap between feed requests.
+        browserHandler.postDelayed(this::runNextQueuedFeedRefresh, 5L * 60L * 1000L);
+    }
+
+    private void saveFeedModel(List<HomeSection> sections, boolean collection) {
+        if (!collection) { saveHomeModel(sections); return; }
+        saveModelToFile(sections, new java.io.File(getFilesDir(), "kinozal_collections_model_v1.json"));
+    }
+
+    private void saveModelToFile(List<HomeSection> sections, java.io.File target) {
+        try {
+            org.json.JSONArray feeds = new org.json.JSONArray();
+            for (HomeSection section : sections) {
+                org.json.JSONObject feed = new org.json.JSONObject();
+                feed.put("title", section.title); feed.put("path", section.path);
+                org.json.JSONArray items = new org.json.JSONArray();
+                for (HomePoster poster : section.items) {
+                    org.json.JSONObject item = new org.json.JSONObject();
+                    item.put("title", poster.torrent.title); item.put("href", poster.torrent.href);
+                    item.put("size", poster.torrent.size); item.put("seeds", poster.torrent.seeds);
+                    item.put("leeches", poster.torrent.leeches); item.put("uploaded", poster.torrent.uploaded);
+                    item.put("image", poster.imageUrl); items.put(item);
+                }
+                feed.put("items", items); feeds.put(feed);
+            }
+            org.json.JSONObject rootJson = new org.json.JSONObject();
+            rootJson.put("version", 1); rootJson.put("mirror", client.getMirror());
+            rootJson.put("savedAt", System.currentTimeMillis()); rootJson.put("feeds", feeds);
+            java.io.File temp = new java.io.File(target.getParentFile(), target.getName() + ".tmp");
+            try (java.io.FileOutputStream stream = new java.io.FileOutputStream(temp)) {
+                stream.write(rootJson.toString().getBytes(StandardCharsets.UTF_8)); stream.getFD().sync();
+            }
+            if (target.exists()) target.delete();
+            temp.renameTo(target);
+        } catch (Exception ignored) { }
+    }
+
+    private List<HomeSection> readModelFromFile(java.io.File file) {
+        if (!file.isFile() || file.length() <= 0 || file.length() > 8L * 1024L * 1024L) return null;
+        try {
+            org.json.JSONObject rootJson = new org.json.JSONObject(new String(
+                    java.nio.file.Files.readAllBytes(file.toPath()), StandardCharsets.UTF_8));
+            if (rootJson.optInt("version") != 1 || !client.getMirror().equals(rootJson.optString("mirror"))) return null;
+            org.json.JSONArray feeds = rootJson.optJSONArray("feeds");
+            if (feeds == null) return null;
+            List<HomeSection> result = new ArrayList<>();
+            for (int i=0;i<feeds.length();i++) {
+                org.json.JSONObject feed=feeds.optJSONObject(i); if(feed==null) continue;
+                HomeSection section=new HomeSection(feed.optString("title"),feed.optString("path"));
+                org.json.JSONArray items=feed.optJSONArray("items"); if(items==null) continue;
+                for(int j=0;j<items.length();j++) {
+                    org.json.JSONObject value=items.optJSONObject(j); if(value==null) continue;
+                    HomePoster p=new HomePoster(); p.torrent=new Torrent();
+                    p.torrent.title=value.optString("title"); p.torrent.href=value.optString("href");
+                    p.torrent.size=value.optString("size","—"); p.torrent.seeds=value.optString("seeds","—");
+                    p.torrent.leeches=value.optString("leeches","—"); p.torrent.uploaded=value.optString("uploaded","");
+                    p.imageUrl=value.optString("image");
+                    if(!p.torrent.title.isEmpty()&&!p.torrent.href.isEmpty()) section.items.add(p);
+                }
+                if(!section.items.isEmpty()) result.add(section);
+            }
+            return result;
+        } catch(Exception ignored) { return null; }
     }
 
     private void activateCachedScreen(String key) {
@@ -658,6 +830,15 @@ public class MainActivity extends Activity {
 
     private void startInitialHomeBrowserLoad() {
         if (browserFeedLoading) return;
+        if (homeCacheDisplayed && areAllFeedsFresh(HOME_PATHS, false)) {
+            status.setText("Главная · все ленты актуальны");
+            progress.setVisibility(View.GONE);
+            return;
+        }
+        if (homeCacheDisplayed) {
+            queueDueFeeds(false);
+            return;
+        }
         browserFeedLoading = true;
         currentPath = "";
         currentTitle = "Главная";
