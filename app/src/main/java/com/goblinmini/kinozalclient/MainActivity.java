@@ -1909,7 +1909,8 @@ public class MainActivity extends Activity {
         refreshFeed.setGravity(Gravity.CENTER);
         refreshFeed.setIncludeFontPadding(false);
         refreshFeed.setPadding(0, 0, 0, 0);
-        refreshFeed.setTranslationY(0);
+        // Lift the glyph slightly so its visual center sits on the crossbar of the section's "Н".
+        refreshFeed.setTranslationY(-dp(4));
         refreshFeed.setContentDescription("Обновить ленту " + section.title);
         refreshFeed.setOnClickListener(v -> {
             int feedIndex = getFeedIndex(feedGroup, section.path);
@@ -3975,7 +3976,10 @@ public class MainActivity extends Activity {
                         paint.setStrokeWidth(dp(3.2f));
                         paint.setStrokeCap(android.graphics.Paint.Cap.ROUND);
                         paint.setStrokeJoin(android.graphics.Paint.Join.ROUND);
-                        float cx = getWidth() / 2f, top = dp(7), bottom = getHeight() - dp(7);
+                        float cx = getWidth() / 2f;
+                        canvas.save();
+                        canvas.scale(0.70f, 0.70f, cx, getHeight() / 2f);
+                        float top = dp(7), bottom = getHeight() - dp(7);
                         float w = dp(29), left = cx - w / 2f, right = cx + w / 2f;
                         canvas.drawRoundRect(cx - dp(8), top, cx + dp(8), top + dp(7), dp(3), dp(3), paint);
                         canvas.drawRoundRect(left - dp(5), top + dp(10), right + dp(5), top + dp(18), dp(7), dp(7), paint);
@@ -3991,6 +3995,7 @@ public class MainActivity extends Activity {
                             float x = cx + i * dp(8);
                             canvas.drawLine(x, top + dp(28), x, bottom - dp(5), paint);
                         }
+                        canvas.restore();
                     }
                 };
                 delete.setContentDescription(recentList ? "Удалить из истории" : "Удалить из избранного");
@@ -4003,7 +4008,9 @@ public class MainActivity extends Activity {
                     if (recentList) removeRecentlyViewed(t.href);
                     else removeFavorite(t.href);
                 });
-                itemRow.addView(delete, new LinearLayout.LayoutParams(dp(52), dp(54)));
+                LinearLayout.LayoutParams deleteParams = new LinearLayout.LayoutParams(dp(52), dp(54));
+                deleteParams.leftMargin = dp(10);
+                itemRow.addView(delete, deleteParams);
             }
             list.addView(itemRow, itemParams);
         }
