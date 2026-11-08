@@ -133,7 +133,6 @@ public class MainActivity extends Activity {
     private String activeScreenKey = "home";
     private static final long HOME_REFRESH_INTERVAL_MS = 2L * 60L * 60L * 1000L;
     private static final long COLLECTION_REFRESH_INTERVAL_MS = 3L * 60L * 60L * 1000L;
-    private static final long CATEGORY_REFRESH_INTERVAL_MS = 2L * 60L * 60L * 1000L;
     private boolean refreshQueueRunning;
     private final java.util.ArrayDeque<Runnable> scheduledRefreshQueue = new java.util.ArrayDeque<>();
     private final java.util.Map<String, Long> feedRefreshTimes = new java.util.HashMap<>();
@@ -3033,20 +3032,8 @@ public class MainActivity extends Activity {
 
     private void load(String path, String title, String postBody) {
         if (deferBrowserNavigationIfBusy(() -> load(path, title, postBody))) return;
-        activateCachedScreen("category:" + path);
         currentPath = path; currentTitle = title; heading.setText(title);
-        if (postBody == null && isScreenFresh("category:" + path, CATEGORY_REFRESH_INTERVAL_MS)
-                && list.getChildCount() > 0) {
-            progress.setVisibility(View.GONE);
-            status.setText("Категория · сохранённый экран");
-            return;
-        }
-        if (list.getChildCount() == 0) {
-            showPageLoading("Загрузка каталога…");
-        } else {
-            progress.setVisibility(View.VISIBLE);
-            status.setText("Обновляем каталог · сохранённые данные остаются на экране");
-        }
+        showPageLoading("Загрузка каталога…");
         if (sessionWebView != null) {
             fetchBrowserPage(path, postBody, html -> {
                 if (html != null && !html.isEmpty()) {
@@ -3252,7 +3239,6 @@ public class MainActivity extends Activity {
         torrents.clear(); torrents.addAll(parsed);
         setCatalogStatus("Раздач", parsed.size());
         renderTorrents(parsed);
-        markScreenRefreshed("category:" + currentPath);
         if (parsed.isEmpty()) addEmpty("Страница загружена, но раздачи не найдены. Возможно, фильтр не применился.");
     }
     private List<Torrent> parseTorrents(Document doc) {
