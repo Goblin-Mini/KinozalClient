@@ -806,7 +806,14 @@ public class MainActivity extends Activity {
             // Reconcile duplicate cards without rebuilding every row in one frame.
             renderHomeSectionsIncrementally(sections);
             int total = countHomeCards(sections);
-            if (!sections.isEmpty() && paths == HOME_PATHS) homeSectionsMemory = new ArrayList<>(sections);
+            if (!sections.isEmpty() && paths == HOME_PATHS) {
+                homeSectionsMemory = new ArrayList<>(sections);
+                // Schedule independent refresh chains only after the first valid
+                // browser-authenticated snapshot has been obtained.
+                HomeFeedScheduler.scheduleInitial(getApplicationContext(), "home");
+            } else if (!sections.isEmpty() && paths == COLLECTION_PATHS) {
+                HomeFeedScheduler.scheduleInitial(getApplicationContext(), "collections");
+            }
             progress.setVisibility(View.GONE);
             browserFeedLoading = false;
             if (paths == HOME_PATHS && pendingBrowserNavigation == null) {
