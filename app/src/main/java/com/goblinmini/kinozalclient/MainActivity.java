@@ -1902,7 +1902,7 @@ public class MainActivity extends Activity {
         Button refreshFeed = button("⟳");
         // Icon-only refresh control: no button plate, only the glyph changes color on focus.
         refreshFeed.setTextSize(20);
-        refreshFeed.setTextColor(TEAL);
+        refreshFeed.setTextColor(Color.rgb(192, 198, 202)); // Серебристый
         refreshFeed.setMinWidth(0);
         refreshFeed.setMinimumWidth(0);
         refreshFeed.setMinHeight(0);
@@ -1913,7 +1913,7 @@ public class MainActivity extends Activity {
         refreshFeed.setBackgroundColor(Color.TRANSPARENT);
         refreshFeed.setTranslationY(-dp(4));
         refreshFeed.setOnFocusChangeListener((v, focused) -> {
-            refreshFeed.setTextColor(focused ? GOLD : TEAL);
+            refreshFeed.setTextColor(focused ? GOLD : Color.rgb(192, 198, 202));
             refreshFeed.setBackgroundColor(Color.TRANSPARENT);
         });
         refreshFeed.setContentDescription("Обновить ленту " + section.title);
