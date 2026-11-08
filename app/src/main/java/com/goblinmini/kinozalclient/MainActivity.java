@@ -5,6 +5,7 @@ import android.content.Intent;
 import android.net.Uri;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
+import android.util.LruCache;
 import android.widget.ImageView;
 import android.app.AlertDialog;
 import android.graphics.Color;
@@ -72,6 +73,7 @@ public class MainActivity extends Activity {
     private KinozalHttpClient client;
     private Socks5ProxyBridge socks5Bridge;
     private DiskCache diskCache;
+    private LruCache<String, Bitmap> decodedImageCache;
     private String mirror;
     private String currentPath = "browse.php";
     private String currentTitle = "Все раздачи";
@@ -145,6 +147,13 @@ public class MainActivity extends Activity {
         mirror = getSharedPreferences(PREFS, MODE_PRIVATE).getString("mirror", MIRRORS[0]);
         client = new KinozalHttpClient(this, mirror);
         diskCache = new DiskCache(this, 200L * 1024L * 1024L);
+        int bitmapCacheBytes = (int) Math.min(16L * 1024L * 1024L,
+                Math.max(2L * 1024L * 1024L, Runtime.getRuntime().maxMemory() / 8L));
+        decodedImageCache = new LruCache<String, Bitmap>(bitmapCacheBytes) {
+            @Override protected int sizeOf(String key, Bitmap value) {
+                return value == null ? 0 : value.getAllocationByteCount();
+            }
+        };
         buildShell();
         socks5Bridge = new Socks5ProxyBridge(this);
         String savedBrowserCookies = client.getSavedBrowserCookies();
@@ -1164,18 +1173,61 @@ public class MainActivity extends Activity {
         });
     }
 
+    private Bitmap decodeImageForView(byte[] bytes, ImageView target) {
+        if (bytes == null || bytes.length == 0) return null;
+        BitmapFactory.Options bounds = new BitmapFactory.Options();
+        bounds.inJustDecodeBounds = true;
+        BitmapFactory.decodeByteArray(bytes, 0, bytes.length, bounds);
+        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null;
+        int targetWidth = target == null ? 0 : target.getWidth();
+        int targetHeight = target == null ? 0 : target.getHeight();
+        if (targetWidth <= 0 && target != null && target.getLayoutParams() != null)
+            targetWidth = target.getLayoutParams().width;
+        if (targetHeight <= 0 && target != null && target.getLayoutParams() != null)
+            targetHeight = target.getLayoutParams().height;
+        if (targetWidth <= 0) targetWidth = dp(240);
+        if (targetHeight <= 0) targetHeight = dp(360);
+        BitmapFactory.Options options = new BitmapFactory.Options();
+        options.inSampleSize = 1;
+        while (bounds.outWidth / (options.inSampleSize * 2) >= targetWidth
+                && bounds.outHeight / (options.inSampleSize * 2) >= targetHeight)
+            options.inSampleSize *= 2;
+        options.inPreferredConfig = Bitmap.Config.RGB_565;
+        options.inDither = true;
+        return BitmapFactory.decodeByteArray(bytes, 0, bytes.length, options);
+    }
+
+    private Bitmap getCachedImageBitmap(String imageUrl) {
+        return decodedImageCache == null ? null : decodedImageCache.get(imageUrl);
+    }
+
+    private void cacheImageBitmap(String imageUrl, Bitmap bitmap) {
+        if (decodedImageCache != null && imageUrl != null && bitmap != null && !bitmap.isRecycled())
+            decodedImageCache.put(imageUrl, bitmap);
+    }
+
     private void loadImageIntoView(String imageUrl, ImageView target) {
         loadImageIntoView(imageUrl, target, client.getMirror() + "/");
     }
 
     private void loadImageIntoView(String imageUrl, ImageView target, String referer) {
         if (imageUrl == null || imageUrl.isEmpty() || target == null) return;
-        // DiskCache.get() performs file I/O. Never call it while building home rows.
+        Bitmap memoryBitmap = getCachedImageBitmap(imageUrl);
+        if (memoryBitmap != null) {
+            target.setImageBitmap(memoryBitmap);
+            return;
+        }
         imageIo.execute(() -> {
+            Bitmap ready = getCachedImageBitmap(imageUrl);
+            if (ready != null) {
+                runOnUiThread(() -> { if (target.getParent() != null) target.setImageBitmap(ready); });
+                return;
+            }
             byte[] cachedImage = diskCache.get("image|" + imageUrl, 0L);
             if (cachedImage != null && cachedImage.length > 0) {
-                Bitmap cachedBitmap = BitmapFactory.decodeByteArray(cachedImage, 0, cachedImage.length);
+                Bitmap cachedBitmap = decodeImageForView(cachedImage, target);
                 if (cachedBitmap != null) {
+                    cacheImageBitmap(imageUrl, cachedBitmap);
                     runOnUiThread(() -> { if (target.getParent() != null) target.setImageBitmap(cachedBitmap); });
                     return;
                 }
@@ -1202,7 +1254,8 @@ public class MainActivity extends Activity {
                         try {
                             byte[] bytes = android.util.Base64.decode(base64, android.util.Base64.DEFAULT);
                             diskCache.put("image|" + imageUrl, bytes);
-                            Bitmap bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.length);
+                            Bitmap bitmap = decodeImageForView(bytes, target);
+                            cacheImageBitmap(imageUrl, bitmap);
                             if (bitmap != null) runOnUiThread(() -> {
                                 if (target.getParent() != null) target.setImageBitmap(bitmap);
                             });
@@ -1228,7 +1281,8 @@ public class MainActivity extends Activity {
                     if (bytes == null || bytes.length == 0) return;
                     diskCache.put("image|" + imageUrl, bytes);
                 }
-                Bitmap bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.length);
+                Bitmap bitmap = decodeImageForView(bytes, target);
+                cacheImageBitmap(imageUrl, bitmap);
                 if (bitmap != null) runOnUiThread(() -> {
                     if (target.getParent() != null) target.setImageBitmap(bitmap);
                 });
