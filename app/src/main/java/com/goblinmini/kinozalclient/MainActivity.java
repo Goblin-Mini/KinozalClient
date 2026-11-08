@@ -1900,7 +1900,8 @@ public class MainActivity extends Activity {
         final String feedGroup = getFeedIndex("collections", section.path) >= 0
                 ? "collections" : "home";
         Button refreshFeed = button("⟳");
-        refreshFeed.setTextSize(14);
+        // Match the refresh glyph to the capital-letter height and center it on the title's midline.
+        refreshFeed.setTextSize(20);
         refreshFeed.setMinWidth(0);
         refreshFeed.setMinimumWidth(0);
         refreshFeed.setMinHeight(0);
@@ -1908,7 +1909,6 @@ public class MainActivity extends Activity {
         refreshFeed.setGravity(Gravity.CENTER);
         refreshFeed.setIncludeFontPadding(false);
         refreshFeed.setPadding(0, 0, 0, 0);
-        // Keep the compact refresh control vertically centered with the section title.
         refreshFeed.setTranslationY(0);
         refreshFeed.setContentDescription("Обновить ленту " + section.title);
         refreshFeed.setOnClickListener(v -> {
@@ -1919,7 +1919,7 @@ public class MainActivity extends Activity {
             }
             refreshFeedInBrowser(feedGroup, feedIndex, section.path, section.title, false, 1);
         });
-        LinearLayout.LayoutParams refreshParams = new LinearLayout.LayoutParams(dp(26), dp(26));
+        LinearLayout.LayoutParams refreshParams = new LinearLayout.LayoutParams(dp(38), dp(38));
         refreshParams.rightMargin = dp(10);
         sectionHeader.addView(refreshFeed, refreshParams);
         String refreshButtonKey = feedButtonKey(feedGroup, section.path);
@@ -2332,8 +2332,8 @@ public class MainActivity extends Activity {
                 iconPaint.setStrokeCap(android.graphics.Paint.Cap.ROUND);
                 float cx = getWidth() / 2f;
                 canvas.save();
-                canvas.translate(0, -dp(5));
-                canvas.scale(0.85f, 0.85f, cx, getHeight() / 2f);
+                canvas.translate(0, -dp(2));
+                canvas.scale(0.72f, 0.72f, cx, getHeight() / 2f);
                 float top = getHeight() / 2f - dp(10);
                 float bottom = getHeight() / 2f + dp(2);
                 float micWidth = dp(6);
@@ -2374,7 +2374,10 @@ public class MainActivity extends Activity {
         searchBar.addView(searchField, searchParams);
         Button history = button("История");
         history.setTextSize(12);
-        LinearLayout.LayoutParams historyParams = new LinearLayout.LayoutParams(dp(82), dp(48));
+        history.setMinWidth(0);
+        history.setMinimumWidth(0);
+        history.setTranslationY(dp(3));
+        LinearLayout.LayoutParams historyParams = new LinearLayout.LayoutParams(dp(92), dp(44));
         historyParams.rightMargin = dp(10);
         searchBar.addView(history, historyParams);
         history.setOnClickListener(v -> showSearchHistory());
