@@ -4669,7 +4669,7 @@ public class MainActivity extends Activity {
         FrameLayout webContainer = new FrameLayout(this);
         webContainer.setFocusable(false);
         TvWebCursorView tvCursor = new TvWebCursorView(this, web);
-        tvCursor.setVisibility(View.VISIBLE);
+        tvCursor.setVisibility(View.GONE);
         webContainer.addView(web, new FrameLayout.LayoutParams(-1, -1));
         webContainer.addView(tvCursor, new FrameLayout.LayoutParams(-1, -1));
         panel.addView(webContainer, new LinearLayout.LayoutParams(-1, 0, 1f));
@@ -4684,11 +4684,9 @@ public class MainActivity extends Activity {
                 web.requestFocus();
             }
         });
-        webContainer.post(() -> {
-            tvCursor.setCursorPosition(webContainer.getWidth() * 0.12f,
-                    webContainer.getHeight() * 0.18f);
-            tvCursor.requestFocus();
-        });
+        webContainer.post(() -> tvCursor.setCursorPosition(
+                webContainer.getWidth() * 0.12f,
+                webContainer.getHeight() * 0.18f + dp(36)));
 
         AlertDialog dialog = new AlertDialog.Builder(this)
                 .setView(panel)
@@ -4801,10 +4799,13 @@ public class MainActivity extends Activity {
         dialog.getWindow().setLayout(
                 (int)(getResources().getDisplayMetrics().widthPixels * 0.90f),
                 (int)(getResources().getDisplayMetrics().heightPixels * 0.90f));
+        cursorToggle.setFocusable(true);
+        cursorToggle.setFocusableInTouchMode(true);
+        cursorToggle.post(cursorToggle::requestFocus);
         web.post(() -> {
             web.requestLayout();
-            web.requestFocus();
             web.loadUrl(base + "/login.php?m=5");
+            cursorToggle.post(cursorToggle::requestFocus);
         });
     }
 
