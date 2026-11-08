@@ -90,6 +90,13 @@ public class MainActivity extends Activity {
     private final java.util.Set<String> detailPrefetchScheduled = new java.util.HashSet<>();
     private LinearLayout root, sidebar, content, list, menuItems;
     private ScrollView homeScrollView;
+    private ScrollView collectionsScrollView;
+    private LinearLayout homeList, collectionsList;
+    private ViewGroup feedScreenParent;
+    private String activeFeedScreen = "home";
+    private boolean homeLoadedOnce = false;
+    private boolean collectionsLoadedOnce = false;
+    private List<HomeSection> collectionsSectionsMemory = new ArrayList<>();
     private TextView heading, status;
     private ProgressBar progress;
     private EditText search;
@@ -523,10 +530,26 @@ public class MainActivity extends Activity {
 
     private void loadCollections() {
         if (deferBrowserNavigationIfBusy(this::loadCollections)) return;
-        browserFeedLoading = true;
+        activateFeedScreen("collections");
         currentPath = "collections";
         currentTitle = "Подборки";
         heading.setText("Подборки");
+        if (!collectionsSectionsMemory.isEmpty()) {
+            collectionsLoadedOnce = true;
+            status.setText("Показано лент: " + collectionsSectionsMemory.size());
+            return;
+        }
+        List<HomeSection> cached = readCollectionsModel();
+        if (cached != null && !cached.isEmpty()) {
+            collectionsSectionsMemory = new ArrayList<>(cached);
+            collectionsLoadedOnce = true;
+            renderHome(cached);
+            status.setText("Подборки из кэша");
+            HomeFeedScheduler.scheduleInitial(getApplicationContext(), "collections");
+            return;
+        }
+        if (collectionsLoadedOnce) return;
+        browserFeedLoading = true;
         showPageLoading("Загрузка подборок через WebView…");
         if (sessionWebView == null) restoreBrowserSession("");
         browserHandler.postDelayed(() -> loadHomeSectionsInBrowser(
@@ -569,9 +592,14 @@ public class MainActivity extends Activity {
     }
 
     private void loadInitialCatalog(int startupRetry) {
+        activateFeedScreen("home");
         currentPath = "";
         currentTitle = "Главная";
         heading.setText("Главная");
+        if (homeLoadedOnce) {
+            status.setText("Главная · сохранённый экран");
+            return;
+        }
         if (!homeCacheLoadFinished) {
             initialHomeFetchPending = true;
             progress.setVisibility(View.VISIBLE);
@@ -582,7 +610,8 @@ public class MainActivity extends Activity {
     }
 
     private void startInitialHomeBrowserLoad() {
-        if (browserFeedLoading) return;
+        activateFeedScreen("home");
+        if (homeLoadedOnce || browserFeedLoading) return;
         browserFeedLoading = true;
         currentPath = "";
         currentTitle = "Главная";
@@ -800,6 +829,9 @@ public class MainActivity extends Activity {
             if (paths == HOME_PATHS) {
                 List<HomeSection> channelSnapshot = new ArrayList<>(sections);
                 io.execute(() -> saveHomeModel(channelSnapshot));
+            } else if (paths == COLLECTION_PATHS) {
+                List<HomeSection> collectionSnapshot = new ArrayList<>(sections);
+                io.execute(() -> saveCollectionsModel(collectionSnapshot));
             }
             // Re-render the final de-duplicated model. This replaces each row
             // in place, so cards discarded by final normalization disappear too.
@@ -808,10 +840,11 @@ public class MainActivity extends Activity {
             int total = countHomeCards(sections);
             if (!sections.isEmpty() && paths == HOME_PATHS) {
                 homeSectionsMemory = new ArrayList<>(sections);
-                // Schedule independent refresh chains only after the first valid
-                // browser-authenticated snapshot has been obtained.
+                homeLoadedOnce = true;
                 HomeFeedScheduler.scheduleInitial(getApplicationContext(), "home");
             } else if (!sections.isEmpty() && paths == COLLECTION_PATHS) {
+                collectionsSectionsMemory = new ArrayList<>(sections);
+                collectionsLoadedOnce = true;
                 HomeFeedScheduler.scheduleInitial(getApplicationContext(), "collections");
             }
             progress.setVisibility(View.GONE);
@@ -1993,13 +2026,137 @@ public class MainActivity extends Activity {
         homeScrollView = new ScrollView(this); homeScrollView.setFillViewport(true);
         homeScrollView.setVerticalScrollBarEnabled(false);
         list = new LinearLayout(this); list.setOrientation(LinearLayout.VERTICAL);
-        homeScrollView.addView(list);
+        homeList = list;
+        homeScrollView.addView(homeList);
         main.addView(homeScrollView, new LinearLayout.LayoutParams(-1, 0, 1));
+        feedScreenParent = main;
         homeScrollView.setOnScrollChangeListener((View v, int x, int y, int oldX, int oldY) -> {
             if (y != oldY) scheduleVisibleHomePosterLoad();
         });
         setContentView(root);
         if (menuItems.getChildCount() > 0) menuItems.getChildAt(0).requestFocus();
+    }
+
+    /** Keep Home and Collections as two distinct live view trees. */
+    private void activateFeedScreen(String screen) {
+        if (feedScreenParent == null || homeScrollView == null) return;
+        boolean collections = "collections".equals(screen);
+        if (collections && collectionsScrollView == null) {
+            collectionsList = new LinearLayout(this);
+            collectionsList.setOrientation(LinearLayout.VERTICAL);
+            collectionsScrollView = new ScrollView(this);
+            collectionsScrollView.setFillViewport(true);
+            collectionsScrollView.setVerticalScrollBarEnabled(false);
+            collectionsScrollView.addView(collectionsList);
+            collectionsScrollView.setOnScrollChangeListener((View v, int x, int y, int oldX, int oldY) -> {
+                if (y != oldY) scheduleVisibleHomePosterLoad();
+            });
+        }
+        ScrollView target = collections ? collectionsScrollView : homeScrollView;
+        if (target == null || target == (collections ? homeScrollView : collectionsScrollView)) return;
+        View current = "collections".equals(activeFeedScreen) ? collectionsScrollView : homeScrollView;
+        if (current == target) {
+            list = collections ? collectionsList : homeList;
+            homeScrollView = target;
+            activeFeedScreen = screen;
+            return;
+        }
+        ViewGroup.LayoutParams params = current == null ? null : current.getLayoutParams();
+        if (current != null && current.getParent() == feedScreenParent) feedScreenParent.removeView(current);
+        if (params == null) params = new LinearLayout.LayoutParams(-1, 0, 1);
+        if (target.getParent() instanceof ViewGroup) ((ViewGroup) target.getParent()).removeView(target);
+        feedScreenParent.addView(target, params);
+        list = collections ? collectionsList : homeList;
+        homeScrollView = target;
+        activeFeedScreen = screen;
+        scheduleVisibleHomePosterLoad();
+    }
+
+    private java.io.File collectionsModelFile() {
+        return new java.io.File(getFilesDir(), "kinozal_collections_model_v1.json");
+    }
+
+    private void saveCollectionsModel(List<HomeSection> sections) {
+        try {
+            org.json.JSONArray feeds = new org.json.JSONArray();
+            for (HomeSection section : sections) {
+                org.json.JSONObject feed = new org.json.JSONObject();
+                feed.put("title", section.title);
+                feed.put("path", section.path);
+                org.json.JSONArray items = new org.json.JSONArray();
+                for (HomePoster poster : section.items) {
+                    org.json.JSONObject item = new org.json.JSONObject();
+                    item.put("title", poster.torrent.title);
+                    item.put("href", poster.torrent.href);
+                    item.put("size", poster.torrent.size);
+                    item.put("seeds", poster.torrent.seeds);
+                    item.put("leeches", poster.torrent.leeches);
+                    item.put("uploaded", poster.torrent.uploaded);
+                    item.put("image", poster.imageUrl);
+                    items.put(item);
+                }
+                feed.put("items", items);
+                feeds.put(feed);
+            }
+            org.json.JSONObject rootJson = new org.json.JSONObject();
+            rootJson.put("version", 1);
+            rootJson.put("mirror", client.getMirror());
+            rootJson.put("savedAt", System.currentTimeMillis());
+            rootJson.put("feeds", feeds);
+            writeModelAtomically(collectionsModelFile(), rootJson.toString());
+        } catch (Exception ignored) { }
+    }
+
+    private List<HomeSection> readCollectionsModel() {
+        java.io.File file = collectionsModelFile();
+        if (!file.isFile() || file.length() <= 0 || file.length() > 8L * 1024L * 1024L) return null;
+        try {
+            org.json.JSONObject rootJson = new org.json.JSONObject(new String(
+                    java.nio.file.Files.readAllBytes(file.toPath()), StandardCharsets.UTF_8));
+            if (rootJson.optInt("version") != 1 || !client.getMirror().equals(rootJson.optString("mirror"))
+                    || System.currentTimeMillis() - rootJson.optLong("savedAt") > 7L * 24 * 60 * 60 * 1000) return null;
+            org.json.JSONArray feeds = rootJson.optJSONArray("feeds");
+            if (feeds == null) return null;
+            List<HomeSection> result = new ArrayList<>();
+            for (int i = 0; i < feeds.length(); i++) {
+                org.json.JSONObject feed = feeds.optJSONObject(i);
+                if (feed == null) continue;
+                HomeSection section = new HomeSection(feed.optString("title"), feed.optString("path"));
+                org.json.JSONArray items = feed.optJSONArray("items");
+                if (items == null) continue;
+                for (int j = 0; j < items.length(); j++) {
+                    org.json.JSONObject value = items.optJSONObject(j);
+                    if (value == null) continue;
+                    HomePoster poster = new HomePoster();
+                    poster.torrent = new Torrent();
+                    poster.torrent.title = value.optString("title");
+                    poster.torrent.href = value.optString("href");
+                    poster.torrent.size = value.optString("size", "—");
+                    poster.torrent.seeds = value.optString("seeds", "—");
+                    poster.torrent.leeches = value.optString("leeches", "—");
+                    poster.torrent.uploaded = value.optString("uploaded", "");
+                    poster.imageUrl = value.optString("image");
+                    if (!poster.torrent.title.isEmpty() && !poster.torrent.href.isEmpty()) section.items.add(poster);
+                }
+                if (!section.items.isEmpty()) result.add(section);
+            }
+            return result;
+        } catch (Exception ignored) { return null; }
+    }
+
+    private void writeModelAtomically(java.io.File target, String value) throws Exception {
+        java.io.File temp = new java.io.File(target.getParentFile(), target.getName() + ".tmp");
+        try (java.io.FileOutputStream out = new java.io.FileOutputStream(temp)) {
+            out.write(value.getBytes(StandardCharsets.UTF_8));
+            out.getFD().sync();
+        }
+        java.io.File backup = new java.io.File(target.getParentFile(), target.getName() + ".bak");
+        if (target.exists() && !target.renameTo(backup)) throw new java.io.IOException("Cannot backup model");
+        if (!temp.renameTo(target)) {
+            if (backup.exists()) backup.renameTo(target);
+            throw new java.io.IOException("Cannot commit model");
+        }
+        if (backup.exists()) backup.delete();
     }
 
     private String categoryIcon(String label) {
