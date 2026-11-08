@@ -489,11 +489,9 @@ public class MainActivity extends Activity {
         currentPath = "";
         currentTitle = "Главная";
         heading.setText(currentTitle);
-        if (isScreenFresh("home", HOME_REFRESH_INTERVAL_MS)) {
-            progress.setVisibility(View.GONE);
-            status.setText("Главная · сохранённая лента");
-            return;
-        }
+        // Do not trust the aggregate screen timestamp here: it may be fresh
+        // even when the disk snapshot is missing or unreadable. Let the
+        // cache preload finish, then validate each feed independently.
         loadInitialCatalog(0);
     }
 
