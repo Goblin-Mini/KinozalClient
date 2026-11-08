@@ -2688,7 +2688,8 @@ public class MainActivity extends Activity {
     private Button settingsPillButton(String title) {
         Button b = button(title);
         b.setTextSize(13);
-        b.setGravity(Gravity.CENTER);
+        b.setGravity(Gravity.CENTER_VERTICAL | Gravity.LEFT);
+        b.setPadding(dp(12), 0, dp(8), 0);
         return b;
     }
 
@@ -3365,12 +3366,6 @@ public class MainActivity extends Activity {
                     if (!tracker.isEmpty()) {
                         metaText.setSpan(new android.text.style.ForegroundColorSpan(trackerColor),
                                 trackerStart, tracker.length(), android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-                    }
-                    int sizeStart = metaValue.indexOf("Размер:");
-                    int sizeEnd = metaValue.indexOf("  ·  Сиды:");
-                    if (sizeStart >= 0 && sizeEnd > sizeStart) {
-                        metaText.setSpan(new android.text.style.ForegroundColorSpan(trackerColor),
-                                sizeStart, sizeEnd, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
                     }
                     int seedsStart = metaValue.indexOf("Сиды:");
                     int seedsEnd = metaValue.indexOf("  ·  Пиры:");
