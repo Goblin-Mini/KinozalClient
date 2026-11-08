@@ -1168,99 +1168,44 @@ public class MainActivity extends Activity {
     }
 
     /**
-     * Load the first page as a normal WebView navigation to establish the
-     * authenticated origin, then fetch all remaining home sections concurrently.
+     * Load home feeds one by one through the authenticated WebView session.
+     * Sequential navigations avoid stalled parallel fetch() requests on Kinozal.
      */
     private void fetchBrowserPages(String[] paths, java.util.function.Consumer<List<String>> callback) {
-        long navigationStarted = android.os.SystemClock.elapsedRealtime();
-        appendFeedDiagnostic("NAVIGATION_START", paths[0]);
-        fetchBrowserPage(paths[0], null, firstHtml -> {
-            appendFeedDiagnostic("NAVIGATION_DONE", paths[0] + " durationMs="
-                    + (android.os.SystemClock.elapsedRealtime() - navigationStarted)
-                    + ", htmlChars=" + (firstHtml == null ? 0 : firstHtml.length()));
-            if (firstHtml == null || firstHtml.isEmpty()) {
-                if (lastBrowserError == null || lastBrowserError.isEmpty())
-                    lastBrowserError = "Первый запрос novinki.php не вернул HTML";
-                callback.accept(null);
-                return;
+        long started = android.os.SystemClock.elapsedRealtime();
+        List<String> result = new ArrayList<>();
+        fetchBrowserPagesSequentially(paths, 0, result, started, callback);
+    }
+
+    private void fetchBrowserPagesSequentially(String[] paths, int index, List<String> result,
+            long started, java.util.function.Consumer<List<String>> callback) {
+        if (index >= paths.length) {
+            appendFeedDiagnostic("FETCH_DONE", "sequentialRequests=" + result.size()
+                    + ", totalMs=" + (android.os.SystemClock.elapsedRealtime() - started));
+            callback.accept(result);
+            return;
+        }
+
+        String path = paths[index];
+        long requestStarted = android.os.SystemClock.elapsedRealtime();
+        appendFeedDiagnostic(index == 0 ? "NAVIGATION_START" : "HTTP_START",
+                path + " index=" + (index + 1) + "/" + paths.length);
+
+        fetchBrowserPage(path, null, html -> {
+            long duration = android.os.SystemClock.elapsedRealtime() - requestStarted;
+            int length = html == null ? 0 : html.length();
+            appendFeedDiagnostic(index == 0 ? "NAVIGATION_DONE" : "HTTP",
+                    path + " durationMs=" + duration + ", htmlChars=" + length
+                            + (length == 0 ? ", error=" + safe(lastBrowserError) : ""));
+
+            if (length == 0) {
+                // Keep already loaded sections; a single failed feed must not
+                // discard successful responses from the same group.
+                result.add("");
+            } else {
+                result.add(html);
             }
-            if (paths.length == 1) {
-                List<String> only = new ArrayList<>();
-                only.add(firstHtml);
-                callback.accept(only);
-                return;
-            }
-            WebView web = sessionWebView;
-            if (web == null) {
-                callback.accept(null);
-                return;
-            }
-
-            org.json.JSONArray requested = new org.json.JSONArray();
-            for (int i = 1; i < paths.length; i++) requested.put(paths[i]);
-
-            final boolean[] completed = {false};
-            final Runnable[] timeoutHolder = {null};
-            web.addJavascriptInterface(new Object() {
-                @JavascriptInterface
-                public void onHomePagesResult(String json) {
-                    runOnUiThread(() -> {
-                        if (completed[0]) return;
-                        completed[0] = true;
-                        if (timeoutHolder[0] != null) browserHandler.removeCallbacks(timeoutHolder[0]);
-                        web.removeJavascriptInterface("KinozalHomeBridge");
-                        try {
-                            org.json.JSONArray array = new org.json.JSONArray(json);
-                            List<String> result = new ArrayList<>();
-                            result.add(firstHtml);
-                            for (int i = 0; i < array.length(); i++) {
-                                org.json.JSONObject item = array.optJSONObject(i);
-                                if (item == null) {
-                                    result.add("");
-                                    appendFeedDiagnostic("HTTP_ERROR", paths[i + 1] + " некорректный JS-ответ");
-                                    continue;
-                                }
-                                String html = item.optString("html", "");
-                                int httpStatus = item.optInt("status", -1);
-                                long duration = item.optLong("durationMs", -1L);
-                                String error = item.optString("error", "");
-                                result.add(html);
-                                appendFeedDiagnostic("HTTP", paths[i + 1] + " status=" + httpStatus
-                                        + ", durationMs=" + duration + ", htmlChars=" + html.length()
-                                        + (error.isEmpty() ? "" : ", error=" + error));
-                            }
-                            appendFeedDiagnostic("FETCH_DONE", "parallelRequests=" + array.length()
-                                    + ", totalMs=" + (android.os.SystemClock.elapsedRealtime() - navigationStarted));
-                            callback.accept(result);
-                        } catch (Exception e) {
-                            lastBrowserError = "Ошибка разбора ответа JS-моста: " + e.getMessage();
-                            callback.accept(null);
-                        }
-                    });
-                }
-            }, "KinozalHomeBridge");
-
-            timeoutHolder[0] = () -> {
-                if (completed[0]) return;
-                completed[0] = true;
-                appendFeedDiagnostic("FETCH_TIMEOUT", "параллельные запросы превысили 35 секунд");
-                web.removeJavascriptInterface("KinozalHomeBridge");
-                lastBrowserError = "Тайм-аут параллельных запросов (35 секунд)";
-                callback.accept(null);
-            };
-            browserHandler.postDelayed(timeoutHolder[0], 35000);
-
-            String script = "(function(){var p=" + requested.toString() + ";var allStarted=Date.now();"
-                    + "Promise.all(p.map(function(u){var started=Date.now();return fetch(u,{credentials:'include',"
-                    + "cache:'no-store'}).then(function(r){var status=r.status;return r.text().then(function(t){"
-                    + "return {html:(status>=200&&status<300)?t:'',status:status,durationMs:Date.now()-started,"
-                    + "error:(status>=200&&status<300)?'':'HTTP '+status};});}"
-                    + ").catch(function(e){return {html:'',status:0,durationMs:Date.now()-started,"
-                    + "error:String(e&&e.message||e).slice(0,180)};});})).then(function(a){"
-                    + "window.KinozalHomeBridge.onHomePagesResult(JSON.stringify(a));"
-                    + "}).catch(function(e){window.KinozalHomeBridge.onHomePagesResult('[]');});})()";
-            appendFeedDiagnostic("JS_FETCH_START", "Promise.all: " + requested.length() + " запросов");
-            web.evaluateJavascript(script, null);
+            fetchBrowserPagesSequentially(paths, index + 1, result, started, callback);
         });
     }
 
