@@ -24,7 +24,7 @@ public final class HomeFeedScheduler {
         "top.php?j=&t=1&d=0&k=0&f=0&w=2&s=0",
         "top.php?t=2&d=0&f=0&k=0&j=&s=0&w=2",
         "top.php?j=&t=4&d=0&k=0&f=0&w=2&s=0",
-        "top.php?j=&t=7&d=0&&k=0&f=0&w=2&s=0"
+        "top.php?j=&t=7&d=0&k=0&f=0&w=2&s=0"
     };
     private static final String[] HOME_TITLES = {
         "Новинки кино", "Топ раздач месяца", "Топ русские сериалы",
@@ -50,10 +50,26 @@ public final class HomeFeedScheduler {
     public static void scheduleInitial(Context context, String group) {
         String[] paths = "home".equals(group) ? HOME_PATHS : COLLECTION_PATHS;
         String[] titles = "home".equals(group) ? HOME_TITLES : COLLECTION_TITLES;
+        String mirror = context.getSharedPreferences("kinozal_settings", Context.MODE_PRIVATE)
+                .getString("mirror", KinozalHttpClient.DEFAULT_MIRROR);
+        String marker = "v1|" + mirror;
+        String key = "scheduled_" + group;
+        android.content.SharedPreferences prefs = context.getSharedPreferences("kinozal_feed_schedule", Context.MODE_PRIVATE);
+        if (marker.equals(prefs.getString(key, ""))) return;
         long baseMinutes = "home".equals(group) ? 120L : 300L;
         for (int i = 0; i < paths.length; i++) {
             enqueue(context, group, i, paths[i], titles[i], baseMinutes + i * 5L,
                     ExistingWorkPolicy.REPLACE);
+        }
+        prefs.edit().putString(key, marker).apply();
+    }
+
+    /** Queue every feed in order, with a five-minute gap between requests. */
+    public static void refreshAll(Context context, String group) {
+        String[] paths = "home".equals(group) ? HOME_PATHS : COLLECTION_PATHS;
+        String[] titles = "home".equals(group) ? HOME_TITLES : COLLECTION_TITLES;
+        for (int i = 0; i < paths.length; i++) {
+            enqueue(context, group, i, paths[i], titles[i], i * 5L, ExistingWorkPolicy.REPLACE);
         }
     }
 
