@@ -91,6 +91,8 @@ public class MainActivity extends Activity {
     private LinearLayout root, sidebar, content, list, menuItems;
     private ScrollView homeScrollView;
     private ScrollView collectionsScrollView;
+    private ScrollView browseScrollView;
+    private LinearLayout browseList;
     private LinearLayout homeList, collectionsList;
     private ViewGroup feedScreenParent;
     private ScrollView activeFeedScrollView;
@@ -2071,6 +2073,34 @@ public class MainActivity extends Activity {
     }
 
     /** Keep Home and Collections as two distinct live view trees. */
+    /** Browse/category pages use their own temporary host and cannot erase feed screens. */
+    private void activateBrowseScreen() {
+        if (feedScreenParent == null) return;
+        if (browseScrollView == null) {
+            browseList = new LinearLayout(this);
+            browseList.setOrientation(LinearLayout.VERTICAL);
+            browseScrollView = new ScrollView(this);
+            browseScrollView.setFillViewport(true);
+            browseScrollView.setVerticalScrollBarEnabled(false);
+            browseScrollView.addView(browseList);
+        }
+        if (activeFeedScrollView == browseScrollView) {
+            list = browseList;
+            activeFeedScreen = "browse";
+            return;
+        }
+        View current = activeFeedScrollView;
+        ViewGroup.LayoutParams params = current == null ? null : current.getLayoutParams();
+        if (current != null && current.getParent() == feedScreenParent) feedScreenParent.removeView(current);
+        if (params == null) params = new LinearLayout.LayoutParams(-1, 0, 1);
+        if (browseScrollView.getParent() instanceof ViewGroup)
+            ((ViewGroup) browseScrollView.getParent()).removeView(browseScrollView);
+        feedScreenParent.addView(browseScrollView, params);
+        activeFeedScrollView = browseScrollView;
+        activeFeedScreen = "browse";
+        list = browseList;
+    }
+
     private void activateFeedScreen(String screen) {
         if (feedScreenParent == null || homeScrollView == null) return;
         boolean collections = "collections".equals(screen);
@@ -3151,6 +3181,7 @@ public class MainActivity extends Activity {
 
     private void load(String path, String title, String postBody) {
         if (deferBrowserNavigationIfBusy(() -> load(path, title, postBody))) return;
+        activateBrowseScreen();
         currentPath = path; currentTitle = title; heading.setText(title);
 
         // Browse/category pages change frequently. Always request the current
