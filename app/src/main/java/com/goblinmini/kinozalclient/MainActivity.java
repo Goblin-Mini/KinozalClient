@@ -120,6 +120,9 @@ public class MainActivity extends Activity {
     // Home/collection and Android TV feed refreshes share one WebView. Queue
     // interactive navigation until the background sequence releases it.
     private boolean browserFeedLoading = false;
+    // Invalidates callbacks and delayed steps belonging to a background feed
+    // sequence when the user explicitly navigates to another screen.
+    private int browserFeedGeneration = 0;
     private Runnable pendingBrowserNavigation;
     private List<HomeSection> homeSectionsMemory = new ArrayList<>();
     private List<HomeSection> collectionSectionsMemory = new ArrayList<>();
@@ -553,12 +556,14 @@ public class MainActivity extends Activity {
 
     private boolean deferBrowserNavigationIfBusy(Runnable navigation) {
         if (!browserFeedLoading && !tvChannelsRefreshInProgress) return false;
-        // Keep the latest explicit user choice; it will open as soon as the
-        // background WebView sequence finishes instead of cancelling it.
-        pendingBrowserNavigation = navigation;
-        progress.setVisibility(View.VISIBLE);
-        status.setText("Завершаем обновление каталога…");
-        return true;
+        // Explicit user navigation has priority over background feed refresh.
+        // Invalidate the old sequence; its callback cannot schedule more pages.
+        browserFeedGeneration++;
+        pendingFeedRefreshes.clear();
+        refreshAllRunning = false;
+        browserFeedLoading = false;
+        pendingBrowserNavigation = null;
+        return false;
     }
 
     private void runPendingBrowserNavigation() {
@@ -615,7 +620,7 @@ public class MainActivity extends Activity {
         showPageLoading("Загрузка подборок…");
         if (sessionWebView == null) restoreBrowserSession("");
         browserHandler.postDelayed(() -> loadHomeSectionsInBrowser(
-                COLLECTION_PATHS, COLLECTION_TITLES, 0, new ArrayList<>(), 0),
+                COLLECTION_PATHS, COLLECTION_TITLES, 0, new ArrayList<>(), 0, ++browserFeedGeneration),
                 sessionWebView == null ? 350 : 100);
     }
 
@@ -673,7 +678,8 @@ public class MainActivity extends Activity {
     }
 
     private void runNextQueuedFeedRefresh() {
-        if (browserFeedLoading) return;
+        if (browserFeedLoading || pendingBrowserNavigation != null) return;
+        final int generation = browserFeedGeneration;
         FeedRefreshRequest request = pendingFeedRefreshes.pollFirst();
         if (request == null) {
             refreshAllRunning = false;
@@ -686,6 +692,7 @@ public class MainActivity extends Activity {
         progress.setVisibility(View.VISIBLE);
         status.setText("Обновляем: " + request.title);
         fetchBrowserPage(request.path, null, html -> {
+            if (generation != browserFeedGeneration) return;
             if (torrentDetailsOpen) {
                 browserFeedLoading = false;
                 return;
@@ -703,6 +710,7 @@ public class MainActivity extends Activity {
                     if (!parsed.items.isEmpty()) removeHomeDuplicates(java.util.Collections.singletonList(parsed));
                 } catch (Exception ignored) { }
                 runOnUiThread(() -> {
+                    if (generation != browserFeedGeneration) return;
                     if (!parsed.items.isEmpty()) {
                         List<HomeSection> target = request.collection ? collectionSectionsMemory : homeSectionsMemory;
                         boolean replaced = false;
@@ -726,6 +734,7 @@ public class MainActivity extends Activity {
     }
 
     private void scheduleNextQueuedFeedRefresh() {
+        final int generation = browserFeedGeneration;
         if (pendingFeedRefreshes.isEmpty()) {
             refreshAllRunning = false;
             progress.setVisibility(View.GONE);
@@ -733,7 +742,9 @@ public class MainActivity extends Activity {
             return;
         }
         // Kinozal is rate-limited: keep a five-minute gap between feed requests.
-        browserHandler.postDelayed(this::runNextQueuedFeedRefresh, 5L * 60L * 1000L);
+        browserHandler.postDelayed(() -> {
+            if (generation == browserFeedGeneration) runNextQueuedFeedRefresh();
+        }, 5L * 60L * 1000L);
     }
 
     private void saveFeedModel(List<HomeSection> sections, boolean collection) {
@@ -894,7 +905,7 @@ public class MainActivity extends Activity {
             restoreBrowserSession("");
         }
         browserHandler.postDelayed(() -> loadHomeSectionsInBrowser(
-                HOME_PATHS, HOME_TITLES, 0, new ArrayList<>(), 0),
+                HOME_PATHS, HOME_TITLES, 0, new ArrayList<>(), 0, ++browserFeedGeneration),
                 sessionWebView == null ? 350 : 100);
     }
 
@@ -1079,14 +1090,15 @@ public class MainActivity extends Activity {
                     status.setText("Пробуем резервную загрузку через WebView…");
                     if (sessionWebView == null) restoreBrowserSession("");
                     browserHandler.postDelayed(() -> loadHomeSectionsInBrowser(
-                            homePaths, homeTitles, 0, new ArrayList<>(), 0), 250);
+                            homePaths, homeTitles, 0, new ArrayList<>(), 0, ++browserFeedGeneration), 250);
                 }
             });
         });
     }
 
     private void loadHomeSectionsInBrowser(String[] paths, String[] titles, int index,
-            List<HomeSection> sections, int retry) {
+            List<HomeSection> sections, int retry, int generation) {
+        if (generation != browserFeedGeneration) return;
         if (index == 0 && retry == 0 && paths == HOME_PATHS) startHomePerformanceMonitor();
         if (index >= paths.length) {
             removeHomeDuplicates(sections);
@@ -1128,6 +1140,7 @@ public class MainActivity extends Activity {
         }
 
         fetchBrowserPage(paths[index], null, html -> {
+            if (generation != browserFeedGeneration) return;
             // A torrent card took ownership of the authenticated WebView.
             // Stop the cancelled feed chain so it cannot restart over the detail page.
             if (torrentDetailsOpen) {
@@ -1138,11 +1151,11 @@ public class MainActivity extends Activity {
                 if (index == 0 && retry == 0) {
                     status.setText("Повторное подключение к Kinozal…");
                     browserHandler.postDelayed(() -> loadHomeSectionsInBrowser(
-                            paths, titles, 0, new ArrayList<>(), 1), 1200);
+                            paths, titles, 0, new ArrayList<>(), 1, generation), 1200);
                     return;
                 }
                 browserHandler.postDelayed(() -> loadHomeSectionsInBrowser(
-                        paths, titles, index + 1, sections, 0), 150);
+                        paths, titles, index + 1, sections, 0, generation), 150);
                 return;
             }
 
@@ -1168,6 +1181,7 @@ public class MainActivity extends Activity {
                 } catch (Exception ignored) { }
 
                 runOnUiThread(() -> {
+                    if (generation != browserFeedGeneration) return;
                     if (torrentDetailsOpen) {
                         browserFeedLoading = false;
                         return;
@@ -1185,7 +1199,7 @@ public class MainActivity extends Activity {
                     // Keep requests serialized to avoid triggering Kinozal rate limits,
                     // but a five-minute gap made the initial screen look permanently empty.
                     browserHandler.postDelayed(() -> loadHomeSectionsInBrowser(
-                            paths, titles, index + 1, sections, 0), 1800);
+                            paths, titles, index + 1, sections, 0, generation), 1800);
                 });
             });
         });
