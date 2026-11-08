@@ -168,11 +168,11 @@ public class MainActivity extends Activity {
             feedDiagnosticStartedAtMs = android.os.SystemClock.elapsedRealtime();
             feedDiagnosticGroup = group;
             feedLoadDiagnostics.append("Kinozal feed diagnostics\\n")
-                    .append("Группа: ").append(group).append('\\n')
-                    .append("Зеркало: ").append(client == null ? "?" : client.getMirror()).append('\\n')
+                    .append("Группа: ").append(group).append('\n')
+                    .append("Зеркало: ").append(client == null ? "?" : client.getMirror()).append('\n')
                     .append("Время: ").append(new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.ROOT)
-                            .format(new java.util.Date())).append('\\n')
-                    .append("Лент: ").append(paths.length).append('\\n');
+                            .format(new java.util.Date())).append('\n')
+                    .append("Лент: ").append(paths.length).append('\n');
             for (int i = 0; i < paths.length; i++)
                 feedLoadDiagnostics.append(String.format(java.util.Locale.ROOT, "%02d. %s | %s\\n", i + 1, paths[i], i));
         }
