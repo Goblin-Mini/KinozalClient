@@ -1190,24 +1190,14 @@ public class MainActivity extends Activity {
                 } catch (Exception ignored) { }
             }
 
-            String script = buildHomeParallelExtractScript(batchPaths.toString());
+            String script = buildHomeParallelExtractScript(batchPaths.toString(), feedIndex,
+                    org.json.JSONObject.quote(currentHtml));
             long batchStarted = android.os.SystemClock.elapsedRealtime();
             web.evaluateJavascript(script, value -> {
                 try {
                     String json = new org.json.JSONArray("[" + value + "]").getString(0);
                     org.json.JSONArray results = new org.json.JSONArray(json);
-                    HomeSection current = new HomeSection(title, path);
-                    current.items.addAll(parseHomePostersFromJsonArray(
-                            extractHomeItemsFromCurrentDocument(currentHtml)));
-                    if (!current.items.isEmpty()) {
-                        loaded.add(current);
-                        diskCache.put("home|" + client.getMirror() + "|" + path,
-                                currentHtml.getBytes(StandardCharsets.UTF_8));
-                    }
-                    appendFeedDiagnostic("PARSE_JS", path + " cards=" + current.items.size()
-                            + ", htmlChars=" + currentHtml.length());
-
-                    boolean batchOk = results.length() == batchEnd - feedIndex - 1;
+                    boolean batchOk = results.length() == batchEnd - feedIndex;
                     for (int i = 0; i < results.length(); i++) {
                         org.json.JSONObject result = results.optJSONObject(i);
                         if (result == null || !result.optBoolean("ok", false)) {
@@ -1228,8 +1218,9 @@ public class MainActivity extends Activity {
                             diskCache.put("home|" + client.getMirror() + "|" + resultPath,
                                     resultHtml.getBytes(StandardCharsets.UTF_8));
                         }
-                        appendFeedDiagnostic("PARSE_JS_PARALLEL", resultPath
-                                + " durationMs=" + (android.os.SystemClock.elapsedRealtime() - batchStarted)
+                        appendFeedDiagnostic(resultIndex == feedIndex ? "PARSE_JS" : "PARSE_JS_PARALLEL",
+                                resultPath + " durationMs="
+                                + (android.os.SystemClock.elapsedRealtime() - batchStarted)
                                 + ", cards=" + section.items.size()
                                 + ", htmlChars=" + resultHtml.length());
                     }
@@ -1254,7 +1245,7 @@ public class MainActivity extends Activity {
         });
     }
 
-    private String buildHomeParallelExtractScript(String pathsJson) {
+    private String buildHomeParallelExtractScript(String pathsJson, int currentIndex, String currentHtmlJson) {
         return "(function(){"
                 + "function extract(doc,base){try{"
                 + "var links=doc.querySelectorAll('table.t_peer td.nam > a');"
@@ -1278,21 +1269,18 @@ public class MainActivity extends Activity {
                 + "out.push({title:title,href:href,image:image,size:cell(3),seeds:cell(4),leeches:cell(5),uploaded:cell(6)});}"
                 + "return out;}catch(e){return [];}}"
                 + "var requests=" + pathsJson + ";"
+                + "var currentHtml=" + currentHtmlJson + ",currentIndex=" + currentIndex + ";"
                 + "return Promise.all(requests.map(function(r){"
                 + "var url=new URL(r.path,location.href).href;"
                 + "return fetch(url,{credentials:'include',cache:'no-store'}).then(function(resp){"
                 + "if(!resp.ok)throw new Error('HTTP '+resp.status+' '+r.path);"
                 + "return resp.text().then(function(html){var doc=new DOMParser().parseFromString(html,'text/html');"
                 + "return {ok:true,index:r.index,html:html,items:extract(doc,url)};});"
-                + "});})).then(function(rows){return JSON.stringify(rows);})"
-                + ".catch(function(e){return JSON.stringify([{ok:false,error:String(e)}]);});"
+                + "});})).then(function(rows){rows.unshift({ok:true,index:currentIndex,html:currentHtml,"
+                + "items:extract(document,document.baseURI)});return JSON.stringify(rows);})"
+                + ".catch(function(e){return JSON.stringify([{ok:true,index:currentIndex,html:currentHtml,"
+                + "items:extract(document,document.baseURI)},{ok:false,error:String(e)}]);});"
                 + "})()";
-    }
-
-    private org.json.JSONArray extractHomeItemsFromCurrentDocument(String html) {
-        // The currently navigated page is already represented by the live WebView DOM.
-        // This method is replaced by the direct DOM extraction callback below.
-        return new org.json.JSONArray();
     }
 
     private List<HomePoster> parseHomePostersFromJsonArray(org.json.JSONArray array) {
@@ -1353,9 +1341,7 @@ public class MainActivity extends Activity {
                         fetchStarted, parseStarted, callback, "WebView отсутствует during fallback");
                 return;
             }
-            String script = buildHomeParallelExtractScript("[]").replace(
-                    "var requests=[];", "var requests=[];");
-            // Reuse the same DOM extraction logic with the current live document.
+            // Reuse the DOM extraction logic with the current live document.
             String currentScript = "(function(){try{var links=document.querySelectorAll('table.t_peer td.nam > a');"
                     + "if(!links.length)links=document.querySelectorAll('a[href]');var out=[],seen={};"
                     + "function t(e){return e?(e.innerText||e.textContent||'').replace(/\\\\s+/g,' ').trim():'';}"
