@@ -115,6 +115,7 @@ public class MainActivity extends Activity {
     private boolean homeCacheDisplayed = false;
     private boolean homeCacheLoadFinished = false;
     private boolean initialHomeFetchPending = false;
+    private boolean torrentDetailsOpen = false;
     private boolean homeRefreshInProgress = false;
     // Home/collection and Android TV feed refreshes share one WebView. Queue
     // interactive navigation until the background sequence releases it.
@@ -489,9 +490,24 @@ public class MainActivity extends Activity {
         currentPath = "";
         currentTitle = "Главная";
         heading.setText(currentTitle);
-        // Do not trust the aggregate screen timestamp here: it may be fresh
-        // even when the disk snapshot is missing or unreadable. Let the
-        // cache preload finish, then validate each feed independently.
+        if (homeCacheDisplayed && hasHomeContent(homeSectionsMemory)) {
+            if (list.getChildCount() == 0) renderHome(homeSectionsMemory);
+            if (areAllFeedsFresh(HOME_PATHS, false)) {
+                progress.setVisibility(View.GONE);
+                status.setText("Главная · сохранённая лента");
+            } else {
+                progress.setVisibility(View.VISIBLE);
+                status.setText("Главная · обновляем в фоне");
+                queueDueFeeds(false);
+            }
+            return;
+        }
+        if (!homeCacheLoadFinished) {
+            initialHomeFetchPending = true;
+            progress.setVisibility(View.VISIBLE);
+            status.setText("Загружаем сохранённую главную…");
+            return;
+        }
         loadInitialCatalog(0);
     }
 
@@ -801,33 +817,31 @@ public class MainActivity extends Activity {
     }
 
     private void preloadHomeCache() {
-        String startupSource = getSharedPreferences(PREFS, MODE_PRIVATE)
-                .getString("startup_source", "home");
-        if (!"home".equals(startupSource) || !pendingTvTorrentHref.isEmpty()) {
-            homeCacheLoadFinished = true;
-            return;
-        }
+        // Load the home snapshot regardless of the configured startup screen.
+        // The user may open Главная later in this session; it must already be
+        // available locally instead of forcing a complete network reload.
         io.execute(() -> {
             List<HomeSection> cached = readHomeModel();
             runOnUiThread(() -> {
                 homeCacheLoadFinished = true;
-                // Do not overwrite a screen the user has already navigated to.
-                if (cached != null && !cached.isEmpty()
-                        && "browse.php".equals(currentPath)
-                        && "Все раздачи".equals(currentTitle)
-                        && !isFinishing()) {
-                    currentPath = "";
-                    currentTitle = "Главная";
-                    heading.setText("Главная");
+                if (cached != null && !cached.isEmpty() && !isFinishing()) {
                     homeSectionsMemory = new ArrayList<>(cached);
                     homeCacheDisplayed = true;
-                    renderHome(cached);
-                    status.setText("Главная из кэша · обновляем…");
+                    if ((currentPath == null || currentPath.isEmpty())
+                            && "home".equals(activeScreenKey) && !torrentDetailsOpen) {
+                        currentTitle = "Главная";
+                        heading.setText(currentTitle);
+                        renderHome(cached);
+                        status.setText("Главная из сохранённой ленты");
+                    }
                 }
                 if (initialHomeFetchPending) {
                     initialHomeFetchPending = false;
                     if (currentPath == null || currentPath.isEmpty()) {
-                        startInitialHomeBrowserLoad();
+                        if (homeCacheDisplayed && hasHomeContent(homeSectionsMemory)) {
+                            if (list.getChildCount() == 0) renderHome(homeSectionsMemory);
+                            queueDueFeeds(false);
+                        } else startInitialHomeBrowserLoad();
                     }
                 }
             });
@@ -1110,6 +1124,12 @@ public class MainActivity extends Activity {
         }
 
         fetchBrowserPage(paths[index], null, html -> {
+            // A torrent card took ownership of the authenticated WebView.
+            // Stop the cancelled feed chain so it cannot restart over the detail page.
+            if (torrentDetailsOpen) {
+                browserFeedLoading = false;
+                return;
+            }
             if (html == null || html.isEmpty()) {
                 if (index == 0 && retry == 0) {
                     status.setText("Повторное подключение к Kinozal…");
@@ -1144,6 +1164,10 @@ public class MainActivity extends Activity {
                 } catch (Exception ignored) { }
 
                 runOnUiThread(() -> {
+                    if (torrentDetailsOpen) {
+                        browserFeedLoading = false;
+                        return;
+                    }
                     if (!section.items.isEmpty()) {
                         // Only a successfully parsed feed advances its own refresh clock.
                         markScreenRefreshed("feed:" + (paths == COLLECTION_PATHS ? "c:" : "h:") + paths[index]);
@@ -4651,6 +4675,7 @@ public class MainActivity extends Activity {
     // The click handler reuses this in-flight request instead of starting a
     // second WebView navigation and cancelling the first one.
     private void showTorrent(Torrent t) {
+        torrentDetailsOpen = true;
         focusedTorrentSource = getCurrentFocus();
         if (t == null || t.href == null || t.href.trim().isEmpty()) {
             showMessage("Не удалось определить адрес раздачи.");
@@ -4697,6 +4722,7 @@ public class MainActivity extends Activity {
             if (html == null || html.trim().isEmpty()) {
                 if (!hasCachedDetails && href.equals(activeTorrentDetailsHref)) {
                     progress.setVisibility(View.GONE);
+                    torrentDetailsOpen = false;
                     showMessage("Не удалось загрузить карточку через браузерную сессию.");
                 }
                 return;
@@ -5131,6 +5157,7 @@ public class MainActivity extends Activity {
                 .create();
         dialog.show();
         dialog.setOnDismissListener(ignored -> {
+            torrentDetailsOpen = false;
             View returnFocus = focusedTorrentSource;
             focusedTorrentSource = null;
             if (returnFocus != null) {
