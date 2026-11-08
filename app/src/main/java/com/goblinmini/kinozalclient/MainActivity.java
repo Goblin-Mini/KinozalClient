@@ -980,17 +980,33 @@ public class MainActivity extends Activity {
                 long parseStarted = android.os.SystemClock.elapsedRealtime();
                 List<HomeSection> loaded = new ArrayList<>();
                 int count = Math.min(paths.length, htmlPages.size());
+                List<java.util.concurrent.Future<HomeSection>> parseJobs = new ArrayList<>();
+                for (int i = 0; i < count; i++) {
+                    final int feedIndex = i;
+                    final String html = htmlPages.get(i);
+                    if (html == null || html.trim().isEmpty()) {
+                        parseJobs.add(null);
+                        continue;
+                    }
+                    parseJobs.add(homeRefreshIo.submit(() -> {
+                        HomeSection section = new HomeSection(titles[feedIndex], paths[feedIndex]);
+                        section.items.addAll(parseHomePosters(
+                                Jsoup.parse(html, client.getMirror() + "/")));
+                        return section;
+                    }));
+                }
+                // Parse independent HTML documents concurrently, but collect them in
+                // the original feed order so the UI and de-duplication stay unchanged.
                 for (int i = 0; i < count; i++) {
                     String html = htmlPages.get(i);
                     if (html == null || html.trim().isEmpty()) {
                         appendFeedDiagnostic("PARSE", paths[i] + " пустой HTML");
                         continue;
                     }
-                    HomeSection section = new HomeSection(titles[i], paths[i]);
                     try {
-                        section.items.addAll(parseHomePosters(
-                                Jsoup.parse(html, client.getMirror() + "/")));
-                        if (!section.items.isEmpty()) {
+                        java.util.concurrent.Future<HomeSection> job = parseJobs.get(i);
+                        HomeSection section = job == null ? null : job.get();
+                        if (section != null && !section.items.isEmpty()) {
                             diskCache.put("home|" + client.getMirror() + "|" + paths[i],
                                     html.getBytes(StandardCharsets.UTF_8));
                             loaded.add(section);
