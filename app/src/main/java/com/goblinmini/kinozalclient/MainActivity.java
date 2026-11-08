@@ -3862,7 +3862,14 @@ public class MainActivity extends Activity {
             final long parseStartedAt = android.os.SystemClock.elapsedRealtime();
             final List<Torrent> parsed;
             try {
-                parsed = parseTorrents(Jsoup.parse(html, client.getMirror()));
+                long domStartedAt = android.os.SystemClock.elapsedRealtime();
+                Document document = Jsoup.parse(html, client.getMirror());
+                long domDuration = android.os.SystemClock.elapsedRealtime() - domStartedAt;
+                long extractStartedAt = android.os.SystemClock.elapsedRealtime();
+                parsed = parseTorrents(document);
+                long extractDuration = android.os.SystemClock.elapsedRealtime() - extractStartedAt;
+                logBrowsePerf("catalog-dom-parse", domDuration, "htmlChars=" + html.length());
+                logBrowsePerf("catalog-extract", extractDuration, "torrents=" + parsed.size());
                 logBrowsePerf("catalog-parse",
                         android.os.SystemClock.elapsedRealtime() - parseStartedAt,
                         "htmlChars=" + html.length() + " torrents=" + parsed.size());
@@ -3898,50 +3905,48 @@ public class MainActivity extends Activity {
     }
     private List<Torrent> parseTorrents(Document doc) {
         List<Torrent> out = new ArrayList<>();
+        java.util.HashSet<String> seenHrefs = new java.util.HashSet<>();
 
-        // On Kinozal, uploader profiles use userdetails.php?id=...
-        // A broad "details.php?id=" selector also matched those links,
-        // causing usernames to appear as separate torrent cards.
-        // Torrent titles live specifically in the "nam" table cell.
-        Elements anchors = doc.select("table.t_peer td.nam > a[href*=details.php?id=]");
-        for (Element a : anchors) {
-            String name = a.text().trim();
-            if (name.length() < 3) continue;
+        // Walk the table structure directly instead of running several nested
+        // CSS selectors for every torrent row. Kinozal titles are direct links
+        // inside td.nam; uploader links live in a different cell.
+        for (Element table : doc.select("table.t_peer")) {
+            for (Element row : table.getElementsByTag("tr")) {
+                Elements cells = row.children();
+                Element nameCell = null;
+                for (Element cell : cells) {
+                    if ("td".equals(cell.tagName()) && cell.hasClass("nam")) {
+                        nameCell = cell;
+                        break;
+                    }
+                }
+                if (nameCell == null) continue;
 
-            Element row = a.closest("tr");
-            String href = a.absUrl("href");
-            if (href.isEmpty()) href = a.attr("href");
+                for (Element anchor : nameCell.children()) {
+                    if (!"a".equals(anchor.tagName())
+                            || !anchor.attr("href").contains("details.php?id=")) continue;
 
-            Torrent t = new Torrent();
-            t.title = name;
-            t.href = href;
+                    String name = anchor.text().trim();
+                    if (name.length() < 3) continue;
 
-            if (row != null) {
-                Elements cells = row.select("td");
-                // Kinozal columns: icon, title, comments, size, seeds, peers, uploaded, uploader.
-                t.size = cells.size() > 3 ? cells.get(3).text().trim() : "—";
-                t.seeds = cells.size() > 4 ? cells.get(4).text().trim() : "—";
-                t.leeches = cells.size() > 5 ? cells.get(5).text().trim() : "—";
-                t.uploaded = cells.size() > 6 ? cells.get(6).text().trim() : "—";
-            } else {
-                t.size = "—";
-                t.seeds = "—";
-                t.leeches = "—";
-                t.uploaded = "—";
-            }
+                    String href = anchor.absUrl("href");
+                    if (href.isEmpty()) href = anchor.attr("href");
+                    if (!seenHrefs.add(href)) continue;
 
-            boolean duplicate = false;
-            for (Torrent old : out) {
-                if (old.href.equals(t.href)) {
-                    duplicate = true;
-                    break;
+                    Torrent torrent = new Torrent();
+                    torrent.title = name;
+                    torrent.href = href;
+                    // Kinozal columns: icon, title, comments, size, seeds, peers, uploaded, uploader.
+                    torrent.size = cells.size() > 3 ? cells.get(3).text().trim() : "—";
+                    torrent.seeds = cells.size() > 4 ? cells.get(4).text().trim() : "—";
+                    torrent.leeches = cells.size() > 5 ? cells.get(5).text().trim() : "—";
+                    torrent.uploaded = cells.size() > 6 ? cells.get(6).text().trim() : "—";
+                    out.add(torrent);
                 }
             }
-            if (!duplicate) out.add(t);
         }
         return out;
     }
-
 
 
     private void setSearchSort(String key) {
