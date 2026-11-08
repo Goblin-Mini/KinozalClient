@@ -206,6 +206,10 @@ public class MainActivity extends Activity {
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
+        // Cloudflare requires a live JavaScript browser context. Cancel legacy
+        // native HTTP WorkManager jobs; manual refreshes now run in sessionWebView.
+        androidx.work.WorkManager.getInstance(this).cancelAllWorkByTag("kinozal-feed-home");
+        androidx.work.WorkManager.getInstance(this).cancelAllWorkByTag("kinozal-feed-collections");
         GOLD = getAccentColor(getSharedPreferences(PREFS, MODE_PRIVATE).getString("accent_color", "gold"));
         readTvLaunchIntent(getIntent());
         mirror = getSharedPreferences(PREFS, MODE_PRIVATE).getString("mirror", MIRRORS[0]);
@@ -558,7 +562,6 @@ public class MainActivity extends Activity {
             collectionsLoadedOnce = true;
             renderHome(cached);
             status.setText("Подборки из кэша");
-            HomeFeedScheduler.scheduleInitial(getApplicationContext(), "collections");
             return;
         }
         if (collectionsLoadedOnce) return;
@@ -590,7 +593,6 @@ public class MainActivity extends Activity {
                                     .getString("startup_source", "home"))) {
                         renderCachedHomeIfNeeded();
                         status.setText("Главная · восстановлена из кэша");
-                        HomeFeedScheduler.scheduleInitial(getApplicationContext(), "home");
                     }
                 }
                 if (initialHomeFetchPending) {
@@ -862,11 +864,9 @@ public class MainActivity extends Activity {
             if (!sections.isEmpty() && paths == HOME_PATHS) {
                 homeSectionsMemory = new ArrayList<>(sections);
                 homeLoadedOnce = true;
-                HomeFeedScheduler.scheduleInitial(getApplicationContext(), "home");
             } else if (!sections.isEmpty() && paths == COLLECTION_PATHS) {
                 collectionsSectionsMemory = new ArrayList<>(sections);
                 collectionsLoadedOnce = true;
-                HomeFeedScheduler.scheduleInitial(getApplicationContext(), "collections");
             }
             progress.setVisibility(View.GONE);
             browserFeedLoading = false;
@@ -1619,7 +1619,6 @@ public class MainActivity extends Activity {
             }
             io.execute(() -> {
                 HomeSection refreshed = new HomeSection(title, path);
-                String lower = html.toLowerCase(java.util.Locale.ROOT);
                 String cloudflareText = Jsoup.parse(html).text().toLowerCase(java.util.Locale.ROOT);
                 String failure = null;
                 if (cloudflareText.contains("just a moment")
@@ -1678,7 +1677,6 @@ public class MainActivity extends Activity {
                     success.putExtra("feed_bulk", bulk);
                     success.putExtra("refresh_state", "success");
                     handleFeedRefreshState(success);
-                    HomeFeedScheduler.scheduleNext(getApplicationContext(), group, index, path, title);
                 });
             });
         });
@@ -1706,7 +1704,6 @@ public class MainActivity extends Activity {
             refreshFeedInBrowser(group, index, paths[index], titles[index], true, paths.length);
             if (current[0] < paths.length) browserHandler.postDelayed(next[0], 5 * 60 * 1000L);
         };
-        next[0] = next[0] == null ? () -> { } : next[0];
         browserHandler.post(next[0]);
     }
 
