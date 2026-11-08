@@ -3386,6 +3386,9 @@ public class MainActivity extends Activity {
         web.getSettings().setDomStorageEnabled(true);
         web.getSettings().setLoadsImagesAutomatically(false);
         web.getSettings().setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
+        // Cloudflare clearance is bound to the browser User-Agent. Persist the exact
+        // WebView UA so WorkManager does not present a different native fingerprint.
+        client.setUserAgent(web.getSettings().getUserAgentString());
         CookieManager manager = CookieManager.getInstance();
         manager.setAcceptCookie(true);
         manager.setAcceptThirdPartyCookies(web, true);
