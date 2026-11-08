@@ -1583,13 +1583,14 @@ public class MainActivity extends Activity {
         }
         horizontal.post(this::scheduleVisibleHomePosterLoad);
 
-        final long startedAt = android.os.SystemClock.elapsedRealtime();
+        final long[] startedAt = {0L};
         final int[] cardIndex = {0};
         final int cardCount = section.items.size();
         for (HomePoster item : section.items) {
             homeCardBuildQueue.addLast(() -> {
                 if (generation != homeRenderGeneration || isFinishing()) return;
                 long cardStartedAt = android.os.SystemClock.elapsedRealtime();
+                if (startedAt[0] == 0L) startedAt[0] = cardStartedAt;
                 strip.addView(createHomePosterCard(item, section));
                 long cardDuration = android.os.SystemClock.elapsedRealtime() - cardStartedAt;
                 if (cardDuration >= 32L) {
@@ -1598,7 +1599,7 @@ public class MainActivity extends Activity {
                 }
                 cardIndex[0]++;
                 if (cardIndex[0] == cardCount) {
-                    long duration = android.os.SystemClock.elapsedRealtime() - startedAt;
+                    long duration = android.os.SystemClock.elapsedRealtime() - startedAt[0];
                     Log.i("KinozalPerf", "home row complete=" + duration + "ms, title="
                             + section.title + ", cards=" + cardCount);
                     scheduleVisibleHomePosterLoad();
