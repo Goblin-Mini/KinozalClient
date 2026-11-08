@@ -5018,6 +5018,8 @@ public class MainActivity extends Activity {
         final java.util.List<String> comments = new java.util.ArrayList<>();
         String screenshotRequestId = "";
         String screenshotPagesd = "";
+        boolean screenshotsLoaded = false;
+        boolean screenshotsLoading = false;
     }
 
     // Warm the next likely details page while the user navigates the list.
@@ -5052,9 +5054,9 @@ public class MainActivity extends Activity {
                 TorrentDetails cachedDetails = parseTorrentDetails(cachedDoc, t);
                 t.poster = cachedDetails.poster;
                 saveRecentlyViewed(t);
-                loadScreenshotThumbnails(cachedDetails, ready -> {
-                    if (href.equals(activeTorrentDetailsHref)) showTorrentDetails(t, ready);
-                });
+                // Show the card immediately. Screenshot AJAX is loaded only
+                // when the user opens the Screenshots tab.
+                showTorrentDetails(t, cachedDetails);
             } catch (Exception ignored) {
                 cachedHtml = null;
             }
@@ -5094,12 +5096,12 @@ public class MainActivity extends Activity {
                 diskCache.put(cacheKey, html.getBytes(StandardCharsets.UTF_8));
                 t.poster = details.poster;
                 saveRecentlyViewed(t);
-                loadScreenshotThumbnails(details, ready -> {
-                    if (href.equals(activeTorrentDetailsHref)) {
-                        progress.setVisibility(View.GONE);
-                        showTorrentDetails(t, ready);
-                    }
-                });
+                // Do not wait for the secondary screenshot request before
+                // presenting the already parsed release details.
+                if (href.equals(activeTorrentDetailsHref)) {
+                    progress.setVisibility(View.GONE);
+                    showTorrentDetails(t, details);
+                }
             } catch (Exception e) {
                 if (!hasCachedDetails && href.equals(activeTorrentDetailsHref)) {
                     progress.setVisibility(View.GONE);
@@ -5344,9 +5346,8 @@ public class MainActivity extends Activity {
                 if (href.equals(activeTorrentDetailsHref)) {
                     progress.setVisibility(View.GONE);
                     saveRecentlyViewed(torrent);
-                    loadScreenshotThumbnails(parsed, ready -> {
-                        if (href.equals(activeTorrentDetailsHref)) showTorrentDetails(torrent, ready);
-                    });
+                    // Prefetch only the detail HTML; screenshot data stays lazy.
+                    showTorrentDetails(torrent, parsed);
                 }
             } catch (Exception ignored) { }
         });
@@ -5481,8 +5482,25 @@ public class MainActivity extends Activity {
             detailContent.removeAllViews();
             if (active[0] == 2) {
                 if (data.screenshotThumbs.isEmpty()) {
-                    detailContent.addView(text("Скриншоты на странице раздачи не найдены.",
-                            15, Color.LTGRAY, false));
+                    String message = data.screenshotsLoading ? "Загружаем скриншоты…"
+                            : data.screenshotsLoaded || data.screenshotRequestId.isEmpty()
+                            || data.screenshotPagesd.isEmpty()
+                            ? "Скриншоты на странице раздачи не найдены."
+                            : "Загружаем скриншоты…";
+                    detailContent.addView(text(message, 15, Color.LTGRAY, false));
+                    if (!data.screenshotsLoaded && !data.screenshotsLoading
+                            && !data.screenshotRequestId.isEmpty()
+                            && !data.screenshotPagesd.isEmpty()) {
+                        data.screenshotsLoading = true;
+                        loadScreenshotThumbnails(data, ready -> {
+                            data.screenshotsLoading = false;
+                            data.screenshotsLoaded = true;
+                            if (active[0] == 2) render.run();
+                        });
+                    } else if (data.screenshotRequestId.isEmpty()
+                            || data.screenshotPagesd.isEmpty()) {
+                        data.screenshotsLoaded = true;
+                    }
                 } else {
                     detailContent.addView(text("Скриншоты (" + data.screenshotThumbs.size() + ")",
                             13, TEAL, true));
