@@ -157,6 +157,43 @@ public class MainActivity extends Activity {
     private Runnable pendingBrowserNavigation;
     private List<HomeSection> homeSectionsMemory = new ArrayList<>();
     private String homeCacheDiagnostic = "Кэш главной ещё не проверялся";
+    // Temporary feed diagnostics: timings and response metadata only; never store cookies or page bodies.
+    private final StringBuilder feedLoadDiagnostics = new StringBuilder();
+    private final Object feedDiagnosticsLock = new Object();
+    private long feedDiagnosticStartedAtMs = 0L;
+    private String feedDiagnosticGroup = "";
+    private void resetFeedDiagnostics(String group, String[] paths) {
+        synchronized (feedDiagnosticsLock) {
+            feedLoadDiagnostics.setLength(0);
+            feedDiagnosticStartedAtMs = android.os.SystemClock.elapsedRealtime();
+            feedDiagnosticGroup = group;
+            feedLoadDiagnostics.append("Kinozal feed diagnostics\\n")
+                    .append("Группа: ").append(group).append('\\n')
+                    .append("Зеркало: ").append(client == null ? "?" : client.getMirror()).append('\\n')
+                    .append("Время: ").append(new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.ROOT)
+                            .format(new java.util.Date())).append('\\n')
+                    .append("Лент: ").append(paths.length).append('\\n');
+            for (int i = 0; i < paths.length; i++)
+                feedLoadDiagnostics.append(String.format(java.util.Locale.ROOT, "%02d. %s | %s\\n", i + 1, paths[i], i));
+        }
+        appendFeedDiagnostic("START", "начата загрузка группы");
+    }
+    private void appendFeedDiagnostic(String stage, String details) {
+        long elapsed = feedDiagnosticStartedAtMs == 0L ? 0L
+                : android.os.SystemClock.elapsedRealtime() - feedDiagnosticStartedAtMs;
+        String line = String.format(java.util.Locale.ROOT, "[+%d ms] %s %s\\n", elapsed, stage,
+                details == null ? "" : details);
+        synchronized (feedDiagnosticsLock) {
+            feedLoadDiagnostics.append(line);
+            if (feedLoadDiagnostics.length() > 48000)
+                feedLoadDiagnostics.delete(0, feedLoadDiagnostics.length() - 48000);
+        }
+        Log.i("KinozalFeedDiag", line.trim());
+    }
+    private String getFeedDiagnosticsText() {
+        synchronized (feedDiagnosticsLock) { return feedLoadDiagnostics.toString(); }
+    }
+
     private int homeRenderGeneration = 0;
     // Lightweight startup diagnostics: frame gaps and expensive home-row renders.
     private boolean homePerfMonitoring = false;
@@ -921,10 +958,13 @@ public class MainActivity extends Activity {
         // fetch the remaining feeds concurrently with the existing JS bridge.
         // This replaces N sequential page navigations with one navigation + Promise.all.
         if (index != 0) return;
+        String group = paths == HOME_PATHS ? "Главная" : "Подборки";
+        resetFeedDiagnostics(group, paths);
         if (paths == HOME_PATHS) startHomePerformanceMonitor();
 
         fetchBrowserPages(paths, htmlPages -> {
             if (htmlPages == null || htmlPages.isEmpty()) {
+                appendFeedDiagnostic("NAVIGATION", "не получен HTML первой страницы; error=" + safe(lastBrowserError));
                 if (retry == 0) {
                     status.setText("Повторное подключение к Kinozal…");
                     browserHandler.postDelayed(() -> loadHomeSectionsInBrowser(
@@ -935,12 +975,17 @@ public class MainActivity extends Activity {
                 return;
             }
 
+            appendFeedDiagnostic("FETCH", "получено HTML-ответов: " + htmlPages.size() + "/" + paths.length);
             executeSafely(io, () -> {
+                long parseStarted = android.os.SystemClock.elapsedRealtime();
                 List<HomeSection> loaded = new ArrayList<>();
                 int count = Math.min(paths.length, htmlPages.size());
                 for (int i = 0; i < count; i++) {
                     String html = htmlPages.get(i);
-                    if (html == null || html.trim().isEmpty()) continue;
+                    if (html == null || html.trim().isEmpty()) {
+                        appendFeedDiagnostic("PARSE", paths[i] + " пустой HTML");
+                        continue;
+                    }
                     HomeSection section = new HomeSection(titles[i], paths[i]);
                     try {
                         section.items.addAll(parseHomePosters(
@@ -949,10 +994,19 @@ public class MainActivity extends Activity {
                             diskCache.put("home|" + client.getMirror() + "|" + paths[i],
                                     html.getBytes(StandardCharsets.UTF_8));
                             loaded.add(section);
+                            appendFeedDiagnostic("PARSE", paths[i] + " карточек=" + section.items.size()
+                                    + ", htmlBytes=" + html.length());
+                        } else {
+                            appendFeedDiagnostic("PARSE", paths[i] + " карточки не найдены, htmlChars=" + html.length());
                         }
-                    } catch (Exception ignored) { }
+                    } catch (Exception e) {
+                        appendFeedDiagnostic("PARSE_ERROR", paths[i] + " " + safe(e.getMessage()));
+                    }
                 }
                 removeHomeDuplicates(loaded);
+                appendFeedDiagnostic("PARSE_DONE", "секций=" + loaded.size() + ", карточек="
+                        + countHomeCards(loaded) + ", parseMs="
+                        + (android.os.SystemClock.elapsedRealtime() - parseStarted));
                 if (!loaded.isEmpty()) {
                     if (paths == HOME_PATHS) saveHomeModel(loaded);
                     else if (paths == COLLECTION_PATHS) saveCollectionsModel(loaded);
@@ -963,6 +1017,7 @@ public class MainActivity extends Activity {
     }
 
     private void finishHomeBrowserLoad(String[] paths, List<HomeSection> sections) {
+        appendFeedDiagnostic("RENDER_START", "секций=" + sections.size() + ", карточек=" + countHomeCards(sections));
         // Preserve the existing screen completion behavior and keep Android TV
         // channel loading on its separate, unchanged pipeline.
         ensureFeedActions();
@@ -986,6 +1041,8 @@ public class MainActivity extends Activity {
         } else {
             runPendingBrowserNavigation();
         }
+        appendFeedDiagnostic("FINISH", "секций=" + sections.size() + ", карточек=" + total
+                + ", totalMs=" + (android.os.SystemClock.elapsedRealtime() - feedDiagnosticStartedAtMs));
         if (total == 0) {
             status.setText("Нет соединения");
             addEmpty("Не удалось получить постеры Kinozal. Проверьте авторизацию и выбранное зеркало.");
@@ -1115,7 +1172,12 @@ public class MainActivity extends Activity {
      * authenticated origin, then fetch all remaining home sections concurrently.
      */
     private void fetchBrowserPages(String[] paths, java.util.function.Consumer<List<String>> callback) {
+        long navigationStarted = android.os.SystemClock.elapsedRealtime();
+        appendFeedDiagnostic("NAVIGATION_START", paths[0]);
         fetchBrowserPage(paths[0], null, firstHtml -> {
+            appendFeedDiagnostic("NAVIGATION_DONE", paths[0] + " durationMs="
+                    + (android.os.SystemClock.elapsedRealtime() - navigationStarted)
+                    + ", htmlChars=" + (firstHtml == null ? 0 : firstHtml.length()));
             if (firstHtml == null || firstHtml.isEmpty()) {
                 if (lastBrowserError == null || lastBrowserError.isEmpty())
                     lastBrowserError = "Первый запрос novinki.php не вернул HTML";
@@ -1152,9 +1214,23 @@ public class MainActivity extends Activity {
                             List<String> result = new ArrayList<>();
                             result.add(firstHtml);
                             for (int i = 0; i < array.length(); i++) {
-                                String html = array.optString(i, "");
+                                org.json.JSONObject item = array.optJSONObject(i);
+                                if (item == null) {
+                                    result.add("");
+                                    appendFeedDiagnostic("HTTP_ERROR", paths[i + 1] + " некорректный JS-ответ");
+                                    continue;
+                                }
+                                String html = item.optString("html", "");
+                                int httpStatus = item.optInt("status", -1);
+                                long duration = item.optLong("durationMs", -1L);
+                                String error = item.optString("error", "");
                                 result.add(html);
+                                appendFeedDiagnostic("HTTP", paths[i + 1] + " status=" + httpStatus
+                                        + ", durationMs=" + duration + ", htmlChars=" + html.length()
+                                        + (error.isEmpty() ? "" : ", error=" + error));
                             }
+                            appendFeedDiagnostic("FETCH_DONE", "parallelRequests=" + array.length()
+                                    + ", totalMs=" + (android.os.SystemClock.elapsedRealtime() - navigationStarted));
                             callback.accept(result);
                         } catch (Exception e) {
                             lastBrowserError = "Ошибка разбора ответа JS-моста: " + e.getMessage();
@@ -1167,18 +1243,23 @@ public class MainActivity extends Activity {
             timeoutHolder[0] = () -> {
                 if (completed[0]) return;
                 completed[0] = true;
+                appendFeedDiagnostic("FETCH_TIMEOUT", "параллельные запросы превысили 35 секунд");
                 web.removeJavascriptInterface("KinozalHomeBridge");
                 lastBrowserError = "Тайм-аут параллельных запросов (35 секунд)";
                 callback.accept(null);
             };
             browserHandler.postDelayed(timeoutHolder[0], 35000);
 
-            String script = "(function(){var p=" + requested.toString() + ";"
-                    + "Promise.all(p.map(function(u){return fetch(u,{credentials:'include',"
-                    + "cache:'no-store'}).then(function(r){if(!r.ok)return '';return r.text();}"
-                    + ").catch(function(){return '';});})).then(function(a){"
+            String script = "(function(){var p=" + requested.toString() + ";var allStarted=Date.now();"
+                    + "Promise.all(p.map(function(u){var started=Date.now();return fetch(u,{credentials:'include',"
+                    + "cache:'no-store'}).then(function(r){var status=r.status;return r.text().then(function(t){"
+                    + "return {html:(status>=200&&status<300)?t:'',status:status,durationMs:Date.now()-started,"
+                    + "error:(status>=200&&status<300)?'':'HTTP '+status};});}"
+                    + ").catch(function(e){return {html:'',status:0,durationMs:Date.now()-started,"
+                    + "error:String(e&&e.message||e).slice(0,180)};});})).then(function(a){"
                     + "window.KinozalHomeBridge.onHomePagesResult(JSON.stringify(a));"
                     + "}).catch(function(e){window.KinozalHomeBridge.onHomePagesResult('[]');});})()";
+            appendFeedDiagnostic("JS_FETCH_START", "Promise.all: " + requested.length() + " запросов");
             web.evaluateJavascript(script, null);
         });
     }
@@ -3093,6 +3174,24 @@ public class MainActivity extends Activity {
         TextView networkInfo = text("Внешний IP и страна: проверка…", 14, GOLD, false);
         networkInfo.setLineSpacing(dp(4), 1f);
         panel.addView(networkInfo);
+        TextView feedInfo = text("Загрузка лент: диагностика ещё не запускалась", 13, TEAL, false);
+        feedInfo.setLineSpacing(dp(4), 1f);
+        LinearLayout.LayoutParams feedInfoParams = new LinearLayout.LayoutParams(-1, -2);
+        feedInfoParams.topMargin = dp(12);
+        panel.addView(feedInfo, feedInfoParams);
+        Button copyFeedLog = button("Скопировать диагностику загрузки");
+        copyFeedLog.setGravity(Gravity.CENTER);
+        LinearLayout.LayoutParams copyFeedLogParams = new LinearLayout.LayoutParams(-1, dp(44));
+        copyFeedLogParams.topMargin = dp(8);
+        panel.addView(copyFeedLog, copyFeedLogParams);
+        copyFeedLog.setOnClickListener(v -> {
+            String log = getFeedDiagnosticsText();
+            if (log.trim().isEmpty()) log = "Диагностика загрузки ещё не запускалась.";
+            android.content.ClipboardManager clipboard = (android.content.ClipboardManager)
+                    getSystemService(CLIPBOARD_SERVICE);
+            clipboard.setPrimaryClip(android.content.ClipData.newPlainText("Kinozal feed diagnostics", log));
+            Toast.makeText(this, "Диагностика скопирована. Вставьте её сюда.", Toast.LENGTH_LONG).show();
+        });
         TextView cacheInfo = text(
                 "Дисковый кэш Kinozal\\n"
                 + String.format(java.util.Locale.ROOT, "Занято: %.2f МБ из %.0f МБ (%.1f%%)\\n",
