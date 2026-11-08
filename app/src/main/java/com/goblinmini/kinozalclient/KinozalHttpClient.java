@@ -31,7 +31,7 @@ import javax.crypto.spec.GCMParameterSpec;
  * encrypted with an Android Keystore AES-GCM key before being persisted.
  */
 public final class KinozalHttpClient {
-    public static final String DEFAULT_MIRROR = "https://kinozal.cloudns.nz";
+    public static final String DEFAULT_MIRROR = "https://kinozal.me";
     private static final String PREFS = "kinozal_native_session";
     private static final String COOKIE_KEY = "encrypted_cookie_jar";
     private static final String USER_AGENT_KEY = "native_http_user_agent";
