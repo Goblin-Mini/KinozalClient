@@ -61,7 +61,7 @@ jobs:
           test -s "$RUNNER_TEMP/kinozal-release.jks"
 
       - name: Build signed release APK
-        if: github.event_name != 'pull_request' && github.ref_name != 'feature/magnet-playback' && github.ref_name != 'feature/performance' && github.ref_name != 'feature/screen-cache-background-refresh'
+        if: github.event_name != 'pull_request' && github.ref_name != 'feature/magnet-playback' && github.ref_name != 'feature/performance' && github.ref_name != 'feature/screen-cache-background-refresh' && github.ref_name != 'feature/screen-cache-background-refresh'
         env:
           KINOZAL_KEYSTORE_FILE: ${{ runner.temp }}/kinozal-release.jks
           KINOZAL_STORE_PASSWORD: ${{ secrets.KINOZAL_STORE_PASSWORD }}
