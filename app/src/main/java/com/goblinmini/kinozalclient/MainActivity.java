@@ -989,9 +989,14 @@ public class MainActivity extends Activity {
                         continue;
                     }
                     parseJobs.add(homeRefreshIo.submit(() -> {
+                        long taskStarted = android.os.SystemClock.elapsedRealtime();
                         HomeSection section = new HomeSection(titles[feedIndex], paths[feedIndex]);
                         section.items.addAll(parseHomePosters(
                                 Jsoup.parse(html, client.getMirror() + "/")));
+                        appendFeedDiagnostic("PARSE_TASK", paths[feedIndex]
+                                + " durationMs=" + (android.os.SystemClock.elapsedRealtime() - taskStarted)
+                                + ", cards=" + section.items.size()
+                                + ", thread=" + Thread.currentThread().getName());
                         return section;
                     }));
                 }
@@ -1227,18 +1232,19 @@ public class MainActivity extends Activity {
 
     private List<HomePoster> parseHomePosters(Document doc) {
         List<HomePoster> out = new ArrayList<>();
+        java.util.Set<String> seenLinks = new java.util.HashSet<>();
         Elements anchors = doc.select("table.t_peer td.nam > a[href*=details.php?id=]");
         if (anchors.isEmpty()) anchors = doc.select("a[href*=details.php?id=]");
         for (Element a : anchors) {
             String linkPath = a.attr("href").toLowerCase(java.util.Locale.ROOT);
             if (linkPath.contains("userdetails.php") || linkPath.contains("userdetails")) continue;
             String href = mirrorUrl(a.absUrl("href"), a.attr("href"));
-            if (href.isEmpty()) continue;
+            if (href.isEmpty() || !seenLinks.add(href)) continue;
+
+            // Resolve the table row once and reuse it for poster and statistics lookup.
+            Element row = a.closest("tr");
             Element img = a.selectFirst("img");
-            if (img == null) {
-                Element row = a.closest("tr");
-                if (row != null) img = row.selectFirst("img");
-            }
+            if (img == null && row != null) img = row.selectFirst("img");
             if (img == null && a.parent() != null) img = a.parent().selectFirst("img");
             if (img == null) {
                 Element ancestor = a;
@@ -1262,9 +1268,8 @@ public class MainActivity extends Activity {
             item.torrent = new Torrent();
             item.torrent.title = title;
             item.torrent.href = href;
-            Element statsRow = a.closest("tr");
-            if (statsRow != null) {
-                Elements cells = statsRow.select("td");
+            if (row != null) {
+                Elements cells = row.select("td");
                 item.torrent.size = cells.size() > 3 ? cells.get(3).text().trim() : "—";
                 item.torrent.seeds = cells.size() > 4 ? cells.get(4).text().trim() : "—";
                 item.torrent.leeches = cells.size() > 5 ? cells.get(5).text().trim() : "—";
@@ -1276,11 +1281,7 @@ public class MainActivity extends Activity {
             if (image == null || !(image.startsWith("http://") || image.startsWith("https://"))) image = "";
             item.imageUrl = image;
             item.torrent.poster = image;
-            boolean duplicate = false;
-            for (HomePoster old : out) {
-                if (old.torrent.href.equals(href)) { duplicate = true; break; }
-            }
-            if (!duplicate) out.add(item);
+            out.add(item);
         }
         return out;
     }
