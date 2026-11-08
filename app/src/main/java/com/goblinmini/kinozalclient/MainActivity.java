@@ -552,13 +552,21 @@ public class MainActivity extends Activity {
         browserHandler.post(navigation);
     }
 
+    private boolean hasHomeContent(List<HomeSection> sections) {
+        if (sections == null) return false;
+        for (HomeSection section : sections) {
+            if (section != null && section.items != null && !section.items.isEmpty()) return true;
+        }
+        return false;
+    }
+
     private void loadCollections() {
         if (deferBrowserNavigationIfBusy(this::loadCollections)) return;
         activateCachedScreen("collections");
         currentPath = "collections";
         currentTitle = "Подборки";
         heading.setText("Подборки");
-        if (!collectionSectionsMemory.isEmpty()) {
+        if (hasHomeContent(collectionSectionsMemory)) {
             if (list.getChildCount() == 0) renderHome(collectionSectionsMemory);
             if (areAllFeedsFresh(COLLECTION_PATHS, true)) {
                 progress.setVisibility(View.GONE);
@@ -574,7 +582,7 @@ public class MainActivity extends Activity {
             runOnUiThread(() -> {
                 collectionCacheLoading = false;
                 if (!"collections".equals(currentPath) || isFinishing()) return;
-                if (cached != null && !cached.isEmpty()) {
+                if (hasHomeContent(cached)) {
                     collectionSectionsMemory = new ArrayList<>(cached);
                     renderHome(collectionSectionsMemory);
                     progress.setVisibility(View.GONE);
