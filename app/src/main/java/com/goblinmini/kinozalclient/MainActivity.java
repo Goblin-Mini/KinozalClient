@@ -5398,6 +5398,13 @@ public class MainActivity extends Activity {
         root.setOrientation(LinearLayout.VERTICAL);
         root.setPadding(dp(12), dp(8), dp(12), dp(10));
         root.setBackgroundColor(BG);
+        // Start slightly smaller and lower; animate the native card into place.
+        root.setAlpha(0f);
+        root.setScaleX(0.975f);
+        root.setScaleY(0.975f);
+        root.setTranslationY(dp(14));
+        root.setPivotX(getResources().getDisplayMetrics().widthPixels / 2f);
+        root.setPivotY(getResources().getDisplayMetrics().heightPixels / 2f);
 
         TextView title = text(data.title, 20, GOLD, true);
         title.setMaxLines(2);
@@ -5695,6 +5702,14 @@ public class MainActivity extends Activity {
             window.setAttributes(windowParams);
             window.setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT);
         }
+        root.animate()
+                .alpha(1f)
+                .scaleX(1f)
+                .scaleY(1f)
+                .translationY(0f)
+                .setDuration(220L)
+                .setInterpolator(new android.view.animation.DecelerateInterpolator())
+                .start();
         if (data.poster != null && !data.poster.isEmpty()) loadImageIntoView(data.poster, poster);
         watch.requestFocus();
         prefetchInfoHash(data);
