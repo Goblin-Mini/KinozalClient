@@ -34,15 +34,19 @@ public final class KinozalHttpClient {
     public static final String DEFAULT_MIRROR = "https://kinozal.cloudns.nz";
     private static final String PREFS = "kinozal_native_session";
     private static final String COOKIE_KEY = "encrypted_cookie_jar";
+    private static final String USER_AGENT_KEY = "native_http_user_agent";
     private static final String KEY_ALIAS = "kinozal_session_aes";
     private final Context context;
     private final CookieManager cookies = new CookieManager(null, CookiePolicy.ACCEPT_ALL);
     private String baseUrl;
+    private volatile String userAgent;
     private volatile java.net.Proxy networkProxy = java.net.Proxy.NO_PROXY;
 
     public KinozalHttpClient(Context context, String mirror) {
         this.context = context.getApplicationContext();
         setMirror(mirror);
+        userAgent = this.context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                .getString(USER_AGENT_KEY, android.webkit.WebSettings.getDefaultUserAgent(this.context));
         restoreCookies();
     }
 
@@ -55,6 +59,14 @@ public final class KinozalHttpClient {
     }
 
     public synchronized String getMirror() { return baseUrl; }
+
+    /** Keep native requests on the exact UA used to obtain the browser clearance cookie. */
+    public void setUserAgent(String value) {
+        if (value == null || value.trim().isEmpty()) return;
+        userAgent = value.trim();
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+                .putString(USER_AGENT_KEY, userAgent).apply();
+    }
 
     /** Route native HTTP requests through the app-owned local SOCKS5 bridge. */
     public void setProxy(java.net.Proxy proxy) {
@@ -190,7 +202,7 @@ public final class KinozalHttpClient {
             connection.setConnectTimeout(15000);
             connection.setReadTimeout(25000);
             connection.setInstanceFollowRedirects(false);
-            connection.setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 Chrome/120.0 Mobile Safari/537.36");
+            connection.setRequestProperty("User-Agent", userAgent);
             connection.setRequestProperty("Accept", accept == null ? "*/*" : accept);
             connection.setRequestProperty("Referer",
                     referer == null || referer.trim().isEmpty() ? baseUrl + "/" : referer);
@@ -347,7 +359,26 @@ public final class KinozalHttpClient {
                         : "Повтори не раньше чем через " + retryAfter.trim() + " сек.";
                 throw new java.io.IOException("Kinozal временно ограничил запросы (HTTP 429). " + wait);
             }
-            if (code >= 400) throw new java.io.IOException("HTTP " + code + " при запросе Kinozal");
+            if (code >= 400) {
+                org.jsoup.nodes.Document errorDoc = org.jsoup.Jsoup.parse(result == null ? "" : result);
+                String errorTitle = errorDoc.title();
+                String errorText = errorDoc.text();
+                if (errorText.length() > 220) errorText = errorText.substring(0, 220);
+                String diagnostic = "";
+                if (code == 403) {
+                    String lower = (errorTitle + " " + errorText).toLowerCase(java.util.Locale.ROOT);
+                    if (lower.contains("cloudflare") || lower.contains("attention required")
+                            || lower.contains("checking your browser") || lower.contains("ray id")) {
+                        diagnostic = " (страница блокировки Cloudflare)";
+                    } else if (lower.contains("access denied") || lower.contains("forbidden")) {
+                        diagnostic = " (сервер запретил доступ; проверьте сессию/зеркало)";
+                    } else {
+                        diagnostic = " (тип ответа: " + (errorTitle.isEmpty() ? "неизвестная страница" : errorTitle) + ")";
+                    }
+                }
+                throw new java.io.IOException("HTTP " + code + diagnostic + " при запросе Kinozal"
+                        + (errorText.isEmpty() ? "" : ": " + errorText));
+            }
             return result;
         }
         throw new java.io.IOException("Не удалось выполнить запрос к Kinozal");
