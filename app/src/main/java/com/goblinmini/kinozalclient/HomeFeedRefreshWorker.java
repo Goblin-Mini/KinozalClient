@@ -48,6 +48,16 @@ public final class HomeFeedRefreshWorker extends Worker {
         boolean proxyStarted = false;
         sendRefreshState(context, group, index, path, title, bulk, total, "running", null);
         try {
+            // Background workers run outside the Activity/WebView. Restore the
+            // saved browser session (including Cloudflare clearance cookies)
+            // into this worker's isolated native cookie jar before requesting.
+            String browserCookies = client.getSavedBrowserCookies();
+            if (browserCookies != null && !browserCookies.trim().isEmpty()) {
+                client.importBrowserCookies(browserCookies);
+                Log.i(TAG, "Restored saved browser cookies for background feed refresh");
+            } else {
+                Log.w(TAG, "No saved browser cookie header; using native session cookies only");
+            }
             Socks5ProxyBridge.Settings proxySettings = bridge.getSettings();
             if (proxySettings.enabled) {
                 Proxy proxy = bridge.start();
