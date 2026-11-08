@@ -90,6 +90,7 @@ public class MainActivity extends Activity {
     private final java.util.Set<String> detailPrefetchScheduled = new java.util.HashSet<>();
     private LinearLayout root, sidebar, content, list, menuItems;
     private ScrollView homeScrollView;
+    private LinearLayout homeScreenList;
     private FrameLayout screenHost;
     private static final long SCREEN_TTL_MS = 60L * 60L * 1000L;
     private final java.util.LinkedHashMap<String, ScreenState> screenCache = new java.util.LinkedHashMap<>();
@@ -100,6 +101,7 @@ public class MainActivity extends Activity {
         final LinearLayout list;
         long loadedAt;
         boolean rendered;
+        boolean viewBuilt;
         boolean loading;
         List<Torrent> items = new ArrayList<>();
         ScreenState(String key, String title, ScrollView scroll, LinearLayout list) {
@@ -585,6 +587,8 @@ public class MainActivity extends Activity {
     }
 
     private void loadInitialCatalog(int startupRetry) {
+        ScreenState home = screenCache.get("home");
+        if (home != null) activateScreen(home);
         currentPath = "";
         currentTitle = "Главная";
         heading.setText("Главная");
@@ -592,6 +596,12 @@ public class MainActivity extends Activity {
             initialHomeFetchPending = true;
             progress.setVisibility(View.VISIBLE);
             status.setText("Подготавливаем главную…");
+            return;
+        }
+        if (home != null && home.rendered && home.loadedAt > 0L
+                && System.currentTimeMillis() - home.loadedAt < SCREEN_TTL_MS) {
+            progress.setVisibility(View.GONE);
+            status.setText("Главная · из памяти");
             return;
         }
         startInitialHomeBrowserLoad();
@@ -1492,9 +1502,13 @@ public class MainActivity extends Activity {
     }
 
     private void renderHome(List<HomeSection> sections) {
-        list.removeAllViews();
+        homeScreenList.removeAllViews();
+        ScreenState home = screenCache.get("home");
+        if (home != null) { home.rendered = true; home.viewBuilt = true; home.loadedAt = System.currentTimeMillis(); }
         if (sections.isEmpty()) {
-            addEmpty("На главной пока нет подборок.");
+            TextView empty = text("На главной пока нет подборок.", 17, Color.LTGRAY, false);
+            empty.setPadding(dp(22), dp(24), dp(22), dp(24));
+            homeScreenList.addView(empty);
             return;
         }
         renderHomeSectionsIncrementally(sections);
@@ -1583,19 +1597,19 @@ public class MainActivity extends Activity {
         // Replace only this feed's existing views, preserving other rows and DPAD focus.
         String titleTag = "home-title:" + section.path;
         boolean replaced = false;
-        for (int i = 0; i + 1 < list.getChildCount(); i++) {
-            if (titleTag.equals(list.getChildAt(i).getTag())) {
-                list.removeViewAt(i + 1);
-                list.removeViewAt(i);
-                list.addView(sectionTitle, i, titleParams);
-                list.addView(horizontal, i + 1, rowParams);
+        for (int i = 0; i + 1 < homeScreenList.getChildCount(); i++) {
+            if (titleTag.equals(homeScreenList.getChildAt(i).getTag())) {
+                homeScreenList.removeViewAt(i + 1);
+                homeScreenList.removeViewAt(i);
+                homeScreenList.addView(sectionTitle, i, titleParams);
+                homeScreenList.addView(horizontal, i + 1, rowParams);
                 replaced = true;
                 break;
             }
         }
         if (!replaced) {
-            list.addView(sectionTitle, titleParams);
-            list.addView(horizontal, rowParams);
+            homeScreenList.addView(sectionTitle, titleParams);
+            homeScreenList.addView(horizontal, rowParams);
         }
         horizontal.post(this::scheduleVisibleHomePosterLoad);
 
@@ -1687,11 +1701,11 @@ public class MainActivity extends Activity {
     }
 
     private void scheduleVisibleHomePosterLoad() {
-        if (list == null) return;
-        list.post(() -> {
-            if (list == null) return;
-            for (int i = 0; i < list.getChildCount(); i++) {
-                View child = list.getChildAt(i);
+        if (homeScreenList == null) return;
+        homeScreenList.post(() -> {
+            if (homeScreenList == null) return;
+            for (int i = 0; i < homeScreenList.getChildCount(); i++) {
+                View child = homeScreenList.getChildAt(i);
                 if (child instanceof android.widget.HorizontalScrollView) {
                     loadVisibleHomePosters((android.widget.HorizontalScrollView) child);
                 }
@@ -2006,6 +2020,7 @@ public class MainActivity extends Activity {
         homeScrollView.addView(list);
         screenHost.addView(homeScrollView, new FrameLayout.LayoutParams(-1, -1));
         main.addView(screenHost, new LinearLayout.LayoutParams(-1, 0, 1));
+        homeScreenList = list;
         activeScreen = new ScreenState("home", "Главная", homeScrollView, list);
         screenCache.put("home", activeScreen);
         homeScrollView.setOnScrollChangeListener((View v, int x, int y, int oldX, int oldY) -> {
@@ -2997,7 +3012,6 @@ public class MainActivity extends Activity {
         if (activeScreen != null && activeScreen.scroll != state.scroll)
             activeScreen.scroll.setVisibility(View.GONE);
         activeScreen = state;
-        homeScrollView = state.scroll;
         list = state.list;
         currentPath = "home".equals(state.key) ? "" : state.key.split("\\|POST:", 2)[0];
         currentTitle = state.title;
@@ -3007,9 +3021,14 @@ public class MainActivity extends Activity {
         if (state.rendered && state.items != null) {
             torrents.clear();
             torrents.addAll(state.items);
+            if (!state.viewBuilt) {
+                renderTorrents(state.items);
+                state.viewBuilt = true;
+                if (state.items.isEmpty()) addEmpty("Страница загружена, но раздачи не найдены. Возможно, фильтр не применился.");
+            }
             setCatalogStatus("Раздач", state.items.size());
         }
-        if (state.scroll == homeScrollView) scheduleVisibleHomePosterLoad();
+        if ("home".equals(state.key)) scheduleVisibleHomePosterLoad();
     }
 
     private void load(String path, String title) { load(path, title, null); }
@@ -3033,19 +3052,45 @@ public class MainActivity extends Activity {
         }
 
         final ScreenState requestedScreen = state;
+        if (!state.rendered) {
+            io.execute(() -> {
+                byte[] cached = diskCache.get("screen|" + client.getMirror() + "|" + state.key, SCREEN_TTL_MS);
+                String cachedHtml = cached == null ? "" : new String(cached, StandardCharsets.UTF_8);
+                runOnUiThread(() -> {
+                    if (!cachedHtml.isEmpty() && !requestedScreen.rendered) {
+                        showLoadedPage(cachedHtml, requestedScreen);
+                    }
+                    if (requestedScreen.loadedAt > 0L
+                            && System.currentTimeMillis() - requestedScreen.loadedAt < SCREEN_TTL_MS) {
+                        requestedScreen.loading = false;
+                        if (requestedScreen == activeScreen) {
+                            progress.setVisibility(View.GONE);
+                            status.setText(title + " · из сохранённого кэша");
+                        }
+                    } else {
+                        requestScreenFromNetwork(path, postBody, requestedScreen);
+                    }
+                });
+            });
+        } else {
+            requestScreenFromNetwork(path, postBody, requestedScreen);
+        }
+    }
+
+    private void requestScreenFromNetwork(String path, String postBody, ScreenState target) {
         java.util.function.Consumer<String> completion = html -> {
             if (html != null && !html.isEmpty()) {
                 lastKinozalConnectionStatus = "установлено";
                 updateSidebarConnectionInfo();
-                showLoadedPage(html, requestedScreen);
+                showLoadedPage(html, target);
             } else {
-                requestedScreen.loading = false;
-                if (requestedScreen == activeScreen) {
+                target.loading = false;
+                if (target == activeScreen) {
                     lastKinozalConnectionStatus = "нет соединения";
                     if (sidebarConnectionInfo != null) sidebarConnectionInfo.setText("Подключение к Kinozal: нет соединения");
                     progress.setVisibility(View.GONE);
-                    status.setText(requestedScreen.rendered ? "Нет соединения · показан сохранённый экран" : "Нет соединения");
-                    if (!requestedScreen.rendered) addEmpty("Не удалось загрузить каталог через браузерную сессию.");
+                    status.setText(target.rendered ? "Нет соединения · показан сохранённый экран" : "Нет соединения");
+                    if (!target.rendered) addEmpty("Не удалось загрузить каталог через браузерную сессию.");
                 }
             }
         };
@@ -3237,6 +3282,7 @@ public class MainActivity extends Activity {
         diskCache.put("screen|" + client.getMirror() + "|" + target.key,
                 html.getBytes(StandardCharsets.UTF_8));
         if (target != activeScreen) return;
+        target.viewBuilt = true;
         lastHtml = html;
         progress.setVisibility(View.GONE);
         torrents.clear(); torrents.addAll(parsed);
