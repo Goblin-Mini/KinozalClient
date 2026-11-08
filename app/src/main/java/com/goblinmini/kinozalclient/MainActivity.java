@@ -75,6 +75,18 @@ public class MainActivity extends Activity {
     private final ExecutorService imageIo = Executors.newFixedThreadPool(3);
     // Home refresh is isolated so nine feed requests cannot starve poster loading.
     private final ExecutorService homeRefreshIo = Executors.newFixedThreadPool(4);
+
+    // WebView callbacks may arrive after Activity.onDestroy() has shut down
+    // the executors. Ignore those late tasks instead of crashing the UI thread.
+    private void executeSafely(ExecutorService executor, Runnable task) {
+        if (executor == null || task == null || executor.isShutdown()
+                || isFinishing() || isDestroyed()) return;
+        try {
+            executor.execute(task);
+        } catch (java.util.concurrent.RejectedExecutionException ignored) {
+            // The executor may be shut down between the state check and execute().
+        }
+    }
     private KinozalHttpClient client;
     private Socks5ProxyBridge socks5Bridge;
     private DiskCache diskCache;
@@ -359,7 +371,7 @@ public class MainActivity extends Activity {
             test.setEnabled(false);
             testResult.setTextColor(TEAL);
             testResult.setText("Проверка SOCKS5 и авторизации…");
-            io.execute(() -> {
+            executeSafely(io, () -> {
                 try {
                     socks5Bridge.testConnection(testHost, testPort, testUser, testPassword);
                     runOnUiThread(() -> {
@@ -603,7 +615,7 @@ public class MainActivity extends Activity {
             homeCacheLoadFinished = true;
             return;
         }
-        io.execute(() -> {
+        executeSafely(io, () -> {
             List<HomeSection> cached = readHomeModel();
             runOnUiThread(() -> {
                 homeCacheLoadFinished = true;
@@ -770,7 +782,7 @@ public class MainActivity extends Activity {
     private void refreshHomeInBackground() {
         if (homeRefreshInProgress) return;
         homeRefreshInProgress = true;
-        homeRefreshIo.execute(() -> {
+        executeSafely(homeRefreshIo, () -> {
             try {
                 java.util.Map<String, HomeSection> merged = new java.util.LinkedHashMap<>();
                 for (HomeSection old : homeSectionsMemory) merged.put(old.path, old);
@@ -829,7 +841,7 @@ public class MainActivity extends Activity {
     }
 
     private void loadInitialCatalogFromHttp(String[] homePaths, String[] homeTitles) {
-        homeRefreshIo.execute(() -> {
+        executeSafely(homeRefreshIo, () -> {
             List<java.util.concurrent.Future<HomeSection>> jobs = new ArrayList<>();
             for (int i = 0; i < homePaths.length; i++) {
                 final int index = i;
@@ -877,10 +889,10 @@ public class MainActivity extends Activity {
             removeHomeDuplicates(sections);
             if (paths == HOME_PATHS) {
                 List<HomeSection> channelSnapshot = new ArrayList<>(sections);
-                io.execute(() -> saveHomeModel(channelSnapshot));
+                executeSafely(io, () -> saveHomeModel(channelSnapshot));
             } else if (paths == COLLECTION_PATHS) {
                 List<HomeSection> collectionSnapshot = new ArrayList<>(sections);
-                io.execute(() -> saveCollectionsModel(collectionSnapshot));
+                executeSafely(io, () -> saveCollectionsModel(collectionSnapshot));
             }
             // Keep the bulk-refresh control on both first-load screens.
             ensureFeedActions();
@@ -931,7 +943,7 @@ public class MainActivity extends Activity {
             // Disk writes and Jsoup parsing are deliberately kept off the UI
             // thread. Each completed page is processed independently, then
             // only its small parsed model is handed back for rendering.
-            io.execute(() -> {
+            executeSafely(io, () -> {
                 HomeSection section = new HomeSection(titles[index], paths[index]);
                 try {
                     // Parse and validate first. Never replace a known-good cache
@@ -1005,7 +1017,7 @@ public class MainActivity extends Activity {
             // Keep each TV channel independent: the same release may legitimately
             // appear in more than one feed. parseHomePosters already removes duplicates
             // within an individual feed.
-            io.execute(() -> {
+            executeSafely(io, () -> {
                 try {
                     org.json.JSONArray feeds = new org.json.JSONArray();
                     for (HomeSection section : sections) {
@@ -1061,7 +1073,7 @@ public class MainActivity extends Activity {
                 browserHandler.postDelayed(() -> loadNextTvChannelFeed(index + 1, sections), 180);
                 return;
             }
-            io.execute(() -> {
+            executeSafely(io, () -> {
                 HomeSection section = new HomeSection(title, path);
                 try {
                     section.items.addAll(parseHomePosters(Jsoup.parse(html, client.getMirror() + "/")));
@@ -1338,7 +1350,7 @@ public class MainActivity extends Activity {
      * Resolve it from the torrent page og:image, also used by the details view.
      */
     private void loadHomePosterFromDetails(HomePoster item, ImageView target) {
-        io.execute(() -> {
+        executeSafely(io, () -> {
             try {
                 String html = client.fetch(item.torrent.href);
                 Document doc = Jsoup.parse(html, item.torrent.href);
@@ -1411,7 +1423,7 @@ public class MainActivity extends Activity {
             target.setImageBitmap(memoryBitmap);
             return;
         }
-        imageIo.execute(() -> {
+        executeSafely(imageIo, () -> {
             Bitmap ready = getCachedImageBitmap(imageUrl);
             if (ready != null) {
                 runOnUiThread(() -> { if (target.getParent() != null) target.setImageBitmap(ready); });
@@ -1444,7 +1456,7 @@ public class MainActivity extends Activity {
                         loadImageWithHttp(imageUrl, target, referer); return;
                     }
                     final String base64 = encoded;
-                    imageIo.execute(() -> {
+                    executeSafely(imageIo, () -> {
                         try {
                             byte[] bytes = android.util.Base64.decode(base64, android.util.Base64.DEFAULT);
                             diskCache.put("image|" + imageUrl, bytes);
@@ -1467,7 +1479,7 @@ public class MainActivity extends Activity {
 
     private void loadImageWithHttp(String imageUrl, ImageView target, String referer) {
         if (imageUrl == null || imageUrl.isEmpty() || target == null) return;
-        imageIo.execute(() -> {
+        executeSafely(imageIo, () -> {
             try {
                 byte[] bytes = diskCache.get("image|" + imageUrl, 0L);
                 if (bytes == null || bytes.length == 0) {
@@ -1635,7 +1647,7 @@ public class MainActivity extends Activity {
                 handleFeedRefreshState(failed);
                 return;
             }
-            io.execute(() -> {
+            executeSafely(io, () -> {
                 HomeSection refreshed = new HomeSection(title, path);
                 String cloudflareText = Jsoup.parse(html).text().toLowerCase(java.util.Locale.ROOT);
                 String failure = null;
@@ -2800,7 +2812,7 @@ public class MainActivity extends Activity {
             return;
         }
         showMessage("Проверяем соединение с TorrServe…");
-        io.execute(() -> {
+        executeSafely(io, () -> {
             HttpURLConnection connection = null;
             try {
                 connection = (HttpURLConnection) new URL(base + "/echo").openConnection();
@@ -2826,7 +2838,7 @@ public class MainActivity extends Activity {
                 .setNegativeButton("Отмена", null)
                 .setPositiveButton("Очистить", (dialog, which) -> {
                     showMessage("Очищаем кэш…");
-                    io.execute(() -> {
+                    executeSafely(io, () -> {
                         if (diskCache != null) diskCache.clear();
                         homeModelFile().delete();
                         runOnUiThread(() -> {
@@ -2852,7 +2864,7 @@ public class MainActivity extends Activity {
             return;
         }
         showMessage("Проверяем историю TorrServer…");
-        io.execute(() -> {
+        executeSafely(io, () -> {
             HttpURLConnection connection = null;
             try {
                 connection = (HttpURLConnection) new URL(base + "/viewed").openConnection();
@@ -3109,7 +3121,7 @@ public class MainActivity extends Activity {
 
     private void loadExternalCountryInfo(TextView target) {
         target.setText("Страна подключения: определяется…");
-        io.execute(() -> {
+        executeSafely(io, () -> {
             HttpURLConnection connection = null;
             try {
                 Socks5ProxyBridge.Settings cfg = socks5Bridge.getSettings();
@@ -3325,7 +3337,7 @@ public class MainActivity extends Activity {
             dialog.getWindow().setLayout(ViewGroup.LayoutParams.MATCH_PARENT,
                     ViewGroup.LayoutParams.MATCH_PARENT);
         }
-        io.execute(() -> {
+        executeSafely(io, () -> {
             String[] servers = !jackettCustom().isEmpty()
                     ? new String[]{jackettCustom()}
                     : new String[]{jackettPrimary(), jackettBackup()};
@@ -3591,7 +3603,7 @@ public class MainActivity extends Activity {
                 }
             });
         } else {
-            io.execute(() -> {
+            executeSafely(io, () -> {
                 try {
                     String html = postBody == null ? client.fetch(path) : client.fetchPost(path, postBody);
                     runOnUiThread(() -> {
@@ -3704,7 +3716,7 @@ public class MainActivity extends Activity {
                         // DOM parsing on the WebView/UI thread caused visible
                         // stalls for large Kinozal pages. Validate the login
                         // redirect on the background I/O executor instead.
-                        io.execute(() -> {
+                        executeSafely(io, () -> {
                             boolean loginForm = false;
                             try {
                                 Document loaded = Jsoup.parse(loadedHtml);
@@ -4162,7 +4174,7 @@ public class MainActivity extends Activity {
             return;
         }
         progress.setVisibility(View.VISIBLE);
-        io.execute(() -> {
+        executeSafely(io, () -> {
             try {
                 Document d = Jsoup.parse(cached, client.getMirror() + "/");
                 List<Category> found = new ArrayList<>();
@@ -5118,7 +5130,7 @@ public class MainActivity extends Activity {
             // attempt followed by a second browser navigation.
             fetchBrowserPage(href, null, onFreshHtml);
         } else {
-            io.execute(() -> {
+            executeSafely(io, () -> {
                 try {
                     onFreshHtml.accept(client.fetch(href));
                 } catch (Exception e) {
@@ -5285,7 +5297,7 @@ public class MainActivity extends Activity {
         if (sessionWebView != null) {
             fetchBrowserPage(endpoint, null, onHtml);
         } else {
-            io.execute(() -> {
+            executeSafely(io, () -> {
                 try {
                     onHtml.accept(client.fetch(endpoint));
                 } catch (Exception e) {
@@ -5798,7 +5810,7 @@ public class MainActivity extends Activity {
         // Match TorrServe MatriX "Играть все": add the magnet through the server API,
         // wait until metadata is ready, then open the server-generated M3U playlist.
         // Do not select a single file or build a /stream URL on the client.
-        io.execute(() -> {
+        executeSafely(io, () -> {
             try {
                 org.json.JSONObject addRequest = new org.json.JSONObject();
                 addRequest.put("action", "add");
@@ -6034,7 +6046,7 @@ public class MainActivity extends Activity {
     }
 
     private void downloadTorrentNativeForPlayback(TorrentDetails data) {
-        io.execute(() -> {
+        executeSafely(io, () -> {
             try {
                 String browserCookies = CookieManager.getInstance().getCookie(client.getMirror());
                 if (browserCookies != null && !browserCookies.isEmpty()) {
@@ -6067,7 +6079,7 @@ public class MainActivity extends Activity {
     }
 
     private void downloadTorrentNative(TorrentDetails data) {
-        io.execute(() -> {
+        executeSafely(io, () -> {
             try {
                 String browserCookies = CookieManager.getInstance().getCookie(client.getMirror());
                 if (browserCookies != null && !browserCookies.isEmpty()) {
@@ -6137,7 +6149,7 @@ public class MainActivity extends Activity {
                         return;
                     }
                     if (group == null || path == null) return;
-                    io.execute(() -> {
+                    executeSafely(io, () -> {
                         List<HomeSection> snapshot = "home".equals(group)
                                 ? readHomeModel() : readCollectionsModel();
                         if (snapshot == null) return;
