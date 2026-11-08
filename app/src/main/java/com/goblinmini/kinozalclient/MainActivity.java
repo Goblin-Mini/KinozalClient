@@ -3314,19 +3314,12 @@ public class MainActivity extends Activity {
         activateCachedScreen("catalog");
         currentPath = path; currentTitle = title; heading.setText(title);
         final int requestGeneration = ++catalogLoadGeneration;
-        final boolean hasPostBody = postBody != null;
-        // GET category pages are restored immediately from the last successful
-        // response. The WebView refresh continues in the background.
-        List<Torrent> cachedItems = hasPostBody ? null : readCatalogPageCache(path);
-        if (cachedItems != null && !cachedItems.isEmpty()) {
-            torrents.clear();
-            torrents.addAll(cachedItems);
-            progress.setVisibility(View.VISIBLE);
-            status.setText("Сохранённая категория · обновляем…");
-            renderTorrents(cachedItems);
-        } else {
-            showPageLoading("Загрузка каталога…");
-        }
+        // A category switch must never leave the previous category's rows on
+        // screen. Always clear the list and show the loading state immediately;
+        // the persistent cache is updated after a successful response, but is
+        // not used as stale content during interactive navigation.
+        torrents.clear();
+        showPageLoading("Загрузка каталога…");
         if (sessionWebView != null) {
             fetchBrowserPage(path, postBody, html -> {
                 if (requestGeneration != catalogLoadGeneration) return;
@@ -3338,12 +3331,8 @@ public class MainActivity extends Activity {
                     lastKinozalConnectionStatus = "нет соединения";
                     if (sidebarConnectionInfo != null) sidebarConnectionInfo.setText("Подключение к Kinozal: нет соединения");
                     progress.setVisibility(View.GONE);
-                    if (cachedItems != null && !cachedItems.isEmpty()) {
-                        status.setText("Показана сохранённая категория · обновление недоступно");
-                    } else {
-                        status.setText("Нет соединения");
-                        addEmpty("Не удалось загрузить каталог через браузерную сессию.");
-                    }
+                    status.setText("Нет соединения");
+                    addEmpty("Не удалось загрузить каталог через браузерную сессию.");
                 }
             });
         } else {
@@ -3362,12 +3351,8 @@ public class MainActivity extends Activity {
                         lastKinozalConnectionStatus = "нет соединения";
                         if (sidebarConnectionInfo != null) sidebarConnectionInfo.setText("Подключение к Kinozal: нет соединения");
                         progress.setVisibility(View.GONE);
-                        if (cachedItems != null && !cachedItems.isEmpty()) {
-                            status.setText("Показана сохранённая категория · обновление недоступно");
-                        } else {
-                            status.setText("Нет соединения");
-                            addEmpty("Не удалось загрузить каталог. " + safe(e.getMessage()));
-                        }
+                        status.setText("Нет соединения");
+                        addEmpty("Не удалось загрузить каталог. " + safe(e.getMessage()));
                     });
                 }
             });
