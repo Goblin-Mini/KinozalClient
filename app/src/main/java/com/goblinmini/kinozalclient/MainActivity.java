@@ -558,10 +558,105 @@ public class MainActivity extends Activity {
         currentTitle = "Подборки";
         heading.setText("Подборки");
         showPageLoading("Загрузка подборок через WebView…");
+        // Restore the last successful collection snapshot immediately after Activity recreation.
+        // Fresh authenticated feeds continue loading in the background and replace these rows.
+        io.execute(() -> {
+            List<HomeSection> cached = readCollectionModel();
+            runOnUiThread(() -> {
+                if (cached != null && !cached.isEmpty() && !collectionScreen.rendered
+                        && activeScreen == collectionScreen && !isFinishing()) {
+                    renderHomeSectionsIncrementally(cached, collectionScreen.list);
+                    collectionScreen.rendered = true;
+                    collectionScreen.viewBuilt = true;
+                    collectionScreen.loadedAt = System.currentTimeMillis();
+                    status.setText("Подборки из сохранённого кэша · обновляем…");
+                }
+            });
+        });
         if (sessionWebView == null) restoreBrowserSession("");
         browserHandler.postDelayed(() -> loadHomeSectionsInBrowser(
                 COLLECTION_PATHS, COLLECTION_TITLES, 0, new ArrayList<>(), 0),
                 sessionWebView == null ? 350 : 100);
+    }
+
+    private java.io.File collectionModelFile() {
+        return new java.io.File(getFilesDir(), "kinozal_collections_model_v1.json");
+    }
+
+    private void saveCollectionModel(List<HomeSection> sections) {
+        try {
+            org.json.JSONArray feeds = new org.json.JSONArray();
+            for (HomeSection section : sections) {
+                org.json.JSONObject feed = new org.json.JSONObject();
+                feed.put("title", section.title);
+                feed.put("path", section.path);
+                org.json.JSONArray items = new org.json.JSONArray();
+                for (HomePoster poster : section.items) {
+                    org.json.JSONObject item = new org.json.JSONObject();
+                    item.put("title", poster.torrent.title);
+                    item.put("href", poster.torrent.href);
+                    item.put("size", poster.torrent.size);
+                    item.put("seeds", poster.torrent.seeds);
+                    item.put("leeches", poster.torrent.leeches);
+                    item.put("uploaded", poster.torrent.uploaded);
+                    item.put("image", poster.imageUrl);
+                    items.put(item);
+                }
+                feed.put("items", items);
+                feeds.put(feed);
+            }
+            org.json.JSONObject snapshot = new org.json.JSONObject();
+            snapshot.put("version", 1);
+            snapshot.put("mirror", client.getMirror());
+            snapshot.put("savedAt", System.currentTimeMillis());
+            snapshot.put("feeds", feeds);
+            java.io.File target = collectionModelFile();
+            java.io.File temp = new java.io.File(target.getParentFile(), target.getName() + ".tmp");
+            try (java.io.FileOutputStream out = new java.io.FileOutputStream(temp)) {
+                out.write(snapshot.toString().getBytes(StandardCharsets.UTF_8));
+                out.getFD().sync();
+            }
+            if (target.exists() && !target.delete()) throw new java.io.IOException("Cannot replace collections cache");
+            if (!temp.renameTo(target)) throw new java.io.IOException("Cannot commit collections cache");
+        } catch (Exception ignored) { }
+    }
+
+    private List<HomeSection> readCollectionModel() {
+        java.io.File file = collectionModelFile();
+        if (!file.isFile() || file.length() <= 0 || file.length() > 8L * 1024L * 1024L) return null;
+        try {
+            byte[] bytes = java.nio.file.Files.readAllBytes(file.toPath());
+            org.json.JSONObject snapshot = new org.json.JSONObject(new String(bytes, StandardCharsets.UTF_8));
+            if (snapshot.optInt("version") != 1
+                    || !client.getMirror().equals(snapshot.optString("mirror"))) return null;
+            if (System.currentTimeMillis() - snapshot.optLong("savedAt") > 7L * 24 * 60 * 60 * 1000) return null;
+            org.json.JSONArray feeds = snapshot.optJSONArray("feeds");
+            if (feeds == null) return null;
+            List<HomeSection> result = new ArrayList<>();
+            for (int i = 0; i < feeds.length(); i++) {
+                org.json.JSONObject feed = feeds.optJSONObject(i);
+                if (feed == null) continue;
+                HomeSection section = new HomeSection(feed.optString("title"), feed.optString("path"));
+                org.json.JSONArray items = feed.optJSONArray("items");
+                if (items == null) continue;
+                for (int j = 0; j < items.length(); j++) {
+                    org.json.JSONObject value = items.optJSONObject(j);
+                    if (value == null) continue;
+                    HomePoster poster = new HomePoster();
+                    poster.torrent = new Torrent();
+                    poster.torrent.title = value.optString("title");
+                    poster.torrent.href = value.optString("href");
+                    poster.torrent.size = value.optString("size", "—");
+                    poster.torrent.seeds = value.optString("seeds", "—");
+                    poster.torrent.leeches = value.optString("leeches", "—");
+                    poster.torrent.uploaded = value.optString("uploaded", "");
+                    poster.imageUrl = value.optString("image");
+                    if (!poster.torrent.title.isEmpty() && !poster.torrent.href.isEmpty()) section.items.add(poster);
+                }
+                if (!section.items.isEmpty()) result.add(section);
+            }
+            return result;
+        } catch (Exception ignored) { return null; }
     }
 
     private void preloadHomeCache() {
@@ -835,9 +930,11 @@ public class MainActivity extends Activity {
         if (index == 0 && retry == 0 && paths == HOME_PATHS) startHomePerformanceMonitor();
         if (index >= paths.length) {
             removeHomeDuplicates(sections);
+            List<HomeSection> feedSnapshot = new ArrayList<>(sections);
             if (paths == HOME_PATHS) {
-                List<HomeSection> channelSnapshot = new ArrayList<>(sections);
-                io.execute(() -> saveHomeModel(channelSnapshot));
+                io.execute(() -> saveHomeModel(feedSnapshot));
+            } else if (paths == COLLECTION_PATHS) {
+                io.execute(() -> saveCollectionModel(feedSnapshot));
             }
             // Render into the screen that initiated this feed request. Home refreshes
             // must never append their rows to a category currently shown by the user.
