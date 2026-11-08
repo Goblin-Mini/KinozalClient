@@ -2112,6 +2112,8 @@ public class MainActivity extends Activity {
             running.putExtra("refresh_state", "running");
             handleFeedRefreshState(running);
         }
+        if (label != null) label.setText("Одновременно загружаются все " + paths.length + " лент…");
+        if (bar != null) bar.setIndeterminate(true);
 
         fetchBrowserPage(paths[0], null, html -> {
             if (isFinishing()) {
