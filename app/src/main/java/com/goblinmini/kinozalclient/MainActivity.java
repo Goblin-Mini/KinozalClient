@@ -90,6 +90,22 @@ public class MainActivity extends Activity {
     private final java.util.Set<String> detailPrefetchScheduled = new java.util.HashSet<>();
     private LinearLayout root, sidebar, content, list, menuItems;
     private ScrollView homeScrollView;
+    private FrameLayout screenHost;
+    private static final long SCREEN_TTL_MS = 60L * 60L * 1000L;
+    private final java.util.LinkedHashMap<String, ScreenState> screenCache = new java.util.LinkedHashMap<>();
+    private ScreenState activeScreen;
+    private static class ScreenState {
+        final String key, title;
+        final ScrollView scroll;
+        final LinearLayout list;
+        long loadedAt;
+        boolean rendered;
+        boolean loading;
+        List<Torrent> items = new ArrayList<>();
+        ScreenState(String key, String title, ScrollView scroll, LinearLayout list) {
+            this.key = key; this.title = title; this.scroll = scroll; this.list = list;
+        }
+    }
     private TextView heading, status;
     private ProgressBar progress;
     private EditText search;
@@ -1983,11 +1999,15 @@ public class MainActivity extends Activity {
         LinearLayout.LayoutParams progressParams = new LinearLayout.LayoutParams(-1, dp(3));
         progressParams.bottomMargin = dp(5);
         main.addView(progress, progressParams);
+        screenHost = new FrameLayout(this);
         homeScrollView = new ScrollView(this); homeScrollView.setFillViewport(true);
         homeScrollView.setVerticalScrollBarEnabled(false);
         list = new LinearLayout(this); list.setOrientation(LinearLayout.VERTICAL);
         homeScrollView.addView(list);
-        main.addView(homeScrollView, new LinearLayout.LayoutParams(-1, 0, 1));
+        screenHost.addView(homeScrollView, new FrameLayout.LayoutParams(-1, -1));
+        main.addView(screenHost, new LinearLayout.LayoutParams(-1, 0, 1));
+        activeScreen = new ScreenState("home", "Главная", homeScrollView, list);
+        screenCache.put("home", activeScreen);
         homeScrollView.setOnScrollChangeListener((View v, int x, int y, int oldX, int oldY) -> {
             if (y != oldY) scheduleVisibleHomePosterLoad();
         });
@@ -2945,51 +2965,99 @@ public class MainActivity extends Activity {
     private void showMessage(String message) { Toast.makeText(this, message, Toast.LENGTH_LONG).show(); }
 
     private void showPageLoading(String message) {
-        // A thin activity indicator sits directly below the search field.
         progress.setVisibility(View.VISIBLE);
-        list.removeAllViews();
+        if (activeScreen != null && !activeScreen.rendered) list.removeAllViews();
         status.setText(message);
+    }
+
+    private String screenKey(String path, String postBody) {
+        return path + (postBody == null ? "" : "|POST:" + postBody.hashCode());
+    }
+
+    private ScreenState obtainScreen(String path, String title, String postBody) {
+        String key = screenKey(path, postBody);
+        ScreenState state = screenCache.get(key);
+        if (state == null) {
+            ScrollView scroll = new ScrollView(this);
+            scroll.setFillViewport(true);
+            scroll.setVerticalScrollBarEnabled(false);
+            LinearLayout screenList = new LinearLayout(this);
+            screenList.setOrientation(LinearLayout.VERTICAL);
+            scroll.addView(screenList);
+            state = new ScreenState(key, title, scroll, screenList);
+            screenCache.put(key, state);
+            screenHost.addView(scroll, new FrameLayout.LayoutParams(-1, -1));
+            scroll.setVisibility(View.GONE);
+        }
+        return state;
+    }
+
+    private void activateScreen(ScreenState state) {
+        if (state == null) return;
+        if (activeScreen != null && activeScreen.scroll != state.scroll)
+            activeScreen.scroll.setVisibility(View.GONE);
+        activeScreen = state;
+        homeScrollView = state.scroll;
+        list = state.list;
+        currentPath = "home".equals(state.key) ? "" : state.key.split("\\|POST:", 2)[0];
+        currentTitle = state.title;
+        heading.setText(state.title);
+        state.scroll.setVisibility(View.VISIBLE);
+        progress.setVisibility(View.GONE);
+        if (state.rendered && state.items != null) {
+            torrents.clear();
+            torrents.addAll(state.items);
+            setCatalogStatus("Раздач", state.items.size());
+        }
+        if (state.scroll == homeScrollView) scheduleVisibleHomePosterLoad();
     }
 
     private void load(String path, String title) { load(path, title, null); }
 
     private void load(String path, String title, String postBody) {
         if (deferBrowserNavigationIfBusy(() -> load(path, title, postBody))) return;
-        currentPath = path; currentTitle = title; heading.setText(title);
+        ScreenState state = obtainScreen(path, title, postBody);
+        activateScreen(state);
+        long age = System.currentTimeMillis() - state.loadedAt;
+        if (state.rendered && state.loadedAt > 0L && age < SCREEN_TTL_MS) {
+            status.setText(title + " · из памяти");
+            return;
+        }
 
-        // Browse/category pages change frequently. Always request the current
-        // page from Kinozal; only Home feeds, posters and torrent details use
-        // their dedicated caches.
-        showPageLoading("Загрузка каталога…");
-        if (sessionWebView != null) {
-            fetchBrowserPage(path, postBody, html -> {
-                if (html != null && !html.isEmpty()) {
-                    lastKinozalConnectionStatus = "установлено";
-                    updateSidebarConnectionInfo();
-                    showLoadedPage(html);
-                } else {
+        state.loading = true;
+        if (state.rendered) {
+            progress.setVisibility(View.VISIBLE);
+            status.setText(title + " · обновляем устаревшие данные…");
+        } else {
+            showPageLoading("Загрузка каталога…");
+        }
+
+        final ScreenState requestedScreen = state;
+        java.util.function.Consumer<String> completion = html -> {
+            if (html != null && !html.isEmpty()) {
+                lastKinozalConnectionStatus = "установлено";
+                updateSidebarConnectionInfo();
+                showLoadedPage(html, requestedScreen);
+            } else {
+                requestedScreen.loading = false;
+                if (requestedScreen == activeScreen) {
                     lastKinozalConnectionStatus = "нет соединения";
                     if (sidebarConnectionInfo != null) sidebarConnectionInfo.setText("Подключение к Kinozal: нет соединения");
                     progress.setVisibility(View.GONE);
-                    status.setText("Нет соединения");
-                    addEmpty("Не удалось загрузить каталог через браузерную сессию.");
+                    status.setText(requestedScreen.rendered ? "Нет соединения · показан сохранённый экран" : "Нет соединения");
+                    if (!requestedScreen.rendered) addEmpty("Не удалось загрузить каталог через браузерную сессию.");
                 }
-            });
+            }
+        };
+        if (sessionWebView != null) {
+            fetchBrowserPage(path, postBody, completion);
         } else {
             io.execute(() -> {
                 try {
                     String html = postBody == null ? client.fetch(path) : client.fetchPost(path, postBody);
-                    runOnUiThread(() -> {
-                        lastKinozalConnectionStatus = "установлено";
-                        updateSidebarConnectionInfo();
-                        showLoadedPage(html);
-                    });
+                    runOnUiThread(() -> completion.accept(html));
                 } catch (Exception e) {
-                    runOnUiThread(() -> {
-                        lastKinozalConnectionStatus = "нет соединения";
-                        if (sidebarConnectionInfo != null) sidebarConnectionInfo.setText("Подключение к Kinozal: нет соединения");
-                        progress.setVisibility(View.GONE); status.setText("Нет соединения");
-                        addEmpty("Не удалось загрузить каталог. " + safe(e.getMessage())); });
+                    runOnUiThread(() -> completion.accept(null));
                 }
             });
         }
@@ -3159,9 +3227,17 @@ public class MainActivity extends Activity {
         }
     }
 
-    private void showLoadedPage(String html) {
-        lastHtml = html;
+    private void showLoadedPage(String html, ScreenState target) {
+        if (html == null || target == null) return;
         List<Torrent> parsed = parseTorrents(Jsoup.parse(html, client.getMirror()));
+        target.items = new ArrayList<>(parsed);
+        target.loadedAt = System.currentTimeMillis();
+        target.rendered = true;
+        target.loading = false;
+        diskCache.put("screen|" + client.getMirror() + "|" + target.key,
+                html.getBytes(StandardCharsets.UTF_8));
+        if (target != activeScreen) return;
+        lastHtml = html;
         progress.setVisibility(View.GONE);
         torrents.clear(); torrents.addAll(parsed);
         setCatalogStatus("Раздач", parsed.size());
