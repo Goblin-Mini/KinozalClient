@@ -4849,7 +4849,8 @@ public class MainActivity extends Activity {
         String imdbRating = "—", kinopoiskRating = "—", kinozalRating = "—", kinozalStars = "☆☆☆☆☆☆☆☆☆☆", kinozalVotes = "";
         final java.util.LinkedHashMap<String, String> fields = new java.util.LinkedHashMap<>();
         final java.util.List<String> screenshotThumbs = new java.util.ArrayList<>();
-        final java.util.List<String> screenshotFull = new java.util.ArrayList<>();
+        String screenshotRequestId = "";
+        String screenshotPagesd = "";
     }
 
     // Warm the next likely details page while the user navigates the list.
@@ -4884,7 +4885,9 @@ public class MainActivity extends Activity {
                 TorrentDetails cachedDetails = parseTorrentDetails(cachedDoc, t);
                 t.poster = cachedDetails.poster;
                 saveRecentlyViewed(t);
-                showTorrentDetails(t, cachedDetails);
+                loadScreenshotThumbnails(cachedDetails, ready -> {
+                    if (href.equals(activeTorrentDetailsHref)) showTorrentDetails(t, ready);
+                });
             } catch (Exception ignored) {
                 cachedHtml = null;
             }
@@ -4924,10 +4927,12 @@ public class MainActivity extends Activity {
                 diskCache.put(cacheKey, html.getBytes(StandardCharsets.UTF_8));
                 t.poster = details.poster;
                 saveRecentlyViewed(t);
-                if (href.equals(activeTorrentDetailsHref)) {
-                    progress.setVisibility(View.GONE);
-                    showTorrentDetails(t, details);
-                }
+                loadScreenshotThumbnails(details, ready -> {
+                    if (href.equals(activeTorrentDetailsHref)) {
+                        progress.setVisibility(View.GONE);
+                        showTorrentDetails(t, ready);
+                    }
+                });
             } catch (Exception e) {
                 if (!hasCachedDetails && href.equals(activeTorrentDetailsHref)) {
                     progress.setVisibility(View.GONE);
@@ -5003,20 +5008,18 @@ public class MainActivity extends Activity {
 
         Element technical = doc.selectFirst("#tabs");
         if (technical != null) extractBoldFields(technical, data.fields);
-        // Extract Kinozal screenshot thumbnails and their full-size links.
-        if (technical != null) {
-            for (Element link : technical.select("a:has(img)")) {
-                Element image = link.selectFirst("img");
-                if (image == null) continue;
-                String thumb = image.absUrl("src");
-                String full = link.absUrl("href");
-                if (thumb == null || thumb.trim().isEmpty()) continue;
-                if (full == null || full.trim().isEmpty()) full = thumb;
-                if (!data.screenshotThumbs.contains(thumb)) {
-                    data.screenshotThumbs.add(thumb);
-                    data.screenshotFull.add(full);
-                }
-            }
+        // Kinozal loads the screenshot tab asynchronously. The detail page
+        // contains showtab(id, pagesd), not the screenshot <img> elements.
+        java.util.regex.Matcher screenshotTab = java.util.regex.Pattern.compile(
+                "id=\\\"tbch[\\s\\S]*?showtab\\(([\\s\\S]*?),([\\s\\S]*?)\\)[\\s\\S]*?>([\\s\\S]*?)<",
+                java.util.regex.Pattern.CASE_INSENSITIVE).matcher(doc.html());
+        while (screenshotTab.find()) {
+            String tabLabel = Jsoup.parse(screenshotTab.group(3)).text()
+                    .toLowerCase(java.util.Locale.ROOT);
+            if (!tabLabel.contains("скриншот")) continue;
+            data.screenshotRequestId = screenshotTab.group(1).replaceAll("[\\\"']", "").trim();
+            data.screenshotPagesd = screenshotTab.group(2).replaceAll("[\\\"']", "").trim();
+            break;
         }
         data.fields.putIfAbsent("Размер", torrent.size);
 
@@ -5038,6 +5041,66 @@ public class MainActivity extends Activity {
             data.torrentLink = href.startsWith("magnet:") ? href : download.absUrl("href");
         }
         return data;
+    }
+
+    /**
+     * Kinozal screenshot thumbnails are returned by get_srv_details.php,
+     * selected by the id/pagesd values in the Screenshot tab's showtab(...).
+     * Only img[src] URLs are retained; original-image href links are ignored.
+     */
+    private void loadScreenshotThumbnails(TorrentDetails details,
+            java.util.function.Consumer<TorrentDetails> callback) {
+        if (details == null || details.screenshotRequestId.isEmpty()
+                || details.screenshotPagesd.isEmpty()) {
+            callback.accept(details);
+            return;
+        }
+        final String endpoint = Uri.parse(details.sourcePage).buildUpon()
+                .path("/get_srv_details.php")
+                .clearQuery()
+                .appendQueryParameter("id", details.screenshotRequestId)
+                .appendQueryParameter("pagesd", details.screenshotPagesd)
+                .build().toString();
+
+        java.util.function.Consumer<String> onHtml = html -> {
+            if (html != null && !html.trim().isEmpty()) {
+                try {
+                    Document ajax = Jsoup.parse(html, endpoint);
+                    for (Element image : ajax.select("img[src]")) {
+                        String raw = image.attr("src").trim();
+                        if (raw.isEmpty()) continue;
+                        String decoded = raw;
+                        try {
+                            decoded = java.net.URLDecoder.decode(raw, "UTF-8");
+                        } catch (Exception ignored) { }
+                        String url = decoded;
+                        if (!url.matches("(?i)^https?://.*")) {
+                            url = image.absUrl("src");
+                        }
+                        if (url != null && url.matches("(?i)^https?://.*")
+                                && !details.screenshotThumbs.contains(url)) {
+                            details.screenshotThumbs.add(url);
+                        }
+                    }
+                } catch (Exception e) {
+                    Log.w("KinozalScreenshots", "Cannot parse AJAX screenshot response", e);
+                }
+            }
+            callback.accept(details);
+        };
+
+        if (sessionWebView != null) {
+            fetchBrowserPage(endpoint, null, onHtml);
+        } else {
+            io.execute(() -> {
+                try {
+                    onHtml.accept(client.fetch(endpoint));
+                } catch (Exception e) {
+                    Log.w("KinozalScreenshots", "Cannot load screenshot AJAX endpoint", e);
+                    runOnUiThread(() -> callback.accept(details));
+                }
+            });
+        }
     }
 
     private void extractBoldFields(Element block, java.util.LinkedHashMap<String, String> fields) {
@@ -5093,7 +5156,9 @@ public class MainActivity extends Activity {
                 if (href.equals(activeTorrentDetailsHref)) {
                     progress.setVisibility(View.GONE);
                     saveRecentlyViewed(torrent);
-                    showTorrentDetails(torrent, parsed);
+                    loadScreenshotThumbnails(parsed, ready -> {
+                        if (href.equals(activeTorrentDetailsHref)) showTorrentDetails(torrent, ready);
+                    });
                 }
             } catch (Exception ignored) { }
         });
@@ -5241,20 +5306,8 @@ public class MainActivity extends Activity {
                             ImageView preview = new ImageView(this);
                             preview.setScaleType(ImageView.ScaleType.FIT_CENTER);
                             preview.setBackground(shape(PANEL, 0));
-                            preview.setFocusable(true);
-                            preview.setFocusableInTouchMode(true);
+                            preview.setFocusable(false);
                             preview.setContentDescription("Скриншот " + (shotIndex + 1));
-                            preview.setOnFocusChangeListener((v, focused) ->
-                                    v.setBackground(shape(focused ? Color.rgb(65, 72, 73) : PANEL,
-                                            focused ? GOLD : 0)));
-                            preview.setOnClickListener(v -> {
-                                String fullUrl = data.screenshotFull.get(shotIndex);
-                                try {
-                                    startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(fullUrl)));
-                                } catch (Exception e) {
-                                    showMessage("Не удалось открыть полноразмерный скриншот.");
-                                }
-                            });
                             LinearLayout.LayoutParams imageParams =
                                     new LinearLayout.LayoutParams(0, dp(190), 1);
                             if (col == 1) imageParams.leftMargin = dp(8);
