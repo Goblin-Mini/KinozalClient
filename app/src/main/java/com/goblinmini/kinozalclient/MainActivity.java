@@ -1902,6 +1902,7 @@ public class MainActivity extends Activity {
         if (firstFeedPaths.length > 0 && firstFeedPaths[0].equals(section.path)) {
             Button refreshAll = button("Обновить всё");
             refreshAll.setTextSize(12);
+            refreshAll.setTranslationY(-dp(3));
             LinearLayout.LayoutParams allParams = new LinearLayout.LayoutParams(-2, dp(36));
             allParams.leftMargin = dp(8);
             sectionHeader.addView(refreshAll, allParams);
@@ -2020,6 +2021,7 @@ public class MainActivity extends Activity {
             chipParams.rightMargin = dp(3);
             badgeRow.addView(chip, chipParams);
         }
+        badgeRow.setTranslationY(dp(3));
         card.addView(badgeRow, new LinearLayout.LayoutParams(dp(126), dp(25)));
 
         TextView name = text(item.torrent.title, 12, Color.WHITE, true);
@@ -2165,7 +2167,7 @@ public class MainActivity extends Activity {
         menuScroll.setFillViewport(false);
         menuScroll.setVerticalScrollBarEnabled(false);
         menuScroll.setScrollbarFadingEnabled(true);
-        menuScroll.setPadding(0, 0, 0, 0);
+        menuScroll.setPadding(0, dp(5), 0, 0);
         menuItems = new LinearLayout(this);
         menuItems.setOrientation(LinearLayout.VERTICAL);
         menuScroll.addView(menuItems, new ScrollView.LayoutParams(-1, -2));
@@ -2641,7 +2643,7 @@ public class MainActivity extends Activity {
         columns.addView(right, new LinearLayout.LayoutParams(0, -2, 1f));
 
         addSettingsAction(left, "Авторизация", () -> showLogin());
-        addSettingsAction(left, "Синхронизация", () -> chooseStartupSource());
+        addSettingsAction(left, "Начальный раздел", () -> chooseStartupSource());
         addSettingsAction(left, "Поиск Jackett", () -> showJackettSettings());
         addSettingsAction(left, "Прокси", () -> showSocks5Settings());
         addSettingsAction(left, "Очистить кэш", () -> confirmClearCache());
