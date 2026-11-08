@@ -1419,15 +1419,29 @@ public class MainActivity extends Activity {
         } catch (Exception ignored) { return value; }
     }
 
+    private static final java.util.concurrent.ConcurrentHashMap<String, java.util.regex.Pattern>
+            HOME_BADGE_PATTERNS = new java.util.concurrent.ConcurrentHashMap<>();
+    private static final java.util.regex.Pattern HOME_MUSIC_HINT =
+            java.util.regex.Pattern.compile("\\b(FLAC|MP3|WAV|ALAC|APE|AAC|DSD)\\b");
+    private static final java.util.regex.Pattern HOME_GAME_HINT =
+            java.util.regex.Pattern.compile("\\b(PC|PS[345]|XBOX|NINTENDO|SWITCH|REPACK|PORTABLE)\\b");
+    private static final java.util.regex.Pattern HOME_GAME_VERSION =
+            java.util.regex.Pattern.compile("(?i)\\b(?:v(?:ersion)?\\s*)?([0-9]+\\.[0-9]+(?:\\.[0-9]+){0,2})\\b");
+
+    private static java.util.regex.Pattern homeBadgePattern(String alternatives) {
+        return HOME_BADGE_PATTERNS.computeIfAbsent(alternatives, key ->
+                java.util.regex.Pattern.compile("(?i)(?<![A-Z0-9])(?:" + key + ")(?![A-Z0-9])"));
+    }
+
     private List<String> extractHomeBadges(String title, String sectionTitle) {
         List<String> badges = new ArrayList<>();
         if (title == null) return badges;
         String value = title.toUpperCase(java.util.Locale.ROOT);
         String section = sectionTitle == null ? "" : sectionTitle.toLowerCase(java.util.Locale.ROOT);
         boolean music = section.contains("музык") || section.contains("music")
-                || value.matches("(?s).*\\b(FLAC|MP3|WAV|ALAC|APE|AAC|DSD)\\b.*");
+                || HOME_MUSIC_HINT.matcher(value).find();
         boolean game = section.contains("игр") || section.contains("game")
-                || value.matches("(?s).*\\b(PC|PS[345]|XBOX|NINTENDO|SWITCH|REPACK|PORTABLE)\\b.*");
+                || HOME_GAME_HINT.matcher(value).find();
 
         if (music) {
             addBadge(badges, value, "FLAC|ALAC|APE|WAV|DSD|MP3|AAC|OGG|OPUS");
@@ -1437,8 +1451,7 @@ public class MainActivity extends Activity {
         } else if (game) {
             addBadge(badges, value, "PC|WINDOWS|STEAM|GOG|PS5|PS4|PS3|XBOX|SWITCH");
             addBadge(badges, value, "REPACK|PORTABLE|ISO|RIP");
-            java.util.regex.Matcher version = java.util.regex.Pattern.compile(
-                    "(?i)\\b(?:v(?:ersion)?\\s*)?([0-9]+\\.[0-9]+(?:\\.[0-9]+){0,2})\\b").matcher(title);
+            java.util.regex.Matcher version = HOME_GAME_VERSION.matcher(title);
             if (version.find()) badges.add("v" + version.group(1));
             addBadge(badges, value, "RUS|РУССКИЙ|MULTI[0-9]*|ENG|АНГЛ");
         } else {
@@ -1454,8 +1467,7 @@ public class MainActivity extends Activity {
 
     private void addBadge(List<String> badges, String title, String alternatives) {
         if (badges.size() >= 3) return;
-        java.util.regex.Matcher matcher = java.util.regex.Pattern.compile(
-                "(?i)(?<![A-Z0-9])(?:" + alternatives + ")(?![A-Z0-9])").matcher(title);
+        java.util.regex.Matcher matcher = homeBadgePattern(alternatives).matcher(title);
         if (matcher.find()) {
             String badge = matcher.group().replaceAll("\\s+", " ").replaceAll("[- ]+", " ").trim();
             if ("WEB DL RIP".equals(badge)) badge = "WEB-DLRip";
