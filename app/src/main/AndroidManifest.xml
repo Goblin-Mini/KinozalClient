@@ -29,6 +29,7 @@
             android:grantUriPermissions="true" />
         <activity
             android:name=".MainActivity"
+            android:screenOrientation="landscape"
             android:configChanges="keyboard|keyboardHidden|orientation|screenSize"
             android:exported="true">
             <intent-filter>
