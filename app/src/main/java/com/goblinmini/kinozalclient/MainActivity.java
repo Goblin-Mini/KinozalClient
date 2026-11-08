@@ -3718,7 +3718,6 @@ public class MainActivity extends Activity {
             sortDateButton = sortSizeButton = sortSeedsButton = null;
         }
         boolean recentList = "local:recently-viewed".equals(currentPath);
-        if (recentList) addHistoryClearButton();
 
         LinearLayout header = new LinearLayout(this);
         header.setGravity(Gravity.CENTER_VERTICAL);
