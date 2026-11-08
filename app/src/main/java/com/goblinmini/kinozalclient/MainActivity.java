@@ -3247,6 +3247,8 @@ public class MainActivity extends Activity {
         return value;
     }
 
+    private int torrentRenderGeneration = 0;
+
     private void renderTorrents(List<Torrent> items) {
         if (list == null) return;
         List<Torrent> displayItems = new ArrayList<>(items);
@@ -3311,58 +3313,74 @@ public class MainActivity extends Activity {
         header.addView(leechesHeader, new LinearLayout.LayoutParams(dp(55), -2));
         list.addView(header);
 
+        final int renderGeneration = ++torrentRenderGeneration;
+        final java.util.ArrayDeque<Runnable> pendingCards = new java.util.ArrayDeque<>();
         for (Torrent t : displayItems) {
-            LinearLayout card = new LinearLayout(this);
-            card.setGravity(Gravity.CENTER_VERTICAL);
-            card.setPadding(dp(14), dp(8), dp(14), dp(8));
-            card.setBackground(shape(PANEL, 0));
-            LinearLayout.LayoutParams cardParams = new LinearLayout.LayoutParams(0, dp(66), 1f);
-            TextView name = text(t.title, 16, Color.WHITE, true); name.setMaxLines(2);
-            card.addView(name, new LinearLayout.LayoutParams(0, -2, 1f));
-            TextView size = text(t.size, 13, GOLD, false);
-            size.setGravity(Gravity.CENTER);
-            card.addView(size, new LinearLayout.LayoutParams(dp(85), -2));
-            TextView uploaded = text(t.uploaded == null ? "—" : t.uploaded, 12, Color.rgb(170, 205, 180), false);
-            uploaded.setGravity(Gravity.CENTER);
-            uploaded.setMaxLines(2);
-            card.addView(uploaded, new LinearLayout.LayoutParams(dp(96), -2));
-            TextView seeds = text(t.seeds, 13, TEAL, true);
-            seeds.setGravity(Gravity.CENTER);
-            card.addView(seeds, new LinearLayout.LayoutParams(dp(55), -2));
-            TextView leeches = text(t.leeches, 13, RED, true);
-            leeches.setGravity(Gravity.CENTER);
-            card.addView(leeches, new LinearLayout.LayoutParams(dp(55), -2));
-            card.setFocusable(true);
-            final Runnable[] prefetchTask = {null};
-            card.setOnFocusChangeListener((v, focused) -> {
-                v.setBackground(shape(focused ? Color.rgb(57, 68, 70) : PANEL, focused ? GOLD : 0));
-                if (prefetchTask[0] != null) browserHandler.removeCallbacks(prefetchTask[0]);
-                if (focused) {
-                    prefetchTask[0] = () -> prefetchTorrentDetails(t);
-                    browserHandler.postDelayed(prefetchTask[0], 320);
+            pendingCards.addLast(() -> {
+                if (renderGeneration != torrentRenderGeneration || isFinishing()) return;
+                LinearLayout card = new LinearLayout(this);
+                card.setGravity(Gravity.CENTER_VERTICAL);
+                card.setPadding(dp(14), dp(8), dp(14), dp(8));
+                card.setBackground(shape(PANEL, 0));
+                LinearLayout.LayoutParams cardParams = new LinearLayout.LayoutParams(0, dp(66), 1f);
+                TextView name = text(t.title, 16, Color.WHITE, true); name.setMaxLines(2);
+                card.addView(name, new LinearLayout.LayoutParams(0, -2, 1f));
+                TextView size = text(t.size, 13, GOLD, false);
+                size.setGravity(Gravity.CENTER);
+                card.addView(size, new LinearLayout.LayoutParams(dp(85), -2));
+                TextView uploaded = text(t.uploaded == null ? "—" : t.uploaded, 12, Color.rgb(170, 205, 180), false);
+                uploaded.setGravity(Gravity.CENTER);
+                uploaded.setMaxLines(2);
+                card.addView(uploaded, new LinearLayout.LayoutParams(dp(96), -2));
+                TextView seeds = text(t.seeds, 13, TEAL, true);
+                seeds.setGravity(Gravity.CENTER);
+                card.addView(seeds, new LinearLayout.LayoutParams(dp(55), -2));
+                TextView leeches = text(t.leeches, 13, RED, true);
+                leeches.setGravity(Gravity.CENTER);
+                card.addView(leeches, new LinearLayout.LayoutParams(dp(55), -2));
+                card.setFocusable(true);
+                final Runnable[] prefetchTask = {null};
+                card.setOnFocusChangeListener((v, focused) -> {
+                    v.setBackground(shape(focused ? Color.rgb(57, 68, 70) : PANEL, focused ? GOLD : 0));
+                    if (prefetchTask[0] != null) browserHandler.removeCallbacks(prefetchTask[0]);
+                    if (focused) {
+                        prefetchTask[0] = () -> prefetchTorrentDetails(t);
+                        browserHandler.postDelayed(prefetchTask[0], 320);
+                    }
+                });
+                card.setOnClickListener(v -> showTorrent(t));
+    
+                LinearLayout itemRow = new LinearLayout(this);
+                itemRow.setGravity(Gravity.CENTER_VERTICAL);
+                LinearLayout.LayoutParams itemParams = new LinearLayout.LayoutParams(-1, dp(66));
+                itemParams.bottomMargin = dp(5);
+                itemRow.addView(card, cardParams);
+                if (recentList) {
+                    android.widget.ImageButton delete = new android.widget.ImageButton(this);
+                    delete.setImageResource(android.R.drawable.ic_menu_delete);
+                    delete.setBackground(shape(Color.TRANSPARENT, 0));
+                    delete.setColorFilter(GOLD);
+                    delete.setContentDescription("Удалить из истории");
+                    delete.setFocusable(true);
+                    delete.setOnClickListener(v -> removeRecentlyViewed(t.href));
+                    LinearLayout.LayoutParams deleteParams = new LinearLayout.LayoutParams(dp(48), dp(54));
+                    deleteParams.leftMargin = dp(4);
+                    itemRow.addView(delete, deleteParams);
                 }
+    
             });
-            card.setOnClickListener(v -> showTorrent(t));
-
-            LinearLayout itemRow = new LinearLayout(this);
-            itemRow.setGravity(Gravity.CENTER_VERTICAL);
-            LinearLayout.LayoutParams itemParams = new LinearLayout.LayoutParams(-1, dp(66));
-            itemParams.bottomMargin = dp(5);
-            itemRow.addView(card, cardParams);
-            if (recentList) {
-                android.widget.ImageButton delete = new android.widget.ImageButton(this);
-                delete.setImageResource(android.R.drawable.ic_menu_delete);
-                delete.setBackground(shape(Color.TRANSPARENT, 0));
-                delete.setColorFilter(GOLD);
-                delete.setContentDescription("Удалить из истории");
-                delete.setFocusable(true);
-                delete.setOnClickListener(v -> removeRecentlyViewed(t.href));
-                LinearLayout.LayoutParams deleteParams = new LinearLayout.LayoutParams(dp(48), dp(54));
-                deleteParams.leftMargin = dp(4);
-                itemRow.addView(delete, deleteParams);
-            }
-            list.addView(itemRow, itemParams);
         }
+        Runnable[] buildNextCard = new Runnable[1];
+        buildNextCard[0] = () -> {
+            if (renderGeneration != torrentRenderGeneration || isFinishing()) return;
+            Runnable cardTask = pendingCards.pollFirst();
+            if (cardTask == null) return;
+            cardTask.run();
+            if (!pendingCards.isEmpty())
+                browserHandler.postDelayed(buildNextCard[0], 8);
+        };
+        if (!pendingCards.isEmpty()) browserHandler.post(buildNextCard[0]);
+
         if (recentList) {
             addHistoryClearButton();
         } else {
