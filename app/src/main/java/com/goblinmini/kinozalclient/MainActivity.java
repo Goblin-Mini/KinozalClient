@@ -5478,7 +5478,8 @@ public class MainActivity extends Activity {
                 {"Качество", "Видео", "Аудио", "Субтитры", "Продолжительность", "Перевод", "Размер", "Язык"}
         };
         final int[] active = {0};
-        Runnable render = () -> {
+        final Runnable[] render = new Runnable[1];
+        render[0] = () -> {
             detailContent.removeAllViews();
             if (active[0] == 2) {
                 if (data.screenshotThumbs.isEmpty()) {
@@ -5495,7 +5496,7 @@ public class MainActivity extends Activity {
                         loadScreenshotThumbnails(data, ready -> {
                             data.screenshotsLoading = false;
                             data.screenshotsLoaded = true;
-                            if (active[0] == 2) render.run();
+                            if (active[0] == 2) render[0].run();
                         });
                     } else if (data.screenshotRequestId.isEmpty()
                             || data.screenshotPagesd.isEmpty()) {
