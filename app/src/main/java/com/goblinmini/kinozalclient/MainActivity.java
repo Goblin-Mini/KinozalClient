@@ -3323,43 +3323,30 @@ public class MainActivity extends Activity {
         // Keep the selected category name visible while the old rows are gone
         // and the new page is being fetched.
         showPageLoading("Загрузка: " + title + "…");
-        if (sessionWebView != null) {
-            fetchBrowserPage(path, postBody, html -> {
-                if (requestGeneration != catalogLoadGeneration) return;
-                if (html != null && !html.isEmpty()) {
+        // Catalogue requests use the authenticated native HTTP cookie jar,
+        // not the shared WebView navigation callback. This makes rapid category
+        // switches independent: responses are accepted only for the latest
+        // selection, while the HTTP client serializes access to its cookie jar.
+        io.execute(() -> {
+            try {
+                String html = postBody == null ? client.fetch(path) : client.fetchPost(path, postBody);
+                runOnUiThread(() -> {
+                    if (requestGeneration != catalogLoadGeneration) return;
                     lastKinozalConnectionStatus = "установлено";
                     updateSidebarConnectionInfo();
                     showLoadedPage(html, path);
-                } else {
+                });
+            } catch (Exception e) {
+                runOnUiThread(() -> {
+                    if (requestGeneration != catalogLoadGeneration) return;
                     lastKinozalConnectionStatus = "нет соединения";
                     if (sidebarConnectionInfo != null) sidebarConnectionInfo.setText("Подключение к Kinozal: нет соединения");
                     progress.setVisibility(View.GONE);
                     status.setText("Нет соединения");
-                    addEmpty("Не удалось загрузить каталог через браузерную сессию.");
-                }
-            });
-        } else {
-            io.execute(() -> {
-                try {
-                    String html = postBody == null ? client.fetch(path) : client.fetchPost(path, postBody);
-                    runOnUiThread(() -> {
-                        if (requestGeneration != catalogLoadGeneration) return;
-                        lastKinozalConnectionStatus = "установлено";
-                        updateSidebarConnectionInfo();
-                        showLoadedPage(html, path);
-                    });
-                } catch (Exception e) {
-                    runOnUiThread(() -> {
-                        if (requestGeneration != catalogLoadGeneration) return;
-                        lastKinozalConnectionStatus = "нет соединения";
-                        if (sidebarConnectionInfo != null) sidebarConnectionInfo.setText("Подключение к Kinozal: нет соединения");
-                        progress.setVisibility(View.GONE);
-                        status.setText("Нет соединения");
-                        addEmpty("Не удалось загрузить каталог. " + safe(e.getMessage()));
-                    });
-                }
-            });
-        }
+                    addEmpty("Не удалось загрузить каталог. " + safe(e.getMessage()));
+                });
+            }
+        });
     }
 
     private void restoreBrowserSession(String cookieHeader) {
@@ -3813,22 +3800,32 @@ public class MainActivity extends Activity {
         buildNextCard[0] = () -> {
             if (renderGeneration != torrentRenderGeneration || isFinishing()) return;
             Runnable cardTask = pendingCards.pollFirst();
-            if (cardTask == null) return;
-            cardTask.run();
-            if (!pendingCards.isEmpty())
-                browserHandler.postDelayed(buildNextCard[0], 8);
+            if (cardTask != null) {
+                cardTask.run();
+                if (!pendingCards.isEmpty()) browserHandler.postDelayed(buildNextCard[0], 8);
+                else browserHandler.post(buildNextCard[0]);
+                return;
+            }
+            // Add paging only after the asynchronously-created torrent rows,
+            // otherwise the controls appear above the cards on slower TV boxes.
+            if (recentList) {
+                addHistoryClearButton();
+            } else {
+                LinearLayout pages = new LinearLayout(this);
+                pages.setGravity(Gravity.RIGHT);
+                Button prev = button("← Назад");
+                Button next = button("Далее →");
+                pages.addView(prev);
+                pages.addView(next);
+                LinearLayout.LayoutParams pp = new LinearLayout.LayoutParams(-1, dp(52));
+                pp.topMargin = dp(10);
+                list.addView(pages, pp);
+                prev.setOnClickListener(v -> changePage(-1));
+                next.setOnClickListener(v -> changePage(1));
+            }
         };
         if (!pendingCards.isEmpty()) browserHandler.post(buildNextCard[0]);
 
-        if (recentList) {
-            addHistoryClearButton();
-        } else {
-            LinearLayout pages = new LinearLayout(this); pages.setGravity(Gravity.RIGHT);
-            Button prev = button("← Назад"); Button next = button("Далее →");
-            pages.addView(prev); pages.addView(next);
-            LinearLayout.LayoutParams pp = new LinearLayout.LayoutParams(-1, dp(52)); pp.topMargin = dp(10); list.addView(pages, pp);
-            prev.setOnClickListener(v -> changePage(-1)); next.setOnClickListener(v -> changePage(1));
-        }
         animateContentTransition(list);
     }
 
