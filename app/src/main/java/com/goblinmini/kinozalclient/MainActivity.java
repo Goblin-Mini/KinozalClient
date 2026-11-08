@@ -3159,6 +3159,59 @@ public class MainActivity extends Activity {
         } catch (Exception e) { showMessage("Не удалось восстановить копию: " + safe(e.getMessage())); }
     }
 
+    private void saveFeedDiagnostics() {
+        String log = getFeedDiagnosticsText();
+        if (log.trim().isEmpty()) log = "Диагностика загрузки ещё не запускалась.";
+        String stamp = new java.text.SimpleDateFormat("yyyyMMdd_HHmmss",
+                java.util.Locale.ROOT).format(new java.util.Date());
+        String fileName = "kinozal_feed_diagnostics_" + stamp + ".txt";
+        java.io.OutputStream output = null;
+        android.net.Uri savedUri = null;
+        try {
+            if (android.os.Build.VERSION.SDK_INT >= 29) {
+                android.content.ContentValues values = new android.content.ContentValues();
+                values.put(android.provider.MediaStore.MediaColumns.DISPLAY_NAME, fileName);
+                values.put(android.provider.MediaStore.MediaColumns.MIME_TYPE, "text/plain");
+                values.put(android.provider.MediaStore.MediaColumns.RELATIVE_PATH,
+                        android.os.Environment.DIRECTORY_DOWNLOADS + "/KinozalClient");
+                values.put(android.provider.MediaStore.MediaColumns.IS_PENDING, 1);
+                savedUri = getContentResolver().insert(
+                        android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI, values);
+                if (savedUri == null) throw new java.io.IOException("Не удалось создать файл");
+                output = getContentResolver().openOutputStream(savedUri);
+                if (output == null) throw new java.io.IOException("Не удалось открыть файл");
+                output.write(log.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                output.flush();
+                output.close();
+                output = null;
+                android.content.ContentValues ready = new android.content.ContentValues();
+                ready.put(android.provider.MediaStore.MediaColumns.IS_PENDING, 0);
+                getContentResolver().update(savedUri, ready, null, null);
+                Toast.makeText(this, "Сохранено в Загрузки/KinozalClient/" + fileName,
+                        Toast.LENGTH_LONG).show();
+            } else {
+                java.io.File dir = getExternalFilesDir(android.os.Environment.DIRECTORY_DOWNLOADS);
+                if (dir == null) throw new java.io.IOException("Папка загрузок недоступна");
+                if (!dir.exists() && !dir.mkdirs()) throw new java.io.IOException("Не удалось создать папку");
+                java.io.File file = new java.io.File(dir, fileName);
+                output = new java.io.FileOutputStream(file);
+                output.write(log.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                output.flush();
+                output.close();
+                output = null;
+                Toast.makeText(this, "Диагностика сохранена: " + file.getAbsolutePath(),
+                        Toast.LENGTH_LONG).show();
+            }
+        } catch (Exception e) {
+            if (output != null) try { output.close(); } catch (Exception ignored) { }
+            if (savedUri != null) try { getContentResolver().delete(savedUri, null, null); }
+                catch (Exception ignored) { }
+            Log.e("KinozalFeedDiag", "Не удалось сохранить диагностику", e);
+            Toast.makeText(this, "Не удалось сохранить диагностику: " + e.getMessage(),
+                    Toast.LENGTH_LONG).show();
+        }
+    }
+
     private void showDiagnostics() {
         long used = diskCache.getSizeBytes();
         long limit = diskCache.getMaxBytes();
@@ -3179,19 +3232,12 @@ public class MainActivity extends Activity {
         LinearLayout.LayoutParams feedInfoParams = new LinearLayout.LayoutParams(-1, -2);
         feedInfoParams.topMargin = dp(12);
         panel.addView(feedInfo, feedInfoParams);
-        Button copyFeedLog = button("Скопировать диагностику загрузки");
-        copyFeedLog.setGravity(Gravity.CENTER);
-        LinearLayout.LayoutParams copyFeedLogParams = new LinearLayout.LayoutParams(-1, dp(44));
-        copyFeedLogParams.topMargin = dp(8);
-        panel.addView(copyFeedLog, copyFeedLogParams);
-        copyFeedLog.setOnClickListener(v -> {
-            String log = getFeedDiagnosticsText();
-            if (log.trim().isEmpty()) log = "Диагностика загрузки ещё не запускалась.";
-            android.content.ClipboardManager clipboard = (android.content.ClipboardManager)
-                    getSystemService(CLIPBOARD_SERVICE);
-            clipboard.setPrimaryClip(android.content.ClipData.newPlainText("Kinozal feed diagnostics", log));
-            Toast.makeText(this, "Диагностика скопирована. Вставьте её сюда.", Toast.LENGTH_LONG).show();
-        });
+        Button saveFeedLog = button("Сохранить диагностику загрузки");
+        saveFeedLog.setGravity(Gravity.CENTER);
+        LinearLayout.LayoutParams saveFeedLogParams = new LinearLayout.LayoutParams(-1, dp(44));
+        saveFeedLogParams.topMargin = dp(8);
+        panel.addView(saveFeedLog, saveFeedLogParams);
+        saveFeedLog.setOnClickListener(v -> saveFeedDiagnostics());
         TextView cacheInfo = text(
                 "Дисковый кэш Kinozal\\n"
                 + String.format(java.util.Locale.ROOT, "Занято: %.2f МБ из %.0f МБ (%.1f%%)\\n",
