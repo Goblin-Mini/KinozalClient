@@ -2006,6 +2006,7 @@ public class MainActivity extends Activity {
         left.addView(backupNote);
 
         addSettingsSection(left, "ДОПОЛНИТЕЛЬНО");
+        addSettingsAction(left, "Очистить кэш", () -> confirmClearCache());
         addSettingsAction(left, "Поиск Jackett", () -> showJackettSettings());
         addSettingsAction(left, "О приложении", () -> showAbout());
 
@@ -2051,6 +2052,32 @@ public class MainActivity extends Activity {
                     ViewGroup.LayoutParams.MATCH_PARENT);
         }
         close.setOnClickListener(v -> settingsDialog.dismiss());
+    }
+
+
+    private void confirmClearCache() {
+        new AlertDialog.Builder(this)
+                .setTitle("Очистить кэш?")
+                .setMessage("Будут удалены сохранённая главная, кэш страниц и изображений. Авторизация, избранное, история и настройки останутся без изменений.")
+                .setNegativeButton("Отмена", null)
+                .setPositiveButton("Очистить", (dialog, which) -> {
+                    showMessage("Очищаем кэш…");
+                    io.execute(() -> {
+                        if (diskCache != null) diskCache.clear();
+                        homeModelFile().delete();
+                        runOnUiThread(() -> {
+                            pageCache.clear();
+                            if (decodedImageCache != null) decodedImageCache.evictAll();
+                            homeSectionsMemory.clear();
+                            homeCacheDisplayed = false;
+                            homeCacheLoadFinished = true;
+                            initialHomeFetchPending = false;
+                            if (sessionWebView != null) sessionWebView.clearCache(true);
+                            showMessage("Кэш очищен. Следующая загрузка каталога будет выполнена без старых данных.");
+                        });
+                    });
+                })
+                .show();
     }
 
     private void checkTorrServerViewingHistory() {
