@@ -917,96 +917,82 @@ public class MainActivity extends Activity {
 
     private void loadHomeSectionsInBrowser(String[] paths, String[] titles, int index,
             List<HomeSection> sections, int retry) {
-        if (index == 0 && retry == 0 && paths == HOME_PATHS) startHomePerformanceMonitor();
-        if (index >= paths.length) {
-            removeHomeDuplicates(sections);
-            if (paths == HOME_PATHS) {
-                List<HomeSection> channelSnapshot = new ArrayList<>(sections);
-                executeSafely(io, () -> saveHomeModel(channelSnapshot));
-            } else if (paths == COLLECTION_PATHS) {
-                List<HomeSection> collectionSnapshot = new ArrayList<>(sections);
-                executeSafely(io, () -> saveCollectionsModel(collectionSnapshot));
-            }
-            // Keep the bulk-refresh control on both first-load screens.
-            ensureFeedActions();
-            // Reconcile each completed feed without clearing the other cached rows.
-            renderHomeSectionsIncrementally(sections);
-            int total = countHomeCards(sections);
-            if (!sections.isEmpty() && paths == HOME_PATHS) {
-                homeSectionsMemory = new ArrayList<>(sections);
-                homeLoadedOnce = true;
-                HomeFeedScheduler.scheduleInitial(getApplicationContext(), "home");
-            } else if (!sections.isEmpty() && paths == COLLECTION_PATHS) {
-                collectionsSectionsMemory = new ArrayList<>(sections);
-                collectionsLoadedOnce = true;
-                HomeFeedScheduler.scheduleInitial(getApplicationContext(), "collections");
-            }
-            progress.setVisibility(View.GONE);
-            browserFeedLoading = false;
-            if (paths == HOME_PATHS && pendingBrowserNavigation == null) {
-                browserHandler.postDelayed(() -> {
-                    if (currentPath == null || currentPath.isEmpty()) loadTvChannelFeedsInBrowser();
-                }, 350);
-            } else {
-                runPendingBrowserNavigation();
-            }
-            if (total == 0) {
-                status.setText("Нет соединения");
-                addEmpty("Не удалось получить постеры Kinozal. Проверьте авторизацию и выбранное зеркало.");
-            } else {
-                setCatalogStatus("Постеров", total);
-                status.setText("Показано лент: " + sections.size());
-            }
-            return;
-        }
+        // Home and Collections share one authenticated WebView navigation, then
+        // fetch the remaining feeds concurrently with the existing JS bridge.
+        // This replaces N sequential page navigations with one navigation + Promise.all.
+        if (index != 0) return;
+        if (paths == HOME_PATHS) startHomePerformanceMonitor();
 
-        fetchBrowserPage(paths[index], null, html -> {
-            if (html == null || html.isEmpty()) {
-                if (index == 0 && retry == 0) {
+        fetchBrowserPages(paths, htmlPages -> {
+            if (htmlPages == null || htmlPages.isEmpty()) {
+                if (retry == 0) {
                     status.setText("Повторное подключение к Kinozal…");
                     browserHandler.postDelayed(() -> loadHomeSectionsInBrowser(
                             paths, titles, 0, new ArrayList<>(), 1), 1200);
                     return;
                 }
-                browserHandler.postDelayed(() -> loadHomeSectionsInBrowser(
-                        paths, titles, index + 1, sections, 0), 150);
+                finishHomeBrowserLoad(paths, new ArrayList<>());
                 return;
             }
 
-            // Disk writes and Jsoup parsing are deliberately kept off the UI
-            // thread. Each completed page is processed independently, then
-            // only its small parsed model is handed back for rendering.
             executeSafely(io, () -> {
-                HomeSection section = new HomeSection(titles[index], paths[index]);
-                try {
-                    // Parse and validate first. Never replace a known-good cache
-                    // entry with a Cloudflare challenge, login page or empty response.
-                    section.items.addAll(parseHomePosters(
-                            Jsoup.parse(html, client.getMirror() + "/")));
-                    if (!section.items.isEmpty()) {
-                        List<HomeSection> oneFeed = new ArrayList<>();
-                        oneFeed.add(section);
-                        removeHomeDuplicates(oneFeed);
+                List<HomeSection> loaded = new ArrayList<>();
+                int count = Math.min(paths.length, htmlPages.size());
+                for (int i = 0; i < count; i++) {
+                    String html = htmlPages.get(i);
+                    if (html == null || html.trim().isEmpty()) continue;
+                    HomeSection section = new HomeSection(titles[i], paths[i]);
+                    try {
+                        section.items.addAll(parseHomePosters(
+                                Jsoup.parse(html, client.getMirror() + "/")));
                         if (!section.items.isEmpty()) {
-                            diskCache.put("home|" + client.getMirror() + "|" + paths[index],
+                            diskCache.put("home|" + client.getMirror() + "|" + paths[i],
                                     html.getBytes(StandardCharsets.UTF_8));
+                            loaded.add(section);
                         }
-                    }
-                } catch (Exception ignored) { }
-
-                runOnUiThread(() -> {
-                    if (!section.items.isEmpty()) {
-                        // Keep parsing/network refresh independent from UI construction.
-                        // The final normalized snapshot is rendered once below.
-                        sections.add(section);
-                    }
-                    status.setText("Показано лент: " + sections.size());
-                    setHomeProgress(index + 1, paths.length, sections.size());
-                    browserHandler.postDelayed(() -> loadHomeSectionsInBrowser(
-                            paths, titles, index + 1, sections, 0), 100);
-                });
+                    } catch (Exception ignored) { }
+                }
+                removeHomeDuplicates(loaded);
+                if (!loaded.isEmpty()) {
+                    if (paths == HOME_PATHS) saveHomeModel(loaded);
+                    else if (paths == COLLECTION_PATHS) saveCollectionsModel(loaded);
+                }
+                runOnUiThread(() -> finishHomeBrowserLoad(paths, loaded));
             });
         });
+    }
+
+    private void finishHomeBrowserLoad(String[] paths, List<HomeSection> sections) {
+        // Preserve the existing screen completion behavior and keep Android TV
+        // channel loading on its separate, unchanged pipeline.
+        ensureFeedActions();
+        renderHomeSectionsIncrementally(sections);
+        int total = countHomeCards(sections);
+        if (!sections.isEmpty() && paths == HOME_PATHS) {
+            homeSectionsMemory = new ArrayList<>(sections);
+            homeLoadedOnce = true;
+            HomeFeedScheduler.scheduleInitial(getApplicationContext(), "home");
+        } else if (!sections.isEmpty() && paths == COLLECTION_PATHS) {
+            collectionsSectionsMemory = new ArrayList<>(sections);
+            collectionsLoadedOnce = true;
+            HomeFeedScheduler.scheduleInitial(getApplicationContext(), "collections");
+        }
+        progress.setVisibility(View.GONE);
+        browserFeedLoading = false;
+        if (paths == HOME_PATHS && pendingBrowserNavigation == null) {
+            browserHandler.postDelayed(() -> {
+                if (currentPath == null || currentPath.isEmpty()) loadTvChannelFeedsInBrowser();
+            }, 350);
+        } else {
+            runPendingBrowserNavigation();
+        }
+        if (total == 0) {
+            status.setText("Нет соединения");
+            addEmpty("Не удалось получить постеры Kinozal. Проверьте авторизацию и выбранное зеркало.");
+        } else {
+            setCatalogStatus("Постеров", total);
+            status.setText("Показано лент: " + sections.size());
+        }
     }
 
     private void mergeNewArrivalsHomePages(List<HomeSection> sections) {
