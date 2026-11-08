@@ -120,14 +120,13 @@ final class TvHomeChannels {
                     } else {
                         channelIds[i] = channel.getId();
                         if (!CHANNEL_NAMES[i].equals(channel.getDisplayName())) {
-                            PreviewChannel renamed = new PreviewChannel.Builder()
-                                    .setId(channel.getId())
+                            PreviewChannel.Builder renamedBuilder = new PreviewChannel.Builder()
                                     .setDisplayName(CHANNEL_NAMES[i])
                                     .setDescription("Подборка раздач с " + savedMirror)
                                     .setInternalProviderId("kinozal:" + CHANNEL_KEYS[i])
-                                    .setAppLinkIntent(channel.getAppLinkIntent())
-                                    .build();
-                            helper.updatePreviewChannel(renamed);
+                                    .setAppLinkIntent(channel.getAppLinkIntent());
+                            if (logo != null) renamedBuilder.setLogo(logo);
+                            helper.updatePreviewChannel(channel.getId(), renamedBuilder.build());
                             Log.i(TAG, "Renamed channel to " + CHANNEL_NAMES[i]);
                         }
                     }
