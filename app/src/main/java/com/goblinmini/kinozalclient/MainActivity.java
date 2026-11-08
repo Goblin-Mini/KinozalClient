@@ -3304,7 +3304,10 @@ public class MainActivity extends Activity {
         target.loading = false;
         diskCache.put("screen|" + client.getMirror() + "|" + target.key,
                 html.getBytes(StandardCharsets.UTF_8));
-        if (target != activeScreen) return;
+        if (target != activeScreen) {
+            target.viewBuilt = false;
+            return;
+        }
         target.viewBuilt = true;
         lastHtml = html;
         progress.setVisibility(View.GONE);
