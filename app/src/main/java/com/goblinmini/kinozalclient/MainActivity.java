@@ -862,8 +862,9 @@ public class MainActivity extends Activity {
 
                 runOnUiThread(() -> {
                     if (!section.items.isEmpty()) {
+                        // Keep parsing/network refresh independent from UI construction.
+                        // The final normalized snapshot is rendered once below.
                         sections.add(section);
-                        renderHomeSection(section);
                     }
                     status.setText("Показано лент: " + sections.size());
                     setHomeProgress(index + 1, paths.length, sections.size());
@@ -1476,8 +1477,13 @@ public class MainActivity extends Activity {
      * card in one long main-thread pass. This is especially important on
      * low-memory Android TV boxes.
      */
+    private final java.util.ArrayDeque<Runnable> homeCardBuildQueue = new java.util.ArrayDeque<>();
+    private boolean homeCardBuildScheduled = false;
+
     private void renderHomeSectionsIncrementally(List<HomeSection> sections) {
         final int generation = ++homeRenderGeneration;
+        homeCardBuildQueue.clear();
+        homeCardBuildScheduled = false;
         final List<HomeSection> snapshot = new ArrayList<>(sections);
         final int[] index = {0};
         Runnable[] next = new Runnable[1];
@@ -1485,18 +1491,43 @@ public class MainActivity extends Activity {
             if (generation != homeRenderGeneration || isFinishing()) return;
             if (index[0] >= snapshot.size()) {
                 scheduleVisibleHomePosterLoad();
-                stopHomePerformanceMonitor();
+                scheduleNextHomeCardBuild(generation);
                 return;
             }
             HomeSection section = snapshot.get(index[0]++);
-            renderHomeSection(section);
+            renderHomeSection(section, generation);
             browserHandler.postDelayed(next[0], 24);
         };
         browserHandler.post(next[0]);
     }
 
+    private void scheduleNextHomeCardBuild(int generation) {
+        if (generation != homeRenderGeneration || isFinishing() || homeCardBuildScheduled) return;
+        homeCardBuildScheduled = true;
+        browserHandler.post(() -> {
+            homeCardBuildScheduled = false;
+            if (generation != homeRenderGeneration || isFinishing()) return;
+            Runnable task = homeCardBuildQueue.pollFirst();
+            if (task == null) {
+                scheduleVisibleHomePosterLoad();
+                stopHomePerformanceMonitor();
+                return;
+            }
+            task.run();
+            if (!homeCardBuildQueue.isEmpty()) {
+                browserHandler.postDelayed(() -> scheduleNextHomeCardBuild(generation), 8);
+            } else {
+                browserHandler.postDelayed(() -> scheduleNextHomeCardBuild(generation), 8);
+            }
+        });
+    }
+
     /** Append a feed shell immediately, then construct poster cards over separate UI frames. */
     private void renderHomeSection(HomeSection section) {
+        renderHomeSection(section, homeRenderGeneration);
+    }
+
+    private void renderHomeSection(HomeSection section, int generation) {
         if (section == null || section.items.isEmpty()) return;
 
         TextView sectionTitle = text(section.title, 20, GOLD, true);
@@ -1534,23 +1565,28 @@ public class MainActivity extends Activity {
         horizontal.post(this::scheduleVisibleHomePosterLoad);
 
         final long startedAt = android.os.SystemClock.elapsedRealtime();
-        final int generation = homeRenderGeneration;
         final int[] cardIndex = {0};
-        Runnable[] addNextCard = new Runnable[1];
-        addNextCard[0] = () -> {
-            if (generation != homeRenderGeneration || isFinishing()) return;
-            if (cardIndex[0] >= section.items.size()) {
-                long duration = android.os.SystemClock.elapsedRealtime() - startedAt;
-                Log.w("KinozalPerf", "home row build=" + duration + "ms, title="
-                        + section.title + ", cards=" + section.items.size());
-                scheduleVisibleHomePosterLoad();
-                return;
-            }
-            HomePoster item = section.items.get(cardIndex[0]++);
-            strip.addView(createHomePosterCard(item, section));
-            browserHandler.postDelayed(addNextCard[0], 12);
-        };
-        browserHandler.post(addNextCard[0]);
+        final int cardCount = section.items.size();
+        for (HomePoster item : section.items) {
+            homeCardBuildQueue.addLast(() -> {
+                if (generation != homeRenderGeneration || isFinishing()) return;
+                long cardStartedAt = android.os.SystemClock.elapsedRealtime();
+                strip.addView(createHomePosterCard(item, section));
+                long cardDuration = android.os.SystemClock.elapsedRealtime() - cardStartedAt;
+                if (cardDuration >= 32L) {
+                    Log.w("KinozalPerf", "home card build=" + cardDuration
+                            + "ms, title=" + section.title);
+                }
+                cardIndex[0]++;
+                if (cardIndex[0] == cardCount) {
+                    long duration = android.os.SystemClock.elapsedRealtime() - startedAt;
+                    Log.i("KinozalPerf", "home row complete=" + duration + "ms, title="
+                            + section.title + ", cards=" + cardCount);
+                    scheduleVisibleHomePosterLoad();
+                }
+            });
+        }
+        scheduleNextHomeCardBuild(generation);
     }
 
     private View createHomePosterCard(HomePoster item, HomeSection section) {
