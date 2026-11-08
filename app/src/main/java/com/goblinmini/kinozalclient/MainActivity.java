@@ -1541,16 +1541,6 @@ public class MainActivity extends Activity {
         LinearLayout actions = new LinearLayout(this);
         actions.setOrientation(LinearLayout.VERTICAL);
         actions.setTag("feed-actions");
-        LinearLayout buttonRow = new LinearLayout(this);
-        buttonRow.setGravity(Gravity.RIGHT | Gravity.CENTER_VERTICAL);
-        Button refreshAll = button("Обновить всё");
-        refreshAll.setTextSize(12);
-        refreshAll.setOnClickListener(v -> {
-            String group = "collections".equals(activeFeedScreen) ? "collections" : "home";
-            refreshAllFeedsInBrowser(group);
-        });
-        buttonRow.addView(refreshAll, new LinearLayout.LayoutParams(-2, dp(36)));
-        actions.addView(buttonRow, new LinearLayout.LayoutParams(-1, dp(42)));
 
         String screenKey = "collections".equals(activeFeedScreen) ? "collections" : "home";
         LinearLayout feedRefreshPanel = new LinearLayout(this);
@@ -1908,6 +1898,15 @@ public class MainActivity extends Activity {
         feedRefreshButtons.put(refreshButtonKey, refreshFeed);
         TextView sectionTitle = text(section.title, 20, GOLD, true);
         sectionHeader.addView(sectionTitle, new LinearLayout.LayoutParams(0, dp(38), 1f));
+        String[] firstFeedPaths = feedPaths(feedGroup);
+        if (firstFeedPaths.length > 0 && firstFeedPaths[0].equals(section.path)) {
+            Button refreshAll = button("Обновить всё");
+            refreshAll.setTextSize(12);
+            LinearLayout.LayoutParams allParams = new LinearLayout.LayoutParams(-2, dp(36));
+            allParams.leftMargin = dp(8);
+            sectionHeader.addView(refreshAll, allParams);
+            refreshAll.setOnClickListener(v -> refreshAllFeedsInBrowser(feedGroup));
+        }
         LinearLayout.LayoutParams titleParams = new LinearLayout.LayoutParams(-1, dp(38));
         titleParams.topMargin = dp(10);
 
@@ -2010,8 +2009,8 @@ public class MainActivity extends Activity {
             TextView chip = text(badge, 10, GOLD, true);
             chip.setSingleLine(true);
             chip.setGravity(Gravity.CENTER);
-            chip.setPadding(dp(6), dp(2), dp(6), dp(2));
-            chip.setBackground(shape(Color.rgb(39, 57, 61), TEAL));
+            chip.setPadding(dp(8), dp(2), dp(8), dp(2));
+            chip.setBackground(shape(Color.rgb(39, 57, 61), dp(5)));
             LinearLayout.LayoutParams chipParams = new LinearLayout.LayoutParams(-2, dp(20));
             chipParams.rightMargin = dp(3);
             badgeRow.addView(chip, chipParams);
@@ -2295,12 +2294,16 @@ public class MainActivity extends Activity {
                 iconPaint.setStyle(android.graphics.Paint.Style.STROKE);
                 iconPaint.setStrokeWidth(dp(2.1f));
                 iconPaint.setStrokeCap(android.graphics.Paint.Cap.ROUND);
-                float cx = getWidth() / 2f - dp(2);
-                float cy = getHeight() / 2f - dp(2);
-                float radius = dp(6);
-                canvas.drawCircle(cx, cy, radius, iconPaint);
-                canvas.drawLine(cx + radius * 0.72f, cy + radius * 0.72f,
-                        cx + dp(10), cy + dp(10), iconPaint);
+                float cx = getWidth() / 2f;
+                float top = getHeight() / 2f - dp(10);
+                float bottom = getHeight() / 2f + dp(2);
+                float micWidth = dp(6);
+                canvas.drawRoundRect(cx - micWidth, top, cx + micWidth, bottom,
+                        micWidth, micWidth, iconPaint);
+                canvas.drawArc(cx - dp(10), top + dp(3), cx + dp(10), bottom + dp(9),
+                        0, 180, false, iconPaint);
+                canvas.drawLine(cx, bottom + dp(9), cx, bottom + dp(14), iconPaint);
+                canvas.drawLine(cx - dp(6), bottom + dp(14), cx + dp(6), bottom + dp(14), iconPaint);
             }
         };
         voiceSearch.setContentDescription("Голосовой поиск");
