@@ -3992,8 +3992,14 @@ public class MainActivity extends Activity {
                 v.setBackground(shape(focused ? Color.rgb(57, 68, 70) : PANEL, focused ? GOLD : 0));
                 if (prefetchTask[0] != null) browserHandler.removeCallbacks(prefetchTask[0]);
                 if (focused) {
-                    prefetchTask[0] = () -> prefetchTorrentDetails(t);
-                    browserHandler.postDelayed(prefetchTask[0], 320);
+                    // Do not start WebView prefetch while the user is moving
+                    // through the list. Wait until this row remains focused.
+                    prefetchTask[0] = () -> {
+                        if (card.hasFocus() && card.isAttachedToWindow()) {
+                            prefetchTorrentDetails(t);
+                        }
+                    };
+                    browserHandler.postDelayed(prefetchTask[0], 850);
                 }
             });
             card.setOnClickListener(v -> showTorrent(t));
