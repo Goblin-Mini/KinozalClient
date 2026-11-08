@@ -6,7 +6,7 @@ import android.database.Cursor;
 import android.database.MatrixCursor;
 import android.net.Uri;
 import android.provider.BaseColumns;
-import android.provider.SearchManager;
+import android.app.SearchManager;
 import android.text.TextUtils;
 
 import org.json.JSONArray;
