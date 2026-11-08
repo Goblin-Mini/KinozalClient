@@ -1286,9 +1286,9 @@ public class MainActivity extends Activity {
     }
 
     /**
-     * Collapse alternate encodes of the same release inside each home section.
-     * Keep the torrent with the most seeders; leechers break ties. Other sections
-     * remain independent so a title can appear in multiple home collections.
+     * Collapse duplicate releases independently inside each home section.
+     * A title may legitimately appear in several different feeds, so no
+     * de-duplication key is shared between sections.
      */
     private int countHomeCards(List<HomeSection> sections) {
         int count = 0;
@@ -1297,29 +1297,59 @@ public class MainActivity extends Activity {
     }
 
     private void removeHomeDuplicates(List<HomeSection> sections) {
-        java.util.Set<String> globalIds = new java.util.HashSet<>();
-        java.util.Set<String> globalTitles = new java.util.HashSet<>();
-        java.util.Set<String> globalLinks = new java.util.HashSet<>();
+        java.util.regex.Pattern idPattern = java.util.regex.Pattern.compile(
+                "[?&]id=(\\\\d+)", java.util.regex.Pattern.CASE_INSENSITIVE);
         for (HomeSection section : sections) {
+            java.util.Set<String> ids = new java.util.HashSet<>();
+            java.util.Set<String> titles = new java.util.HashSet<>();
+            java.util.Set<String> links = new java.util.HashSet<>();
             List<HomePoster> unique = new ArrayList<>();
+            int duplicateIds = 0;
+            int duplicateLinks = 0;
+            int duplicateTitles = 0;
+            int invalid = 0;
+
             for (HomePoster item : section.items) {
-                if (item == null || item.torrent == null) continue;
-                String href = item.torrent.href == null ? "" : item.torrent.href;
-                java.util.regex.Matcher matcher = java.util.regex.Pattern
-                        .compile("[?&]id=(\\d+)", java.util.regex.Pattern.CASE_INSENSITIVE).matcher(href);
+                if (item == null || item.torrent == null) {
+                    invalid++;
+                    continue;
+                }
+
+                String href = item.torrent.href == null ? "" : item.torrent.href.trim();
+                java.util.regex.Matcher matcher = idPattern.matcher(href);
                 String id = matcher.find() ? matcher.group(1) : "";
                 String titleKey = normalizeHomeTitle(item.torrent.title);
-                if ((!id.isEmpty() && globalIds.contains(id))
-                        || (!href.isEmpty() && globalLinks.contains(href))
-                        || (!titleKey.isEmpty() && globalTitles.contains(titleKey))) continue;
-                if (!id.isEmpty()) globalIds.add(id);
-                if (!href.isEmpty()) globalLinks.add(href);
-                if (!titleKey.isEmpty()) globalTitles.add(titleKey);
+
+                if (!id.isEmpty() && ids.contains(id)) {
+                    duplicateIds++;
+                    continue;
+                }
+                if (!href.isEmpty() && links.contains(href)) {
+                    duplicateLinks++;
+                    continue;
+                }
+                if (!titleKey.isEmpty() && titles.contains(titleKey)) {
+                    duplicateTitles++;
+                    continue;
+                }
+
+                if (!id.isEmpty()) ids.add(id);
+                if (!href.isEmpty()) links.add(href);
+                if (!titleKey.isEmpty()) titles.add(titleKey);
                 unique.add(item);
                 if (unique.size() >= 15) break;
             }
+
+            int before = section.items.size();
             section.items.clear();
             section.items.addAll(unique);
+            appendFeedDiagnostic("DEDUP", section.title
+                    + " before=" + before + ", after=" + unique.size()
+                    + ", duplicateIds=" + duplicateIds
+                    + ", duplicateLinks=" + duplicateLinks
+                    + ", duplicateTitles=" + duplicateTitles
+                    + ", invalid=" + invalid
+                    + ", limit=15");
         }
         sections.removeIf(section -> section.items.isEmpty());
     }
