@@ -80,13 +80,27 @@ public final class HomeFeedRefreshWorker extends Worker {
             return Result.success();
         } catch (SecurityException e) {
             Log.w(TAG, "Feed refresh requires a fresh Kinozal login: " + path, e);
+            notifyFailure(context, group, path, "нужен повторный вход на Kinozal");
             return Result.retry();
         } catch (Exception e) {
             Log.w(TAG, "Feed refresh failed; previous cache is preserved: " + path, e);
+            String reason = e.getMessage();
+            notifyFailure(context, group, path,
+                    reason == null || reason.trim().isEmpty() ? "ошибка сети или ответа сайта" : reason);
             return Result.retry();
         } finally {
             if (proxyStarted) bridge.stop();
         }
+    }
+
+    private static void notifyFailure(Context context, String group, String path, String message) {
+        android.content.Intent failed = new android.content.Intent(
+                "com.goblinmini.kinozalclient.FEED_CACHE_UPDATED");
+        failed.setPackage(context.getPackageName());
+        failed.putExtra("feed_group", group);
+        failed.putExtra("feed_path", path);
+        failed.putExtra("refresh_error", message);
+        context.sendBroadcast(failed);
     }
 
     private static JSONArray parseItems(String html, String mirror) throws Exception {
