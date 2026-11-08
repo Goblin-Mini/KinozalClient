@@ -36,6 +36,8 @@ public final class HomeFeedRefreshWorker extends Worker {
         int index = getInputData().getInt(HomeFeedScheduler.KEY_INDEX, -1);
         String path = getInputData().getString(HomeFeedScheduler.KEY_PATH);
         String title = getInputData().getString(HomeFeedScheduler.KEY_TITLE);
+        boolean bulk = getInputData().getBoolean(HomeFeedScheduler.KEY_BULK, false);
+        int total = getInputData().getInt(HomeFeedScheduler.KEY_TOTAL, 1);
         if (group == null || path == null || title == null || index < 0) return Result.failure();
 
         Context context = getApplicationContext();
@@ -44,6 +46,7 @@ public final class HomeFeedRefreshWorker extends Worker {
         Socks5ProxyBridge bridge = new Socks5ProxyBridge(context);
         KinozalHttpClient client = new KinozalHttpClient(context, mirror);
         boolean proxyStarted = false;
+        sendRefreshState(context, group, index, path, title, bulk, total, "running", null);
         try {
             Socks5ProxyBridge.Settings proxySettings = bridge.getSettings();
             if (proxySettings.enabled) {
@@ -76,16 +79,17 @@ public final class HomeFeedRefreshWorker extends Worker {
             changed.putExtra("feed_index", index);
             changed.putExtra("feed_path", path);
             context.sendBroadcast(changed);
+            sendRefreshState(context, group, index, path, title, bulk, total, "success", null);
             HomeFeedScheduler.scheduleNext(context, group, index, path, title);
             return Result.success();
         } catch (SecurityException e) {
             Log.w(TAG, "Feed refresh requires a fresh Kinozal login: " + path, e);
-            notifyFailure(context, group, path, "нужен повторный вход на Kinozal");
+            notifyFailure(context, group, index, path, title, bulk, total, "нужен повторный вход на Kinozal");
             return Result.retry();
         } catch (Exception e) {
             Log.w(TAG, "Feed refresh failed; previous cache is preserved: " + path, e);
             String reason = e.getMessage();
-            notifyFailure(context, group, path,
+            notifyFailure(context, group, index, path, title, bulk, total,
                     reason == null || reason.trim().isEmpty() ? "ошибка сети или ответа сайта" : reason);
             return Result.retry();
         } finally {
@@ -93,14 +97,25 @@ public final class HomeFeedRefreshWorker extends Worker {
         }
     }
 
-    private static void notifyFailure(Context context, String group, String path, String message) {
-        android.content.Intent failed = new android.content.Intent(
-                "com.goblinmini.kinozalclient.FEED_CACHE_UPDATED");
-        failed.setPackage(context.getPackageName());
-        failed.putExtra("feed_group", group);
-        failed.putExtra("feed_path", path);
-        failed.putExtra("refresh_error", message);
-        context.sendBroadcast(failed);
+    private static void notifyFailure(Context context, String group, int index, String path,
+            String title, boolean bulk, int total, String message) {
+        sendRefreshState(context, group, index, path, title, bulk, total, "failure", message);
+    }
+
+    private static void sendRefreshState(Context context, String group, int index, String path,
+            String title, boolean bulk, int total, String state, String message) {
+        android.content.Intent event = new android.content.Intent(
+                "com.goblinmini.kinozalclient.FEED_REFRESH_STATE");
+        event.setPackage(context.getPackageName());
+        event.putExtra("feed_group", group);
+        event.putExtra("feed_index", index);
+        event.putExtra("feed_path", path);
+        event.putExtra("feed_title", title);
+        event.putExtra("feed_bulk", bulk);
+        event.putExtra("feed_total", total);
+        event.putExtra("refresh_state", state);
+        if (message != null) event.putExtra("refresh_error", message);
+        context.sendBroadcast(event);
     }
 
     private static JSONArray parseItems(String html, String mirror) throws Exception {
