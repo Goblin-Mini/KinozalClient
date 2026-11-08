@@ -1298,7 +1298,7 @@ public class MainActivity extends Activity {
 
     private void removeHomeDuplicates(List<HomeSection> sections) {
         java.util.regex.Pattern idPattern = java.util.regex.Pattern.compile(
-                "[?&]id=(\\\\d+)", java.util.regex.Pattern.CASE_INSENSITIVE);
+                "[?&]id=(\\d+)", java.util.regex.Pattern.CASE_INSENSITIVE);
         for (HomeSection section : sections) {
             java.util.Set<String> ids = new java.util.HashSet<>();
             java.util.Set<String> titles = new java.util.HashSet<>();
