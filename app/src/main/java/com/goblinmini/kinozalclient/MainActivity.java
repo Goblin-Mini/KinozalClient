@@ -962,79 +962,27 @@ public class MainActivity extends Activity {
         resetFeedDiagnostics(group, paths);
         if (paths == HOME_PATHS) startHomePerformanceMonitor();
 
-        fetchBrowserPages(paths, htmlPages -> {
-            if (htmlPages == null || htmlPages.isEmpty()) {
-                appendFeedDiagnostic("NAVIGATION", "не получен HTML первой страницы; error=" + safe(lastBrowserError));
-                if (retry == 0) {
-                    status.setText("Повторное подключение к Kinozal…");
-                    browserHandler.postDelayed(() -> loadHomeSectionsInBrowser(
-                            paths, titles, 0, new ArrayList<>(), 1), 1200);
-                    return;
-                }
-                finishHomeBrowserLoad(paths, new ArrayList<>());
-                return;
-            }
-
-            appendFeedDiagnostic("FETCH", "получено HTML-ответов: " + htmlPages.size() + "/" + paths.length);
-            executeSafely(io, () -> {
-                long parseStarted = android.os.SystemClock.elapsedRealtime();
-                List<HomeSection> loaded = new ArrayList<>();
-                int count = Math.min(paths.length, htmlPages.size());
-                List<java.util.concurrent.Future<HomeSection>> parseJobs = new ArrayList<>();
-                for (int i = 0; i < count; i++) {
-                    final int feedIndex = i;
-                    final String html = htmlPages.get(i);
-                    if (html == null || html.trim().isEmpty()) {
-                        parseJobs.add(null);
-                        continue;
+        long fetchStarted = android.os.SystemClock.elapsedRealtime();
+        long parseStarted = fetchStarted;
+        fetchAndParseHomeFeedsSequentially(paths, titles, 0, new ArrayList<>(),
+                fetchStarted, parseStarted, loaded -> {
+                    if (loaded.isEmpty() && retry == 0) {
+                        appendFeedDiagnostic("NAVIGATION", "не получены карточки; error=" + safe(lastBrowserError));
+                        status.setText("Повторное подключение к Kinozal…");
+                        browserHandler.postDelayed(() -> loadHomeSectionsInBrowser(
+                                paths, titles, 0, new ArrayList<>(), 1), 1200);
+                        return;
                     }
-                    parseJobs.add(homeRefreshIo.submit(() -> {
-                        long taskStarted = android.os.SystemClock.elapsedRealtime();
-                        HomeSection section = new HomeSection(titles[feedIndex], paths[feedIndex]);
-                        section.items.addAll(parseHomePosters(
-                                Jsoup.parse(html, client.getMirror() + "/")));
-                        appendFeedDiagnostic("PARSE_TASK", paths[feedIndex]
-                                + " durationMs=" + (android.os.SystemClock.elapsedRealtime() - taskStarted)
-                                + ", cards=" + section.items.size()
-                                + ", thread=" + Thread.currentThread().getName());
-                        return section;
-                    }));
-                }
-                // Parse independent HTML documents concurrently, but collect them in
-                // the original feed order so the UI and de-duplication stay unchanged.
-                for (int i = 0; i < count; i++) {
-                    String html = htmlPages.get(i);
-                    if (html == null || html.trim().isEmpty()) {
-                        appendFeedDiagnostic("PARSE", paths[i] + " пустой HTML");
-                        continue;
+                    removeHomeDuplicates(loaded);
+                    appendFeedDiagnostic("PARSE_DONE", "mode=webview-js, секций=" + loaded.size()
+                            + ", карточек=" + countHomeCards(loaded)
+                            + ", parseMs=" + (android.os.SystemClock.elapsedRealtime() - parseStarted));
+                    if (!loaded.isEmpty()) {
+                        if (paths == HOME_PATHS) saveHomeModel(loaded);
+                        else if (paths == COLLECTION_PATHS) saveCollectionsModel(loaded);
                     }
-                    try {
-                        java.util.concurrent.Future<HomeSection> job = parseJobs.get(i);
-                        HomeSection section = job == null ? null : job.get();
-                        if (section != null && !section.items.isEmpty()) {
-                            diskCache.put("home|" + client.getMirror() + "|" + paths[i],
-                                    html.getBytes(StandardCharsets.UTF_8));
-                            loaded.add(section);
-                            appendFeedDiagnostic("PARSE", paths[i] + " карточек=" + section.items.size()
-                                    + ", htmlBytes=" + html.length());
-                        } else {
-                            appendFeedDiagnostic("PARSE", paths[i] + " карточки не найдены, htmlChars=" + html.length());
-                        }
-                    } catch (Exception e) {
-                        appendFeedDiagnostic("PARSE_ERROR", paths[i] + " " + safe(e.getMessage()));
-                    }
-                }
-                removeHomeDuplicates(loaded);
-                appendFeedDiagnostic("PARSE_DONE", "секций=" + loaded.size() + ", карточек="
-                        + countHomeCards(loaded) + ", parseMs="
-                        + (android.os.SystemClock.elapsedRealtime() - parseStarted));
-                if (!loaded.isEmpty()) {
-                    if (paths == HOME_PATHS) saveHomeModel(loaded);
-                    else if (paths == COLLECTION_PATHS) saveCollectionsModel(loaded);
-                }
-                runOnUiThread(() -> finishHomeBrowserLoad(paths, loaded));
-            });
-        });
+                    finishHomeBrowserLoad(paths, loaded);
+                });
     }
 
     private void finishHomeBrowserLoad(String[] paths, List<HomeSection> sections) {
@@ -1184,6 +1132,153 @@ public class MainActivity extends Activity {
                     if (!section.items.isEmpty()) sections.add(section);
                     browserHandler.postDelayed(() -> loadNextTvChannelFeed(index + 1, sections), 180);
                 });
+            });
+        });
+    }
+
+    /**
+     * Navigate feeds sequentially and extract their already-rendered DOM in WebView.
+     * Jsoup is retained as a background fallback if JavaScript extraction fails.
+     */
+    private void fetchAndParseHomeFeedsSequentially(String[] paths, String[] titles, int index,
+            List<HomeSection> loaded, long fetchStarted, long parseStarted,
+            java.util.function.Consumer<List<HomeSection>> callback) {
+        if (index >= paths.length) {
+            appendFeedDiagnostic("FETCH_DONE", "sequentialRequests=" + paths.length
+                    + ", totalMs=" + (android.os.SystemClock.elapsedRealtime() - fetchStarted));
+            callback.accept(loaded);
+            return;
+        }
+
+        final int feedIndex = index;
+        final String path = paths[index];
+        final String title = titles[index];
+        long requestStarted = android.os.SystemClock.elapsedRealtime();
+        appendFeedDiagnostic(index == 0 ? "NAVIGATION_START" : "HTTP_START",
+                path + " index=" + (index + 1) + "/" + paths.length);
+
+        fetchBrowserPage(path, null, html -> {
+            long requestDuration = android.os.SystemClock.elapsedRealtime() - requestStarted;
+            int htmlLength = html == null ? 0 : html.length();
+            appendFeedDiagnostic(index == 0 ? "NAVIGATION_DONE" : "HTTP",
+                    path + " durationMs=" + requestDuration + ", htmlChars=" + htmlLength
+                            + (htmlLength == 0 ? ", error=" + safe(lastBrowserError) : ""));
+            if (htmlLength == 0) {
+                fetchAndParseHomeFeedsSequentially(paths, titles, feedIndex + 1, loaded,
+                        fetchStarted, parseStarted, callback);
+                return;
+            }
+
+            final String pageHtml = html;
+            WebView web = sessionWebView;
+            if (web == null) {
+                parseHomeFeedFallback(pageHtml, title, path, feedIndex, loaded,
+                        paths, titles, fetchStarted, parseStarted, callback, "WebView отсутствует");
+                return;
+            }
+
+            long jsStarted = android.os.SystemClock.elapsedRealtime();
+            String script = "(function(){try{"
+                    + "var links=document.querySelectorAll('table.t_peer td.nam > a[href*=\\\"details.php?id=\\\"]');"
+                    + "if(!links.length)links=document.querySelectorAll('a[href*=\\\"details.php?id=\\\"]');"
+                    + "var out=[],seen=Object.create(null);"
+                    + "function txt(e){return e?(e.innerText||e.textContent||'').replace(/\\s+/g,' ').trim():'';}"
+                    + "function imgSrc(img){if(!img)return '';var a=['data-src','data-original','data-lazy-src','data-original-src','src'];"
+                    + "for(var i=0;i<a.length;i++){var v=(img.getAttribute(a[i])||'').trim();"
+                    + "if(v&&v.indexOf('data:image/')!==0)return v;}"
+                    + "var ss=img.getAttribute('data-srcset')||img.getAttribute('srcset')||'';"
+                    + "return ss?ss.split(',')[0].trim().split(/\\s+/)[0]:'';}"
+                    + "for(var i=0;i<links.length;i++){var a=links[i],rawHref=a.getAttribute('href')||'',href=a.href||rawHref;"
+                    + "if(/userdetails/i.test(rawHref)||!href||seen[href])continue;seen[href]=1;"
+                    + "var row=a.closest('tr'),img=a.querySelector('img');"
+                    + "if(!img&&row)img=row.querySelector('img');if(!img&&a.parentElement)img=a.parentElement.querySelector('img');"
+                    + "var p=a;for(var d=0;d<4&&!img&&p;d++){p=p.parentElement;if(p)img=p.querySelector('img');}"
+                    + "var title=(a.getAttribute('title')||'').trim()||(img?(img.getAttribute('alt')||'').trim():'')||txt(a);"
+                    + "if(title.length<1)continue;var image=imgSrc(img);"
+                    + "try{if(image)image=new URL(image,document.baseURI).href;}catch(e){}"
+                    + "var cells=row?row.querySelectorAll('td'):[];"
+                    + "function cell(n){return cells.length>n?txt(cells[n]):'—';}"
+                    + "out.push({title:title,href:href,image:image,size:cell(3),seeds:cell(4),leeches:cell(5),uploaded:cell(6)});}"
+                    + "return JSON.stringify(out);}catch(e){return '[]';}})()";
+
+            web.evaluateJavascript(script, value -> {
+                List<HomePoster> posters = parseHomePostersJson(value);
+                long jsDuration = android.os.SystemClock.elapsedRealtime() - jsStarted;
+                if (!posters.isEmpty()) {
+                    HomeSection section = new HomeSection(title, path);
+                    section.items.addAll(posters);
+                    loaded.add(section);
+                    diskCache.put("home|" + client.getMirror() + "|" + path,
+                            pageHtml.getBytes(StandardCharsets.UTF_8));
+                    appendFeedDiagnostic("PARSE_JS", path + " durationMs=" + jsDuration
+                            + ", cards=" + posters.size() + ", htmlChars=" + pageHtml.length());
+                    fetchAndParseHomeFeedsSequentially(paths, titles, feedIndex + 1, loaded,
+                            fetchStarted, parseStarted, callback);
+                } else {
+                    parseHomeFeedFallback(pageHtml, title, path, feedIndex, loaded,
+                            paths, titles, fetchStarted, parseStarted, callback,
+                            "JS не вернул карточки, durationMs=" + jsDuration);
+                }
+            });
+        });
+    }
+
+    private List<HomePoster> parseHomePostersJson(String javascriptValue) {
+        List<HomePoster> out = new ArrayList<>();
+        try {
+            String json = new org.json.JSONArray("[" + javascriptValue + "]").getString(0);
+            org.json.JSONArray array = new org.json.JSONArray(json);
+            java.util.Set<String> seen = new java.util.HashSet<>();
+            for (int i = 0; i < array.length(); i++) {
+                org.json.JSONObject obj = array.optJSONObject(i);
+                if (obj == null) continue;
+                String title = obj.optString("title", "").trim();
+                String href = obj.optString("href", "").trim();
+                if (title.isEmpty() || href.isEmpty() || !seen.add(href)) continue;
+                HomePoster item = new HomePoster();
+                item.torrent = new Torrent();
+                item.torrent.title = title;
+                item.torrent.href = href;
+                item.torrent.size = obj.optString("size", "—");
+                item.torrent.seeds = obj.optString("seeds", "—");
+                item.torrent.leeches = obj.optString("leeches", "—");
+                item.torrent.uploaded = obj.optString("uploaded", "—");
+                String image = obj.optString("image", "").trim();
+                if (!image.startsWith("http://") && !image.startsWith("https://")) image = "";
+                item.imageUrl = image;
+                item.torrent.poster = image;
+                out.add(item);
+            }
+        } catch (Exception e) {
+            Log.w("KinozalFeedDiag", "Home JS JSON parse failed", e);
+        }
+        return out;
+    }
+
+    private void parseHomeFeedFallback(String html, String title, String path, int feedIndex,
+            List<HomeSection> loaded, String[] paths, String[] titles, long fetchStarted,
+            long parseStarted, java.util.function.Consumer<List<HomeSection>> callback,
+            String reason) {
+        appendFeedDiagnostic("PARSE_JS_FALLBACK", path + " " + reason);
+        executeSafely(io, () -> {
+            long fallbackStarted = android.os.SystemClock.elapsedRealtime();
+            HomeSection section = new HomeSection(title, path);
+            try {
+                section.items.addAll(parseHomePosters(Jsoup.parse(html, client.getMirror() + "/")));
+            } catch (Exception e) {
+                appendFeedDiagnostic("PARSE_ERROR", path + " " + safe(e.getMessage()));
+            }
+            long fallbackDuration = android.os.SystemClock.elapsedRealtime() - fallbackStarted;
+            runOnUiThread(() -> {
+                if (!section.items.isEmpty()) {
+                    loaded.add(section);
+                    diskCache.put("home|" + client.getMirror() + "|" + path,
+                            html.getBytes(StandardCharsets.UTF_8));
+                }
+                appendFeedDiagnostic("PARSE_JS_FALLBACK_DONE", path + " durationMs="
+                        + fallbackDuration + ", cards=" + section.items.size());
+                fetchAndParseHomeFeedsSequentially(paths, titles, feedIndex + 1, loaded,
+                        fetchStarted, parseStarted, callback);
             });
         });
     }
