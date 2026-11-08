@@ -68,8 +68,8 @@ public class MainActivity extends Activity {
             java.util.regex.Pattern.compile("\\btype\\s*=\\s*(['\\\"]?)password\\1");
     private static final String PREFS = "kinozal_settings";
     private static final String[] MIRRORS = {
-            "https://kinozal.cloudns.nz", "https://kinozal.guru",
-            "https://kinozal.tv", "https://kinozal.me"
+            "https://kinozal.me", "https://kinozal.guru",
+            "https://kinozal.jumpingcrab.com"
     };
 
     private final ExecutorService io = Executors.newSingleThreadExecutor();
@@ -251,6 +251,10 @@ public class MainActivity extends Activity {
         GOLD = getAccentColor(getSharedPreferences(PREFS, MODE_PRIVATE).getString("accent_color", "gold"));
         readTvLaunchIntent(getIntent());
         mirror = getSharedPreferences(PREFS, MODE_PRIVATE).getString("mirror", MIRRORS[0]);
+        if ("https://kinozal.tv".equalsIgnoreCase(mirror)) {
+            mirror = MIRRORS[0];
+            getSharedPreferences(PREFS, MODE_PRIVATE).edit().putString("mirror", mirror).apply();
+        }
         client = new KinozalHttpClient(this, mirror);
         diskCache = new DiskCache(this, 200L * 1024L * 1024L);
         int bitmapCacheBytes = (int) Math.min(16L * 1024L * 1024L,
@@ -4979,11 +4983,44 @@ public class MainActivity extends Activity {
     }
 
     private void chooseMirror() {
-        String[] labels = {"Kinozal CloudNS", "Kinozal Guru", "Kinozal TV", "Kinozal Me"};
+        String[] labels = {"Kinozal Me", "Kinozal Guru", "Kinozal Jumpingcrab"};
         new AlertDialog.Builder(this).setTitle("Зеркало").setItems(labels, (d, which) -> {
-            mirror = MIRRORS[which]; getSharedPreferences(PREFS, MODE_PRIVATE).edit().putString("mirror", mirror).apply();
-            client.setMirror(mirror); load("browse.php", "Все раздачи");
-        }).setNegativeButton("Отмена", null).show();
+            applyMirror(MIRRORS[which]);
+        }).setNeutralButton("Ввести адрес вручную", (d, which) -> showCustomMirrorDialog())
+                .setNegativeButton("Отмена", null).show();
+    }
+
+    private void showCustomMirrorDialog() {
+        EditText address = new EditText(this);
+        address.setSingleLine(true);
+        address.setInputType(android.text.InputType.TYPE_CLASS_TEXT | android.text.InputType.TYPE_TEXT_VARIATION_URI);
+        address.setHint("https://example.com");
+        address.setText(client.getMirror());
+        int pad = dp(18);
+        LinearLayout content = new LinearLayout(this);
+        content.setOrientation(LinearLayout.VERTICAL);
+        content.setPadding(pad, dp(8), pad, 0);
+        content.addView(address, new LinearLayout.LayoutParams(-1, dp(48)));
+        new AlertDialog.Builder(this).setTitle("Своё зеркало").setView(content)
+                .setPositiveButton("Сохранить", (d, which) -> {
+                    String value = address.getText().toString().trim();
+                    if (!value.matches("(?i)^https://[^/\\s]+/?$")) {
+                        showMessage("Введите полный HTTPS-адрес зеркала, например https://kinozal.me");
+                        return;
+                    }
+                    applyMirror(value.replaceAll("/+$", ""));
+                }).setNegativeButton("Отмена", null).show();
+    }
+
+    private void applyMirror(String value) {
+        try {
+            client.setMirror(value);
+            mirror = client.getMirror();
+            getSharedPreferences(PREFS, MODE_PRIVATE).edit().putString("mirror", mirror).apply();
+            load("browse.php", "Все раздачи");
+        } catch (IllegalArgumentException e) {
+            showMessage("Некорректный адрес зеркала. Требуется HTTPS.");
+        }
     }
 
 
