@@ -323,6 +323,8 @@ public final class KinozalHttpClient {
             }
             int code = connection.getResponseCode();
             cookies.put(uri, connection.getHeaderFields());
+            // Persist rotated session/Cloudflare cookies for background workers.
+            try { persistCookies(); } catch (Exception ignored) { }
             String location = connection.getHeaderField("Location");
             if (code == 301 || code == 302 || code == 303 || code == 307 || code == 308) {
                 connection.disconnect();
