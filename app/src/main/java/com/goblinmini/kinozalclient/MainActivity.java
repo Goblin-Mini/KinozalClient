@@ -686,6 +686,10 @@ public class MainActivity extends Activity {
         progress.setVisibility(View.VISIBLE);
         status.setText("Обновляем: " + request.title);
         fetchBrowserPage(request.path, null, html -> {
+            if (torrentDetailsOpen) {
+                browserFeedLoading = false;
+                return;
+            }
             if (html == null || html.isEmpty()) {
                 browserFeedLoading = false;
                 status.setText("Не удалось обновить «" + request.title + "» · сохранённые данные оставлены");
@@ -4675,12 +4679,12 @@ public class MainActivity extends Activity {
     // The click handler reuses this in-flight request instead of starting a
     // second WebView navigation and cancelling the first one.
     private void showTorrent(Torrent t) {
-        torrentDetailsOpen = true;
         focusedTorrentSource = getCurrentFocus();
         if (t == null || t.href == null || t.href.trim().isEmpty()) {
             showMessage("Не удалось определить адрес раздачи.");
             return;
         }
+        torrentDetailsOpen = true;
 
         final String href = t.href;
         final String cacheKey = "details|" + client.getMirror() + "|" + href;
@@ -4745,7 +4749,7 @@ public class MainActivity extends Activity {
                 diskCache.put(cacheKey, html.getBytes(StandardCharsets.UTF_8));
                 t.poster = details.poster;
                 saveRecentlyViewed(t);
-                if (href.equals(activeTorrentDetailsHref)) {
+                if (href.equals(activeTorrentDetailsHref) && !hasCachedDetails) {
                     progress.setVisibility(View.GONE);
                     showTorrentDetails(t, details);
                 }
