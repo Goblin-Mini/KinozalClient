@@ -1900,8 +1900,9 @@ public class MainActivity extends Activity {
         final String feedGroup = getFeedIndex("collections", section.path) >= 0
                 ? "collections" : "home";
         Button refreshFeed = button("⟳");
-        // Match the refresh glyph to the capital-letter height and center it on the title's midline.
+        // Icon-only refresh control: no button plate, only the glyph changes color on focus.
         refreshFeed.setTextSize(20);
+        refreshFeed.setTextColor(TEAL);
         refreshFeed.setMinWidth(0);
         refreshFeed.setMinimumWidth(0);
         refreshFeed.setMinHeight(0);
@@ -1909,8 +1910,12 @@ public class MainActivity extends Activity {
         refreshFeed.setGravity(Gravity.CENTER);
         refreshFeed.setIncludeFontPadding(false);
         refreshFeed.setPadding(0, 0, 0, 0);
-        // Lift the glyph slightly so its visual center sits on the crossbar of the section's "Н".
+        refreshFeed.setBackgroundColor(Color.TRANSPARENT);
         refreshFeed.setTranslationY(-dp(4));
+        refreshFeed.setOnFocusChangeListener((v, focused) -> {
+            refreshFeed.setTextColor(focused ? GOLD : TEAL);
+            refreshFeed.setBackgroundColor(Color.TRANSPARENT);
+        });
         refreshFeed.setContentDescription("Обновить ленту " + section.title);
         refreshFeed.setOnClickListener(v -> {
             int feedIndex = getFeedIndex(feedGroup, section.path);
