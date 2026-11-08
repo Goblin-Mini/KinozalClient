@@ -4849,6 +4849,7 @@ public class MainActivity extends Activity {
         String imdbRating = "—", kinopoiskRating = "—", kinozalRating = "—", kinozalStars = "☆☆☆☆☆☆☆☆☆☆", kinozalVotes = "";
         final java.util.LinkedHashMap<String, String> fields = new java.util.LinkedHashMap<>();
         final java.util.List<String> screenshotThumbs = new java.util.ArrayList<>();
+        final java.util.List<String> comments = new java.util.ArrayList<>();
         String screenshotRequestId = "";
         String screenshotPagesd = "";
     }
@@ -5008,6 +5009,18 @@ public class MainActivity extends Activity {
 
         Element technical = doc.selectFirst("#tabs");
         if (technical != null) extractBoldFields(technical, data.fields);
+
+        // Kinozal comments are embedded in the release page as div.tx blocks.
+        // Read-only extraction: no input field, reply or submit action.
+        java.util.LinkedHashSet<String> uniqueComments = new java.util.LinkedHashSet<>();
+        for (Element comment : doc.select("div.tx")) {
+            String value = comment.wholeText().replace('\u00a0', ' ')
+                    .replaceAll("[\\t\\x0B\\f\\r]+", " ")
+                    .replaceAll(" *\\n *", "\\n")
+                    .replaceAll(" {2,}", " ").trim();
+            if (!value.isEmpty()) uniqueComments.add(value);
+        }
+        data.comments.addAll(uniqueComments);
         // Kinozal loads the screenshot tab asynchronously. The detail page
         // contains showtab(id, pagesd), not the screenshot <img> elements.
         java.util.regex.Matcher screenshotTab = java.util.regex.Pattern.compile(
@@ -5270,8 +5283,9 @@ public class MainActivity extends Activity {
         Button descriptionTab = button("Описание");
         Button technicalTab = button("Техданные");
         Button screenshotsTab = button("Скриншоты");
-        Button jackettTab = button("Другие раздачи");
-        Button[] tabButtons = {descriptionTab, technicalTab, screenshotsTab, jackettTab};
+        Button commentsTab = button("Комментарии");
+        Button jackettTab = button("Другие");
+        Button[] tabButtons = {descriptionTab, technicalTab, screenshotsTab, commentsTab, jackettTab};
         for (int tabIndex = 0; tabIndex < tabButtons.length; tabIndex++) {
             LinearLayout.LayoutParams tabParams = new LinearLayout.LayoutParams(0, dp(44), 1);
             if (tabIndex > 0) tabParams.leftMargin = dp(5);
@@ -5330,6 +5344,36 @@ public class MainActivity extends Activity {
                 detailsScroll.scrollTo(0, 0);
                 return;
             }
+            if (active[0] == 3) {
+                if (data.comments.isEmpty()) {
+                    detailContent.addView(text("Комментарии к этой раздаче не найдены.",
+                            15, Color.LTGRAY, false));
+                } else {
+                    detailContent.addView(text("Комментарии (" + data.comments.size() + ")",
+                            13, TEAL, true));
+                    for (int commentIndex = 0; commentIndex < data.comments.size(); commentIndex++) {
+                        LinearLayout commentCard = new LinearLayout(this);
+                        commentCard.setOrientation(LinearLayout.VERTICAL);
+                        commentCard.setPadding(dp(12), dp(10), dp(12), dp(10));
+                        commentCard.setBackground(shape(PANEL, dp(8)));
+                        TextView number = text("Комментарий " + (commentIndex + 1),
+                                12, TEAL, true);
+                        number.setPadding(0, 0, 0, dp(5));
+                        commentCard.addView(number);
+                        TextView body = text(data.comments.get(commentIndex),
+                                14, Color.WHITE, false);
+                        body.setLineSpacing(dp(2), 1.0f);
+                        body.setTextIsSelectable(false);
+                        commentCard.addView(body, new LinearLayout.LayoutParams(-1, -2));
+                        LinearLayout.LayoutParams commentParams =
+                                new LinearLayout.LayoutParams(-1, -2);
+                        commentParams.bottomMargin = dp(8);
+                        detailContent.addView(commentCard, commentParams);
+                    }
+                }
+                detailsScroll.scrollTo(0, 0);
+                return;
+            }
             String[] keys = groups[active[0]];
             boolean any = false;
             int index = 0;
@@ -5380,9 +5424,14 @@ public class MainActivity extends Activity {
                 v.setBackground(shape(focused ? Color.rgb(65, 72, 73) : PANEL, focused ? GOLD : 0)));
         screenshotsTab.setOnFocusChangeListener((v, focused) ->
                 v.setBackground(shape(focused ? Color.rgb(65, 72, 73) : PANEL, focused ? GOLD : 0)));
+        commentsTab.setOnFocusChangeListener((v, focused) ->
+                v.setBackground(shape(focused ? Color.rgb(65, 72, 73) : PANEL, focused ? GOLD : 0)));
+        jackettTab.setOnFocusChangeListener((v, focused) ->
+                v.setBackground(shape(focused ? Color.rgb(65, 72, 73) : PANEL, focused ? GOLD : 0)));
         descriptionTab.setOnClickListener(v -> { active[0] = 0; render.run(); });
         technicalTab.setOnClickListener(v -> { active[0] = 1; render.run(); });
         screenshotsTab.setOnClickListener(v -> { active[0] = 2; render.run(); });
+        commentsTab.setOnClickListener(v -> { active[0] = 3; render.run(); });
         jackettTab.setOnClickListener(v -> searchJackett(torrent.title, data.poster));
         render.run();
 
