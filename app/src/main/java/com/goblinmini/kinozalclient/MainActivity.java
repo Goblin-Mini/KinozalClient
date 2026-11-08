@@ -1875,10 +1875,15 @@ public class MainActivity extends Activity {
         final String feedGroup = getFeedIndex("collections", section.path) >= 0
                 ? "collections" : "home";
         Button refreshFeed = button("⟳");
-        refreshFeed.setTextSize(22);
+        refreshFeed.setTextSize(17);
+        refreshFeed.setMinWidth(0);
+        refreshFeed.setMinimumWidth(0);
+        refreshFeed.setMinHeight(0);
+        refreshFeed.setMinimumHeight(0);
         refreshFeed.setGravity(Gravity.CENTER);
+        refreshFeed.setIncludeFontPadding(false);
         refreshFeed.setPadding(0, 0, 0, 0);
-        refreshFeed.setTranslationY(-dp(5));
+        refreshFeed.setTranslationY(0f);
         refreshFeed.setContentDescription("Обновить ленту " + section.title);
         refreshFeed.setOnClickListener(v -> {
             int feedIndex = getFeedIndex(feedGroup, section.path);
@@ -1888,7 +1893,7 @@ public class MainActivity extends Activity {
             }
             refreshFeedInBrowser(feedGroup, feedIndex, section.path, section.title, false, 1);
         });
-        LinearLayout.LayoutParams refreshParams = new LinearLayout.LayoutParams(dp(38), dp(38));
+        LinearLayout.LayoutParams refreshParams = new LinearLayout.LayoutParams(dp(30), dp(30));
         refreshParams.rightMargin = dp(10);
         sectionHeader.addView(refreshFeed, refreshParams);
         String refreshButtonKey = feedButtonKey(feedGroup, section.path);
