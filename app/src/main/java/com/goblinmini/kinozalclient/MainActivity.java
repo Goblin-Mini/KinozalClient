@@ -3870,56 +3870,11 @@ public class MainActivity extends Activity {
 
     private void parseCatalogInWebView(WebView web, String html, String requestedPath,
             long parseStartedAt) {
-        final String bridgeName = "KinozalCatalogBridge";
         final boolean[] completed = {false};
         final Runnable[] timeoutHolder = {null};
-        web.removeJavascriptInterface(bridgeName);
-        web.addJavascriptInterface(new Object() {
-            @JavascriptInterface
-            public void onCatalogResult(String json) {
-                runOnUiThread(() -> {
-                    if (completed[0]) return;
-                    completed[0] = true;
-                    if (timeoutHolder[0] != null) browserHandler.removeCallbacks(timeoutHolder[0]);
-                    web.removeJavascriptInterface(bridgeName);
-                    try {
-                        org.json.JSONArray array = new org.json.JSONArray(json);
-                        List<Torrent> parsed = new ArrayList<>(array.length());
-                        for (int i = 0; i < array.length(); i++) {
-                            org.json.JSONObject item = array.optJSONObject(i);
-                            if (item == null) continue;
-                            Torrent torrent = new Torrent();
-                            torrent.title = item.optString("title", "").trim();
-                            torrent.href = item.optString("href", "").trim();
-                            if (torrent.title.length() < 3 || torrent.href.isEmpty()) continue;
-                            torrent.size = item.optString("size", "—");
-                            torrent.seeds = item.optString("seeds", "—");
-                            torrent.leeches = item.optString("leeches", "—");
-                            torrent.uploaded = item.optString("uploaded", "—");
-                            parsed.add(torrent);
-                        }
-                        logBrowsePerf("catalog-js-extract",
-                                android.os.SystemClock.elapsedRealtime() - parseStartedAt,
-                                "htmlChars=" + html.length() + " torrents=" + parsed.size());
-                        if (parsed.isEmpty()) {
-                            // Keep the established parser as a safety net if the site's
-                            // table markup differs from the expected Kinozal structure.
-                            parseCatalogWithJsoup(html, requestedPath, parseStartedAt);
-                        } else {
-                            finishCatalogLoad(html, requestedPath, parsed);
-                        }
-                    } catch (Exception e) {
-                        Log.w("KinozalPerf", "catalog JS result failed; using Jsoup fallback", e);
-                        parseCatalogWithJsoup(html, requestedPath, parseStartedAt);
-                    }
-                });
-            }
-        }, bridgeName);
-
         timeoutHolder[0] = () -> {
             if (completed[0]) return;
             completed[0] = true;
-            web.removeJavascriptInterface(bridgeName);
             Log.w("KinozalPerf", "catalog JS extraction timed out; using Jsoup fallback");
             parseCatalogWithJsoup(html, requestedPath, parseStartedAt);
         };
@@ -3938,9 +3893,44 @@ public class MainActivity extends Activity {
                 + "function cellText(n){return cells.length>n?(cells[n].innerText||cells[n].textContent||'').trim():'—';}"
                 + "out.push({title:title,href:href,size:cellText(3),seeds:cellText(4),"
                 + "leeches:cellText(5),uploaded:cellText(6)});}}"
-                + "window." + bridgeName + ".onCatalogResult(JSON.stringify(out));"
-                + "}catch(e){window." + bridgeName + ".onCatalogResult('[]');}})();";
-        web.evaluateJavascript(script, null);
+                + "return JSON.stringify(out);"
+                + "}catch(e){return '[]';}})()";
+
+        web.evaluateJavascript(script, value -> {
+            if (completed[0]) return;
+            completed[0] = true;
+            if (timeoutHolder[0] != null) browserHandler.removeCallbacks(timeoutHolder[0]);
+            try {
+                String json = new org.json.JSONArray("[" + value + "]").getString(0);
+                org.json.JSONArray array = new org.json.JSONArray(json);
+                List<Torrent> parsed = new ArrayList<>(array.length());
+                for (int i = 0; i < array.length(); i++) {
+                    org.json.JSONObject item = array.optJSONObject(i);
+                    if (item == null) continue;
+                    Torrent torrent = new Torrent();
+                    torrent.title = item.optString("title", "").trim();
+                    torrent.href = item.optString("href", "").trim();
+                    if (torrent.title.length() < 3 || torrent.href.isEmpty()) continue;
+                    torrent.size = item.optString("size", "—");
+                    torrent.seeds = item.optString("seeds", "—");
+                    torrent.leeches = item.optString("leeches", "—");
+                    torrent.uploaded = item.optString("uploaded", "—");
+                    parsed.add(torrent);
+                }
+                logBrowsePerf("catalog-js-extract",
+                        android.os.SystemClock.elapsedRealtime() - parseStartedAt,
+                        "htmlChars=" + html.length() + " torrents=" + parsed.size());
+                if (parsed.isEmpty()) {
+                    Log.w("KinozalPerf", "catalog JS returned no rows; using Jsoup fallback");
+                    parseCatalogWithJsoup(html, requestedPath, parseStartedAt);
+                } else {
+                    finishCatalogLoad(html, requestedPath, parsed);
+                }
+            } catch (Exception e) {
+                Log.w("KinozalPerf", "catalog JS result failed; using Jsoup fallback", e);
+                parseCatalogWithJsoup(html, requestedPath, parseStartedAt);
+            }
+        });
     }
 
     private void parseCatalogWithJsoup(String html, String requestedPath, long parseStartedAt) {
