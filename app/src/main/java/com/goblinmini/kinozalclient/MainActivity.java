@@ -1636,9 +1636,9 @@ public class MainActivity extends Activity {
                         : "Обновляется лента: " + title);
                 bar.setIndeterminate(false);
                 bar.setMax(total);
-                bar.setProgress(index);
+                bar.setProgress(Math.min(total, index + 1));
             }
-            startFeedRefreshAnimation(key);
+            if (visibleGroup) startFeedRefreshAnimation(key);
         } else if ("success".equals(state)) {
             stopFeedRefreshAnimation(key);
             if (visibleGroup && panel != null && label != null && bar != null) {
