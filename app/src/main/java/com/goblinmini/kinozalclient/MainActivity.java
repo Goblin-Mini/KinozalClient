@@ -3824,7 +3824,7 @@ public class MainActivity extends Activity {
                 next.setOnClickListener(v -> changePage(1));
             }
         };
-        if (!pendingCards.isEmpty()) browserHandler.post(buildNextCard[0]);
+        browserHandler.post(buildNextCard[0]);
 
         animateContentTransition(list);
     }
