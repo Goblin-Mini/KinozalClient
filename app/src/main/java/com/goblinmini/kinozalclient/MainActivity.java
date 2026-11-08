@@ -5559,6 +5559,14 @@ public class MainActivity extends Activity {
                 @Override public void onReceive(android.content.Context context, android.content.Intent intent) {
                     String group = intent.getStringExtra("feed_group");
                     String path = intent.getStringExtra("feed_path");
+                    String refreshError = intent.getStringExtra("refresh_error");
+                    if (refreshError != null) {
+                        if (("home".equals(group) && "home".equals(activeFeedScreen))
+                                || ("collections".equals(group) && "collections".equals(activeFeedScreen))) {
+                            status.setText("Обновление не удалось: " + refreshError);
+                        }
+                        return;
+                    }
                     if (group == null || path == null) return;
                     io.execute(() -> {
                         List<HomeSection> snapshot = "home".equals(group)
