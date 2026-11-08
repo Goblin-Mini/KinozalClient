@@ -3313,19 +3313,37 @@ public class MainActivity extends Activity {
         // returning to Подборки would then keep the category's old list attached.
         activateCachedScreen("catalog");
         currentPath = path; currentTitle = title; heading.setText(title);
-        showPageLoading("Загрузка каталога…");
+        final int requestGeneration = ++catalogLoadGeneration;
+        final boolean hasPostBody = postBody != null;
+        // GET category pages are restored immediately from the last successful
+        // response. The WebView refresh continues in the background.
+        List<Torrent> cachedItems = hasPostBody ? null : readCatalogPageCache(path);
+        if (cachedItems != null && !cachedItems.isEmpty()) {
+            torrents.clear();
+            torrents.addAll(cachedItems);
+            progress.setVisibility(View.VISIBLE);
+            status.setText("Сохранённая категория · обновляем…");
+            renderTorrents(cachedItems);
+        } else {
+            showPageLoading("Загрузка каталога…");
+        }
         if (sessionWebView != null) {
             fetchBrowserPage(path, postBody, html -> {
+                if (requestGeneration != catalogLoadGeneration) return;
                 if (html != null && !html.isEmpty()) {
                     lastKinozalConnectionStatus = "установлено";
                     updateSidebarConnectionInfo();
-                    showLoadedPage(html);
+                    showLoadedPage(html, path);
                 } else {
                     lastKinozalConnectionStatus = "нет соединения";
                     if (sidebarConnectionInfo != null) sidebarConnectionInfo.setText("Подключение к Kinozal: нет соединения");
                     progress.setVisibility(View.GONE);
-                    status.setText("Нет соединения");
-                    addEmpty("Не удалось загрузить каталог через браузерную сессию.");
+                    if (cachedItems != null && !cachedItems.isEmpty()) {
+                        status.setText("Показана сохранённая категория · обновление недоступно");
+                    } else {
+                        status.setText("Нет соединения");
+                        addEmpty("Не удалось загрузить каталог через браузерную сессию.");
+                    }
                 }
             });
         } else {
@@ -3333,16 +3351,24 @@ public class MainActivity extends Activity {
                 try {
                     String html = postBody == null ? client.fetch(path) : client.fetchPost(path, postBody);
                     runOnUiThread(() -> {
+                        if (requestGeneration != catalogLoadGeneration) return;
                         lastKinozalConnectionStatus = "установлено";
                         updateSidebarConnectionInfo();
-                        showLoadedPage(html);
+                        showLoadedPage(html, path);
                     });
                 } catch (Exception e) {
                     runOnUiThread(() -> {
+                        if (requestGeneration != catalogLoadGeneration) return;
                         lastKinozalConnectionStatus = "нет соединения";
                         if (sidebarConnectionInfo != null) sidebarConnectionInfo.setText("Подключение к Kinozal: нет соединения");
-                        progress.setVisibility(View.GONE); status.setText("Нет соединения");
-                        addEmpty("Не удалось загрузить каталог. " + safe(e.getMessage())); });
+                        progress.setVisibility(View.GONE);
+                        if (cachedItems != null && !cachedItems.isEmpty()) {
+                            status.setText("Показана сохранённая категория · обновление недоступно");
+                        } else {
+                            status.setText("Нет соединения");
+                            addEmpty("Не удалось загрузить каталог. " + safe(e.getMessage()));
+                        }
+                    });
                 }
             });
         }
@@ -3513,10 +3539,15 @@ public class MainActivity extends Activity {
     }
 
     private void showLoadedPage(String html) {
+        showLoadedPage(html, currentPath);
+    }
+
+    private void showLoadedPage(String html, String path) {
         lastHtml = html;
         List<Torrent> parsed = parseTorrents(Jsoup.parse(html, client.getMirror()));
         progress.setVisibility(View.GONE);
         torrents.clear(); torrents.addAll(parsed);
+        if (!parsed.isEmpty()) saveCatalogPageCache(path, parsed);
         setCatalogStatus("Раздач", parsed.size());
         renderTorrents(parsed);
         if (parsed.isEmpty()) addEmpty("Страница загружена, но раздачи не найдены. Возможно, фильтр не применился.");
@@ -3601,6 +3632,51 @@ public class MainActivity extends Activity {
     }
 
     private int torrentRenderGeneration = 0;
+    // Separates category requests so a slow response from the previous page
+    // cannot replace the category the user selected most recently.
+    private int catalogLoadGeneration = 0;
+
+    private String catalogCacheKey(String path) {
+        return "catalog_page_" + Integer.toHexString((client.getMirror() + "|" + path).hashCode());
+    }
+
+    private List<Torrent> readCatalogPageCache(String path) {
+        try {
+            String raw = getSharedPreferences(PREFS, MODE_PRIVATE)
+                    .getString(catalogCacheKey(path), "");
+            if (raw.isEmpty()) return null;
+            org.json.JSONArray array = new org.json.JSONArray(raw);
+            List<Torrent> result = new ArrayList<>();
+            for (int i = 0; i < array.length(); i++) {
+                org.json.JSONObject item = array.optJSONObject(i);
+                if (item == null) continue;
+                Torrent t = new Torrent();
+                t.title = item.optString("title", "");
+                t.href = item.optString("href", "");
+                t.size = item.optString("size", "—");
+                t.seeds = item.optString("seeds", "—");
+                t.leeches = item.optString("leeches", "—");
+                t.uploaded = item.optString("uploaded", "—");
+                if (!t.title.isEmpty() && !t.href.isEmpty()) result.add(t);
+            }
+            return result.isEmpty() ? null : result;
+        } catch (Exception ignored) { return null; }
+    }
+
+    private void saveCatalogPageCache(String path, List<Torrent> items) {
+        try {
+            org.json.JSONArray array = new org.json.JSONArray();
+            for (Torrent t : items) {
+                org.json.JSONObject item = new org.json.JSONObject();
+                item.put("title", t.title); item.put("href", t.href);
+                item.put("size", t.size); item.put("seeds", t.seeds);
+                item.put("leeches", t.leeches); item.put("uploaded", t.uploaded);
+                array.put(item);
+            }
+            getSharedPreferences(PREFS, MODE_PRIVATE).edit()
+                    .putString(catalogCacheKey(path), array.toString()).apply();
+        } catch (Exception ignored) { }
+    }
 
     private void renderTorrents(List<Torrent> items) {
         if (list == null) return;
