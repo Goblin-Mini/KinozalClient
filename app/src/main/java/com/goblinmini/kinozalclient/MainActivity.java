@@ -619,8 +619,9 @@ public class MainActivity extends Activity {
         browserFeedLoading = true;
         showPageLoading("Загрузка подборок…");
         if (sessionWebView == null) restoreBrowserSession("");
+        final int generation = ++browserFeedGeneration;
         browserHandler.postDelayed(() -> loadHomeSectionsInBrowser(
-                COLLECTION_PATHS, COLLECTION_TITLES, 0, new ArrayList<>(), 0, ++browserFeedGeneration),
+                COLLECTION_PATHS, COLLECTION_TITLES, 0, new ArrayList<>(), 0, generation),
                 sessionWebView == null ? 350 : 100);
     }
 
@@ -904,8 +905,9 @@ public class MainActivity extends Activity {
         if (sessionWebView == null) {
             restoreBrowserSession("");
         }
+        final int generation = ++browserFeedGeneration;
         browserHandler.postDelayed(() -> loadHomeSectionsInBrowser(
-                HOME_PATHS, HOME_TITLES, 0, new ArrayList<>(), 0, ++browserFeedGeneration),
+                HOME_PATHS, HOME_TITLES, 0, new ArrayList<>(), 0, generation),
                 sessionWebView == null ? 350 : 100);
     }
 
@@ -1089,8 +1091,9 @@ public class MainActivity extends Activity {
                 } else if (!homeCacheDisplayed) {
                     status.setText("Пробуем резервную загрузку через WebView…");
                     if (sessionWebView == null) restoreBrowserSession("");
+                    final int generation = ++browserFeedGeneration;
                     browserHandler.postDelayed(() -> loadHomeSectionsInBrowser(
-                            homePaths, homeTitles, 0, new ArrayList<>(), 0, ++browserFeedGeneration), 250);
+                            homePaths, homeTitles, 0, new ArrayList<>(), 0, generation), 250);
                 }
             });
         });
