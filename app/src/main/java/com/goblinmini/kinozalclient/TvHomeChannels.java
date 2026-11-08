@@ -36,15 +36,15 @@ final class TvHomeChannels {
             "top_movies", "top_cartoons", "top_music", "top_games", "continue"
     };
     private static final String[] CHANNEL_NAMES = {
-            "Kinozal — Новинки кино",
-            "Kinozal — Топ раздач месяца",
-            "Kinozal — Топ русские сериалы",
-            "Kinozal — Топ иностранные сериалы",
-            "Kinozal — Топ фильмы",
-            "Kinozal — Топ мульты",
-            "Kinozal — Топ музыка",
-            "Kinozal — Топ игр",
-            "Kinozal — Продолжить просмотр"
+            "Кинозал ТВ — Новинки кино",
+            "Кинозал ТВ — Топ раздач месяца",
+            "Кинозал ТВ — Топ русские сериалы",
+            "Кинозал ТВ — Топ иностранные сериалы",
+            "Кинозал ТВ — Топ фильмы",
+            "Кинозал ТВ — Топ мульты",
+            "Кинозал ТВ — Топ музыка",
+            "Кинозал ТВ — Топ игр",
+            "Кинозал ТВ — Продолжить просмотр"
     };
     private static final String[] FEED_PATHS = {
             "novinki.php",
@@ -119,6 +119,17 @@ final class TvHomeChannels {
                         Log.i(TAG, "Created channel " + CHANNEL_NAMES[i] + " id=" + id);
                     } else {
                         channelIds[i] = channel.getId();
+                        if (!CHANNEL_NAMES[i].equals(channel.getDisplayName())) {
+                            PreviewChannel renamed = new PreviewChannel.Builder()
+                                    .setId(channel.getId())
+                                    .setDisplayName(CHANNEL_NAMES[i])
+                                    .setDescription("Подборка раздач с " + savedMirror)
+                                    .setInternalProviderId("kinozal:" + CHANNEL_KEYS[i])
+                                    .setAppLinkIntent(channel.getAppLinkIntent())
+                                    .build();
+                            helper.updatePreviewChannel(renamed);
+                            Log.i(TAG, "Renamed channel to " + CHANNEL_NAMES[i]);
+                        }
                     }
 
                     JSONArray programs = i == CHANNEL_KEYS.length - 1 ? readRecentPrograms(activity) : findFeedItems(feeds, FEED_PATHS[i]);
