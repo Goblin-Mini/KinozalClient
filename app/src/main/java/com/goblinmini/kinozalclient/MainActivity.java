@@ -97,6 +97,7 @@ public class MainActivity extends Activity {
     private String activeFeedScreen = "home";
     private boolean homeLoadedOnce = false;
     private boolean collectionsLoadedOnce = false;
+    private android.content.BroadcastReceiver feedCacheReceiver;
     private List<HomeSection> collectionsSectionsMemory = new ArrayList<>();
     private TextView heading, status;
     private ProgressBar progress;
@@ -5480,5 +5481,47 @@ public class MainActivity extends Activity {
     private String safe(String s) { return s == null ? "Ошибка сети" : s; }
 
     @Override public void onBackPressed() { finish(); }
+    @Override protected void onStart() {
+        super.onStart();
+        if (feedCacheReceiver == null) {
+            feedCacheReceiver = new android.content.BroadcastReceiver() {
+                @Override public void onReceive(android.content.Context context, android.content.Intent intent) {
+                    String group = intent.getStringExtra("feed_group");
+                    String path = intent.getStringExtra("feed_path");
+                    if (group == null || path == null) return;
+                    io.execute(() -> {
+                        List<HomeSection> snapshot = "home".equals(group)
+                                ? readHomeModel() : readCollectionsModel();
+                        if (snapshot == null) return;
+                        HomeSection changed = null;
+                        for (HomeSection section : snapshot) if (path.equals(section.path)) { changed = section; break; }
+                        final HomeSection updated = changed;
+                        if (updated == null) return;
+                        runOnUiThread(() -> {
+                            if ("home".equals(group)) homeSectionsMemory = new ArrayList<>(snapshot);
+                            else collectionsSectionsMemory = new ArrayList<>(snapshot);
+                            boolean visible = ("home".equals(group) && "home".equals(activeFeedScreen))
+                                    || ("collections".equals(group) && "collections".equals(activeFeedScreen));
+                            if (visible && !isFinishing()) {
+                                renderHomeSection(updated);
+                                status.setText("Обновлена лента: " + updated.title);
+                            }
+                        });
+                    });
+                }
+            };
+        }
+        android.content.IntentFilter filter = new android.content.IntentFilter(
+                "com.goblinmini.kinozalclient.FEED_CACHE_UPDATED");
+        registerReceiver(feedCacheReceiver, filter, android.content.Context.RECEIVER_NOT_EXPORTED);
+    }
+
+    @Override protected void onStop() {
+        if (feedCacheReceiver != null) {
+            try { unregisterReceiver(feedCacheReceiver); } catch (Exception ignored) { }
+        }
+        super.onStop();
+    }
+
     @Override protected void onDestroy() { if (socks5Bridge != null) socks5Bridge.stop(); io.shutdownNow(); imageIo.shutdownNow(); homeRefreshIo.shutdownNow(); super.onDestroy(); }
 }
