@@ -15,6 +15,8 @@ public final class HomeFeedScheduler {
     static final String KEY_INDEX = "feed_index";
     static final String KEY_PATH = "feed_path";
     static final String KEY_TITLE = "feed_title";
+    static final String KEY_BULK = "feed_bulk";
+    static final String KEY_TOTAL = "feed_total";
 
     private static final String[] HOME_PATHS = {
         "novinki.php",
@@ -59,7 +61,7 @@ public final class HomeFeedScheduler {
         long baseMinutes = "home".equals(group) ? 120L : 300L;
         for (int i = 0; i < paths.length; i++) {
             enqueue(context, group, i, paths[i], titles[i], baseMinutes + i * 5L,
-                    ExistingWorkPolicy.REPLACE);
+                    ExistingWorkPolicy.REPLACE, false, paths.length);
         }
         prefs.edit().putString(key, marker).apply();
     }
@@ -69,7 +71,7 @@ public final class HomeFeedScheduler {
         String[] paths = "home".equals(group) ? HOME_PATHS : COLLECTION_PATHS;
         String[] titles = "home".equals(group) ? HOME_TITLES : COLLECTION_TITLES;
         for (int i = 0; i < paths.length; i++) {
-            enqueue(context, group, i, paths[i], titles[i], i * 5L, ExistingWorkPolicy.REPLACE);
+            enqueue(context, group, i, paths[i], titles[i], i * 5L, ExistingWorkPolicy.REPLACE, true, paths.length);
         }
     }
 
@@ -77,21 +79,23 @@ public final class HomeFeedScheduler {
         String[] paths = "home".equals(group) ? HOME_PATHS : COLLECTION_PATHS;
         String[] titles = "home".equals(group) ? HOME_TITLES : COLLECTION_TITLES;
         if (index < 0 || index >= paths.length) return;
-        enqueue(context, group, index, paths[index], titles[index], 0L, ExistingWorkPolicy.REPLACE);
+        enqueue(context, group, index, paths[index], titles[index], 0L, ExistingWorkPolicy.REPLACE, false, 1);
     }
 
     static void scheduleNext(Context context, String group, int index, String path, String title) {
         long minutes = ("home".equals(group) ? 120L : 300L) + index * 5L;
-        enqueue(context, group, index, path, title, minutes, ExistingWorkPolicy.APPEND_OR_REPLACE);
+        enqueue(context, group, index, path, title, minutes, ExistingWorkPolicy.APPEND_OR_REPLACE, false, 1);
     }
 
     private static void enqueue(Context context, String group, int index, String path,
-            String title, long delayMinutes, ExistingWorkPolicy policy) {
+            String title, long delayMinutes, ExistingWorkPolicy policy, boolean bulk, int total) {
         Data input = new Data.Builder()
                 .putString(KEY_GROUP, group)
                 .putInt(KEY_INDEX, index)
                 .putString(KEY_PATH, path)
                 .putString(KEY_TITLE, title)
+                .putBoolean(KEY_BULK, bulk)
+                .putInt(KEY_TOTAL, total)
                 .build();
         OneTimeWorkRequest request = new OneTimeWorkRequest.Builder(HomeFeedRefreshWorker.class)
                 .setInputData(input)
