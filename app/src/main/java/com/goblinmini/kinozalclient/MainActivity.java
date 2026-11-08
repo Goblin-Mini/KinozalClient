@@ -954,9 +954,8 @@ public class MainActivity extends Activity {
 
     private void loadHomeSectionsInBrowser(String[] paths, String[] titles, int index,
             List<HomeSection> sections, int retry) {
-        // Home and Collections share one authenticated WebView navigation, then
-        // fetch the remaining feeds concurrently with the existing JS bridge.
-        // This replaces N sequential page navigations with one navigation + Promise.all.
+        // Home and Collections are navigated sequentially; each rendered page is
+        // extracted directly from its authenticated WebView DOM using JavaScript.
         if (index != 0) return;
         String group = paths == HOME_PATHS ? "Главная" : "Подборки";
         resetFeedDiagnostics(group, paths);
@@ -976,7 +975,7 @@ public class MainActivity extends Activity {
                     removeHomeDuplicates(loaded);
                     appendFeedDiagnostic("PARSE_DONE", "mode=webview-js, секций=" + loaded.size()
                             + ", карточек=" + countHomeCards(loaded)
-                            + ", parseMs=" + (android.os.SystemClock.elapsedRealtime() - parseStarted));
+                            + ", processingMs=" + (android.os.SystemClock.elapsedRealtime() - parseStarted));
                     if (!loaded.isEmpty()) {
                         if (paths == HOME_PATHS) saveHomeModel(loaded);
                         else if (paths == COLLECTION_PATHS) saveCollectionsModel(loaded);
@@ -1179,8 +1178,8 @@ public class MainActivity extends Activity {
 
             long jsStarted = android.os.SystemClock.elapsedRealtime();
             String script = "(function(){try{"
-                    + "var links=document.querySelectorAll('table.t_peer td.nam > a[href*=\\\"details.php?id=\\\"]');"
-                    + "if(!links.length)links=document.querySelectorAll('a[href*=\\\"details.php?id=\\\"]');"
+                    + "var links=document.querySelectorAll('table.t_peer td.nam > a[href*=details.php?id=]');"
+                    + "if(!links.length)links=document.querySelectorAll('a[href*=details.php?id=]');"
                     + "var out=[],seen=Object.create(null);"
                     + "function txt(e){return e?(e.innerText||e.textContent||'').replace(/\\s+/g,' ').trim():'';}"
                     + "function imgSrc(img){if(!img)return '';var a=['data-src','data-original','data-lazy-src','data-original-src','src'];"
