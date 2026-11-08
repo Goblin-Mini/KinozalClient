@@ -1872,7 +1872,7 @@ public class MainActivity extends Activity {
         final String feedGroup = getFeedIndex("collections", section.path) >= 0
                 ? "collections" : "home";
         Button refreshFeed = button("⟳");
-        refreshFeed.setTextSize(17);
+        refreshFeed.setTextSize(14);
         refreshFeed.setMinWidth(0);
         refreshFeed.setMinimumWidth(0);
         refreshFeed.setMinHeight(0);
@@ -1880,7 +1880,8 @@ public class MainActivity extends Activity {
         refreshFeed.setGravity(Gravity.CENTER);
         refreshFeed.setIncludeFontPadding(false);
         refreshFeed.setPadding(0, 0, 0, 0);
-        refreshFeed.setTranslationY(-dp(5));
+        // Keep the compact refresh control vertically centered with the section title.
+        refreshFeed.setTranslationY(0);
         refreshFeed.setContentDescription("Обновить ленту " + section.title);
         refreshFeed.setOnClickListener(v -> {
             int feedIndex = getFeedIndex(feedGroup, section.path);
@@ -1890,7 +1891,7 @@ public class MainActivity extends Activity {
             }
             refreshFeedInBrowser(feedGroup, feedIndex, section.path, section.title, false, 1);
         });
-        LinearLayout.LayoutParams refreshParams = new LinearLayout.LayoutParams(dp(30), dp(30));
+        LinearLayout.LayoutParams refreshParams = new LinearLayout.LayoutParams(dp(26), dp(26));
         refreshParams.rightMargin = dp(10);
         sectionHeader.addView(refreshFeed, refreshParams);
         String refreshButtonKey = feedButtonKey(feedGroup, section.path);
@@ -2352,7 +2353,8 @@ public class MainActivity extends Activity {
         Button find = button("Найти");
         find.setTextSize(12);
         find.setMinWidth(0);
-        LinearLayout.LayoutParams findParams = new LinearLayout.LayoutParams(dp(104), dp(48));
+        LinearLayout.LayoutParams findParams = new LinearLayout.LayoutParams(dp(92), dp(44));
+        find.setTranslationY(dp(3));
         searchBar.addView(find, findParams);
         find.setOnClickListener(v -> submitSearch());
         search.setOnEditorActionListener((v, action, event) -> {
