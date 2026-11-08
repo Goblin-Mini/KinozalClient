@@ -270,6 +270,19 @@ public class MainActivity extends Activity {
 
     private void readTvLaunchIntent(android.content.Intent intent) {
         if (intent == null) return;
+        Uri incomingData = intent.getData();
+        if (incomingData != null && "kinozal".equals(incomingData.getScheme())) {
+            if ("torrent".equals(incomingData.getHost())) {
+                String href = incomingData.getQueryParameter("href");
+                if (href != null && !href.trim().isEmpty()) {
+                    pendingTvTorrentHref = href.trim();
+                    pendingTvTorrentTitle = incomingData.getQueryParameter("title");
+                }
+            } else if ("search".equals(incomingData.getHost())) {
+                String query = incomingData.getQueryParameter("q");
+                if (query != null && !query.trim().isEmpty()) pendingExternalSearchQuery = query.trim();
+            }
+        }
         String action = intent.getAction();
         if (Intent.ACTION_SEARCH.equals(action) || "android.intent.action.WEB_SEARCH".equals(action)) {
             String query = intent.getStringExtra(android.app.SearchManager.QUERY);
