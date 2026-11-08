@@ -100,12 +100,14 @@ public class MainActivity extends Activity {
         final ScrollView scroll;
         final LinearLayout list;
         long loadedAt;
+        final boolean catalog;
         boolean rendered;
         boolean viewBuilt;
         boolean loading;
         List<Torrent> items = new ArrayList<>();
         ScreenState(String key, String title, ScrollView scroll, LinearLayout list) {
             this.key = key; this.title = title; this.scroll = scroll; this.list = list;
+            this.catalog = !"home".equals(key) && !"collections".equals(key);
         }
     }
     private TextView heading, status;
@@ -3039,7 +3041,7 @@ public class MainActivity extends Activity {
         heading.setText(state.title);
         state.scroll.setVisibility(View.VISIBLE);
         progress.setVisibility(View.GONE);
-        if (state.rendered && state.items != null) {
+        if (state.catalog && state.rendered && state.items != null) {
             torrents.clear();
             torrents.addAll(state.items);
             if (!state.viewBuilt) {
