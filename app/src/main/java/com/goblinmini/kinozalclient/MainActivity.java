@@ -3756,12 +3756,8 @@ public class MainActivity extends Activity {
                         // stalls for large Kinozal pages. Validate the login
                         // redirect on the background I/O executor instead.
                         executeSafely(io, () -> {
-                            boolean loginForm = false;
                             long loginCheckStartedAt = android.os.SystemClock.elapsedRealtime();
-                            try {
-                                Document loaded = Jsoup.parse(loadedHtml);
-                                loginForm = !loaded.select("form:has(input[type=password])").isEmpty();
-                            } catch (Exception ignored) { }
+                            boolean loginForm = containsLoginPasswordInput(loadedHtml);
                             logBrowsePerf("login-check",
                                     android.os.SystemClock.elapsedRealtime() - loginCheckStartedAt,
                                     "htmlChars=" + loadedHtml.length());
@@ -3792,6 +3788,30 @@ public class MainActivity extends Activity {
         });
         web.setWebChromeClient(new WebChromeClient());
         if (noCookies) markStartupCatalogReady();
+    }
+
+    // Fast equivalent of form:has(input[type=password]) for login detection.
+    // Avoid building a second Jsoup Document for every catalogue response.
+    private boolean containsLoginPasswordInput(String html) {
+        if (html == null || html.isEmpty()) return false;
+        String lower = html.toLowerCase(java.util.Locale.ROOT);
+        int formStart = 0;
+        while ((formStart = lower.indexOf("<form", formStart)) >= 0) {
+            int formEnd = lower.indexOf("</form", formStart);
+            if (formEnd < 0) formEnd = lower.length();
+            int inputStart = formStart;
+            while ((inputStart = lower.indexOf("<input", inputStart)) >= 0
+                    && inputStart < formEnd) {
+                int tagEnd = lower.indexOf(">", inputStart);
+                if (tagEnd < 0 || tagEnd > formEnd) break;
+                String inputTag = lower.substring(inputStart, tagEnd + 1);
+                if (java.util.regex.Pattern.compile("\\btype\\s*=\\s*(['\\\"]?)password\\1")
+                        .matcher(inputTag).find()) return true;
+                inputStart = tagEnd + 1;
+            }
+            formStart = formEnd + 6;
+        }
+        return false;
     }
 
     private void fetchBrowserPage(String path, String postBody,
