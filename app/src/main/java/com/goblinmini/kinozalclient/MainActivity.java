@@ -13,6 +13,7 @@ import android.app.AlertDialog;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
+import android.animation.ObjectAnimator;
 import android.os.Bundle;
 import android.view.Gravity;
 import android.view.KeyEvent;
@@ -49,6 +50,8 @@ import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import androidx.webkit.ProxyConfig;
@@ -101,6 +104,11 @@ public class MainActivity extends Activity {
     private List<HomeSection> homeDiskCacheSnapshot = new ArrayList<>();
     private boolean collectionsLoadedOnce = false;
     private android.content.BroadcastReceiver feedCacheReceiver;
+    private TextView feedRefreshStatus;
+    private ProgressBar feedRefreshProgress;
+    private LinearLayout feedRefreshPanel;
+    private final Map<String, Button> feedRefreshButtons = new HashMap<>();
+    private final Map<String, ObjectAnimator> feedRefreshAnimations = new HashMap<>();
     private List<HomeSection> collectionsSectionsMemory = new ArrayList<>();
     private TextView heading, status;
     private ProgressBar progress;
@@ -1531,22 +1539,122 @@ public class MainActivity extends Activity {
     private void ensureFeedActions() {
         if (list.getChildCount() > 0 && "feed-actions".equals(list.getChildAt(0).getTag())) return;
         LinearLayout actions = new LinearLayout(this);
-        actions.setGravity(Gravity.RIGHT | Gravity.CENTER_VERTICAL);
+        actions.setOrientation(LinearLayout.VERTICAL);
         actions.setTag("feed-actions");
+        LinearLayout buttonRow = new LinearLayout(this);
+        buttonRow.setGravity(Gravity.RIGHT | Gravity.CENTER_VERTICAL);
         Button refreshAll = button("Обновить всё");
         refreshAll.setTextSize(12);
         refreshAll.setOnClickListener(v -> {
             String group = "collections".equals(activeFeedScreen) ? "collections" : "home";
+            int total = "collections".equals(group) ? 11 : 8;
             try {
                 HomeFeedScheduler.refreshAll(getApplicationContext(), group);
-                status.setText("Запущено обновление всех лент");
+                showFeedRefreshQueued(group, "Все ленты", total, true);
             } catch (Exception e) {
                 status.setText("Не удалось запустить обновление лент: " + e.getMessage());
                 android.util.Log.e("KinozalFeed", "Cannot enqueue bulk refresh", e);
             }
         });
-        actions.addView(refreshAll, new LinearLayout.LayoutParams(-2, dp(36)));
-        list.addView(actions, 0, new LinearLayout.LayoutParams(-1, dp(42)));
+        buttonRow.addView(refreshAll, new LinearLayout.LayoutParams(-2, dp(36)));
+        actions.addView(buttonRow, new LinearLayout.LayoutParams(-1, dp(42)));
+
+        feedRefreshPanel = new LinearLayout(this);
+        feedRefreshPanel.setOrientation(LinearLayout.VERTICAL);
+        feedRefreshPanel.setPadding(dp(2), dp(3), dp(2), dp(8));
+        feedRefreshPanel.setVisibility(View.GONE);
+        feedRefreshStatus = text("", 12, TEAL, false);
+        feedRefreshStatus.setSingleLine(false);
+        feedRefreshPanel.addView(feedRefreshStatus, new LinearLayout.LayoutParams(-1, -2));
+        feedRefreshProgress = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
+        feedRefreshProgress.setMax(100);
+        feedRefreshProgress.setProgress(0);
+        LinearLayout.LayoutParams progressParams = new LinearLayout.LayoutParams(-1, dp(4));
+        progressParams.topMargin = dp(5);
+        feedRefreshPanel.addView(feedRefreshProgress, progressParams);
+        actions.addView(feedRefreshPanel, new LinearLayout.LayoutParams(-1, -2));
+        list.addView(actions, 0, new LinearLayout.LayoutParams(-1, -2));
+    }
+
+    private String feedButtonKey(String group, String path) { return group + "|" + path; }
+
+    private void showFeedRefreshQueued(String group, String title, int total, boolean bulk) {
+        if (!group.equals(activeFeedScreen) || feedRefreshPanel == null) return;
+        feedRefreshPanel.setVisibility(View.VISIBLE);
+        feedRefreshStatus.setText(bulk
+                ? "В очереди " + total + " лент. Ожидаем запуск первой…"
+                : "Лента «" + title + "» поставлена в очередь…");
+        feedRefreshProgress.setIndeterminate(true);
+    }
+
+    private void stopFeedRefreshAnimation(String key) {
+        ObjectAnimator animator = feedRefreshAnimations.remove(key);
+        if (animator != null) {
+            animator.cancel();
+            Button target = feedRefreshButtons.get(key);
+            if (target != null) target.setRotation(0f);
+        }
+    }
+
+    private void startFeedRefreshAnimation(String key) {
+        Button target = feedRefreshButtons.get(key);
+        if (target == null || feedRefreshAnimations.containsKey(key)) return;
+        ObjectAnimator animator = ObjectAnimator.ofFloat(target, View.ROTATION, 0f, 360f);
+        animator.setDuration(900L);
+        animator.setRepeatCount(ObjectAnimator.INFINITE);
+        animator.setInterpolator(new android.view.animation.LinearInterpolator());
+        feedRefreshAnimations.put(key, animator);
+        animator.start();
+    }
+
+    private void handleFeedRefreshState(Intent intent) {
+        String group = intent.getStringExtra("feed_group");
+        String path = intent.getStringExtra("feed_path");
+        String title = intent.getStringExtra("feed_title");
+        String state = intent.getStringExtra("refresh_state");
+        if (group == null || path == null || state == null) return;
+        String key = feedButtonKey(group, path);
+        boolean visibleGroup = group.equals(activeFeedScreen);
+        int index = intent.getIntExtra("feed_index", 0);
+        int total = Math.max(1, intent.getIntExtra("feed_total", 1));
+        boolean bulk = intent.getBooleanExtra("feed_bulk", false);
+        if ("running".equals(state)) {
+            if (visibleGroup && feedRefreshPanel != null) {
+                feedRefreshPanel.setVisibility(View.VISIBLE);
+                feedRefreshStatus.setText(bulk
+                        ? "Обновление лент: " + (index + 1) + " из " + total + " — " + title
+                        : "Обновляется лента: " + title);
+                feedRefreshProgress.setIndeterminate(false);
+                feedRefreshProgress.setMax(total);
+                feedRefreshProgress.setProgress(index);
+            }
+            startFeedRefreshAnimation(key);
+        } else if ("success".equals(state)) {
+            stopFeedRefreshAnimation(key);
+            if (visibleGroup && feedRefreshPanel != null) {
+                feedRefreshPanel.setVisibility(View.VISIBLE);
+                feedRefreshProgress.setIndeterminate(false);
+                feedRefreshProgress.setMax(total);
+                feedRefreshProgress.setProgress(Math.min(total, index + 1));
+                if (bulk && index + 1 >= total) {
+                    feedRefreshStatus.setText("Все " + total + " лент обновлены");
+                } else if (bulk) {
+                    feedRefreshStatus.setText("Готово " + (index + 1) + " из " + total
+                            + ". Следующая лента будет обновляться по очереди");
+                } else {
+                    feedRefreshStatus.setText("Лента обновлена: " + title);
+                }
+            }
+        } else if ("failure".equals(state)) {
+            stopFeedRefreshAnimation(key);
+            if (visibleGroup && feedRefreshPanel != null) {
+                feedRefreshPanel.setVisibility(View.VISIBLE);
+                feedRefreshProgress.setIndeterminate(false);
+                feedRefreshProgress.setProgress(0);
+                feedRefreshStatus.setText("Ошибка обновления «" + title + "»: "
+                        + intent.getStringExtra("refresh_error"));
+            }
+        }
     }
 
     private void renderHome(List<HomeSection> sections) {
@@ -1642,7 +1750,7 @@ public class MainActivity extends Activity {
             }
             try {
                 HomeFeedScheduler.refreshNow(getApplicationContext(), feedGroup, feedIndex);
-                status.setText("Запущено обновление: " + section.title);
+                showFeedRefreshQueued(feedGroup, section.title, 1, false);
             } catch (Exception e) {
                 status.setText("Не удалось обновить ленту: " + e.getMessage());
                 android.util.Log.e("KinozalFeed", "Cannot enqueue feed refresh: " + section.path, e);
@@ -1651,6 +1759,9 @@ public class MainActivity extends Activity {
         LinearLayout.LayoutParams refreshParams = new LinearLayout.LayoutParams(dp(38), dp(38));
         refreshParams.rightMargin = dp(10);
         sectionHeader.addView(refreshFeed, refreshParams);
+        String refreshButtonKey = feedButtonKey(feedGroup, section.path);
+        stopFeedRefreshAnimation(refreshButtonKey);
+        feedRefreshButtons.put(refreshButtonKey, refreshFeed);
         TextView sectionTitle = text(section.title, 20, GOLD, true);
         sectionHeader.addView(sectionTitle, new LinearLayout.LayoutParams(0, dp(38), 1f));
         LinearLayout.LayoutParams titleParams = new LinearLayout.LayoutParams(-1, dp(38));
@@ -5557,6 +5668,10 @@ public class MainActivity extends Activity {
         if (feedCacheReceiver == null) {
             feedCacheReceiver = new android.content.BroadcastReceiver() {
                 @Override public void onReceive(android.content.Context context, android.content.Intent intent) {
+                    if ("com.goblinmini.kinozalclient.FEED_REFRESH_STATE".equals(intent.getAction())) {
+                        handleFeedRefreshState(intent);
+                        return;
+                    }
                     String group = intent.getStringExtra("feed_group");
                     String path = intent.getStringExtra("feed_path");
                     String refreshError = intent.getStringExtra("refresh_error");
@@ -5602,6 +5717,7 @@ public class MainActivity extends Activity {
         }
         android.content.IntentFilter filter = new android.content.IntentFilter(
                 "com.goblinmini.kinozalclient.FEED_CACHE_UPDATED");
+        filter.addAction("com.goblinmini.kinozalclient.FEED_REFRESH_STATE");
         registerReceiver(feedCacheReceiver, filter, android.content.Context.RECEIVER_NOT_EXPORTED);
     }
 
