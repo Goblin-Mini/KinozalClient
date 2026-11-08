@@ -106,6 +106,9 @@ public class MainActivity extends Activity {
     private WebView sessionWebView;
     private BrowserPageCallback pendingBrowserCallback;
     private String pendingBrowserTarget = "";
+    // Diagnostic-only request tracing; does not change navigation behavior.
+    private int browserTraceSequence = 0;
+    private int pendingBrowserTraceId = 0;
     private final android.os.Handler browserHandler = new android.os.Handler(android.os.Looper.getMainLooper());
     private Runnable browserRequestTimeout;
     private boolean startupCatalogReady = false;
@@ -3332,6 +3335,9 @@ public class MainActivity extends Activity {
         // returning to Подборки would then keep the category's old list attached.
         activateCachedScreen("catalog");
         currentPath = path; currentTitle = title; heading.setText(title);
+        final int traceCatalogGeneration = catalogLoadGeneration + 1;
+        android.util.Log.i("KZ_WEBTRACE", "CATALOG_SELECT path=" + path + " title=" + title
+                + " previousGeneration=" + catalogLoadGeneration + " feedLoading=" + browserFeedLoading);
         final int requestGeneration = ++catalogLoadGeneration;
         // A category switch must never leave the previous category's rows on
         // screen. Always clear the list and show the loading state immediately;
@@ -3350,6 +3356,9 @@ public class MainActivity extends Activity {
             catalogBrowserRequestInFlight = true;
             fetchBrowserPage(path, postBody, html -> {
                 catalogBrowserRequestInFlight = false;
+                android.util.Log.i("KZ_WEBTRACE", "CATALOG_CALLBACK path=" + path
+                        + " requestGeneration=" + requestGeneration + " activeGeneration=" + catalogLoadGeneration
+                        + " activePath=" + currentPath + " html=" + (html == null ? -1 : html.length()));
                 if (requestGeneration == catalogLoadGeneration) {
                     if (html != null && !html.isEmpty()) {
                         lastKinozalConnectionStatus = "установлено";
@@ -3449,10 +3458,19 @@ public class MainActivity extends Activity {
             }
             @Override public void onPageFinished(WebView view, String url) {
                 super.onPageFinished(view, url);
-                if (pendingBrowserCallback != null && !isPendingBrowserUrl(url)) return;
+                android.util.Log.i("KZ_WEBTRACE", "PAGE_FINISHED url=" + url + " pendingId="
+                        + pendingBrowserTraceId + " target=" + pendingBrowserTarget);
+                if (pendingBrowserCallback != null && !isPendingBrowserUrl(url)) {
+                    android.util.Log.w("KZ_WEBTRACE", "PAGE_FINISHED_MISMATCH url=" + url
+                            + " expected=" + pendingBrowserTarget + " id=" + pendingBrowserTraceId);
+                    return;
+                }
                 if (pendingBrowserCallback != null) {
                     BrowserPageCallback cb = pendingBrowserCallback;
+                    final int completedTraceId = pendingBrowserTraceId;
+                    android.util.Log.i("KZ_WEBTRACE", "DOM_CAPTURE id=" + completedTraceId + " url=" + url);
                     pendingBrowserCallback = null;
+                    pendingBrowserTraceId = 0;
                     pendingBrowserTarget = "";
                     view.evaluateJavascript("(document.documentElement ? document.documentElement.outerHTML : '')", value -> {
                         String html = "";
@@ -3522,25 +3540,49 @@ public class MainActivity extends Activity {
     private void fetchBrowserPage(String path, String postBody,
             java.util.function.Consumer<String> callback) {
         WebView web = sessionWebView;
-        if (web == null) { callback.accept(null); return; }
+        final int traceId = ++browserTraceSequence;
+        String caller = "unknown";
+        StackTraceElement[] trace = Thread.currentThread().getStackTrace();
+        for (StackTraceElement frame : trace) {
+            if (frame.getClassName().equals(getClass().getName())
+                    && !frame.getMethodName().equals("fetchBrowserPage")) {
+                caller = frame.getMethodName() + ":" + frame.getLineNumber();
+                break;
+            }
+        }
+        String traceTarget = path.startsWith("http") ? path
+                : client.getMirror() + "/" + path.replaceFirst("^/+", "");
+        android.util.Log.i("KZ_WEBTRACE", "REQUEST_START id=" + traceId + " caller=" + caller
+                + " path=" + traceTarget + " activeCatalog=" + currentPath
+                + " catalogGeneration=" + catalogLoadGeneration + " feedGeneration=" + browserFeedGeneration);
+        if (web == null) {
+            android.util.Log.w("KZ_WEBTRACE", "REQUEST_NO_WEBVIEW id=" + traceId);
+            callback.accept(null); return;
+        }
         // Stop the previous navigation before assigning the next callback.
         // WebView may still deliver onPageFinished for the cancelled URL; the
         // URL guard below prevents that stale DOM from completing this request.
         web.stopLoading();
         if (browserRequestTimeout != null) browserHandler.removeCallbacks(browserRequestTimeout);
         if (pendingBrowserCallback != null) {
+            android.util.Log.w("KZ_WEBTRACE", "REQUEST_CANCEL oldId=" + pendingBrowserTraceId
+                    + " oldTarget=" + pendingBrowserTarget + " byNewId=" + traceId);
             BrowserPageCallback previous = pendingBrowserCallback;
             pendingBrowserCallback = null;
             pendingBrowserTarget = "";
+            pendingBrowserTraceId = 0;
             previous.onPage(null, "Предыдущий запрос отменён");
         }
         if (web.getParent() instanceof ViewGroup) ((ViewGroup) web.getParent()).removeView(web);
         web.setVisibility(View.INVISIBLE);
         if (web.getParent() == null) root.addView(web, new LinearLayout.LayoutParams(1, 1));
-        String target = path.startsWith("http") ? path
-                : client.getMirror() + "/" + path.replaceFirst("^/+", "");
+        String target = traceTarget;
         pendingBrowserTarget = target;
+        pendingBrowserTraceId = traceId;
         pendingBrowserCallback = (html, error) -> {
+            android.util.Log.i("KZ_WEBTRACE", "REQUEST_COMPLETE id=" + traceId + " target=" + target
+                    + " html=" + (html == null ? -1 : html.length()) + " error=" + error
+                    + " activeCatalog=" + currentPath + " catalogGeneration=" + catalogLoadGeneration);
             if (browserRequestTimeout != null) browserHandler.removeCallbacks(browserRequestTimeout);
             browserRequestTimeout = null;
             runOnUiThread(() -> callback.accept(error == null ? html : null));
@@ -3548,7 +3590,10 @@ public class MainActivity extends Activity {
         browserRequestTimeout = () -> {
             if (pendingBrowserCallback == null) return;
             BrowserPageCallback timedOut = pendingBrowserCallback;
+            android.util.Log.w("KZ_WEBTRACE", "REQUEST_TIMEOUT id=" + pendingBrowserTraceId
+                    + " target=" + pendingBrowserTarget);
             pendingBrowserCallback = null;
+            pendingBrowserTraceId = 0;
             pendingBrowserTarget = "";
             browserRequestTimeout = null;
             web.stopLoading();
@@ -3567,6 +3612,8 @@ public class MainActivity extends Activity {
     }
 
     private void showLoadedPage(String html, String path) {
+        android.util.Log.i("KZ_WEBTRACE", "CATALOG_RENDER path=" + path + " activePath=" + currentPath
+                + " generation=" + catalogLoadGeneration + " html=" + (html == null ? -1 : html.length()));
         lastHtml = html;
         List<Torrent> parsed = parseTorrents(Jsoup.parse(html, client.getMirror()));
         progress.setVisibility(View.GONE);
