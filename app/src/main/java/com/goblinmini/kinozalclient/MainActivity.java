@@ -2382,16 +2382,19 @@ public class MainActivity extends Activity {
         history.setTextSize(12);
         history.setMinWidth(0);
         history.setMinimumWidth(0);
-        history.setTranslationY(dp(3));
-        LinearLayout.LayoutParams historyParams = new LinearLayout.LayoutParams(dp(92), dp(44));
+        history.setGravity(Gravity.CENTER);
+        history.setIncludeFontPadding(false);
+        LinearLayout.LayoutParams historyParams = new LinearLayout.LayoutParams(dp(92), dp(52));
         historyParams.rightMargin = dp(10);
         searchBar.addView(history, historyParams);
         history.setOnClickListener(v -> showSearchHistory());
         Button find = button("Найти");
         find.setTextSize(12);
         find.setMinWidth(0);
-        LinearLayout.LayoutParams findParams = new LinearLayout.LayoutParams(dp(92), dp(44));
-        find.setTranslationY(dp(3));
+        find.setMinimumWidth(0);
+        find.setGravity(Gravity.CENTER);
+        find.setIncludeFontPadding(false);
+        LinearLayout.LayoutParams findParams = new LinearLayout.LayoutParams(dp(92), dp(52));
         searchBar.addView(find, findParams);
         find.setOnClickListener(v -> submitSearch());
         search.setOnEditorActionListener((v, action, event) -> {
