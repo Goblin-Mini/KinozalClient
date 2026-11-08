@@ -130,6 +130,7 @@ public class MainActivity extends Activity {
     private boolean startupCatalogReady = false;
     private String pendingTvTorrentHref = "";
     private String pendingTvTorrentTitle = "";
+    private String pendingExternalSearchQuery = "";
     private boolean startupCatalogStarted = false;
     private boolean automaticUpdateCheckScheduled = false;
     private boolean homeCacheDisplayed = false;
@@ -269,6 +270,12 @@ public class MainActivity extends Activity {
 
     private void readTvLaunchIntent(android.content.Intent intent) {
         if (intent == null) return;
+        String action = intent.getAction();
+        if (Intent.ACTION_SEARCH.equals(action) || "android.intent.action.WEB_SEARCH".equals(action)) {
+            String query = intent.getStringExtra(android.app.SearchManager.QUERY);
+            if (query == null || query.trim().isEmpty()) query = intent.getStringExtra("query");
+            if (query != null && !query.trim().isEmpty()) pendingExternalSearchQuery = query.trim();
+        }
         String href = intent.getStringExtra("tv_torrent_href");
         if (href != null && !href.trim().isEmpty()) {
             pendingTvTorrentHref = href.trim();
@@ -447,6 +454,14 @@ public class MainActivity extends Activity {
     }
 
     private void openConfiguredStartupSource() {
+        if (!pendingExternalSearchQuery.isEmpty()) {
+            String query = pendingExternalSearchQuery;
+            pendingExternalSearchQuery = "";
+            search.setText(query);
+            submitSearch();
+            Log.i("KinozalSearch", "Opened external voice search query");
+            return;
+        }
         if (!pendingTvTorrentHref.isEmpty()) {
             Torrent selected = new Torrent();
             selected.href = pendingTvTorrentHref;
