@@ -2076,29 +2076,187 @@ public class MainActivity extends Activity {
         });
     }
 
+    private boolean bulkFeedRefreshInProgress = false;
+
+    /**
+     * Refresh the first page in the authenticated WebView, then fetch every
+     * remaining feed concurrently from that same origin/session. The shared
+     * WebView is navigated only once; no five-minute per-feed queue.
+     */
     private void refreshAllFeedsInBrowser(String group) {
         String[] paths = feedPaths(group);
         String[] titles = feedTitles(group);
-        if (browserFeedLoading || pendingBrowserCallback != null) {
-            status.setText("Сейчас выполняется другой запрос к Kinozal. Повтори позже.");
+        if (bulkFeedRefreshInProgress) {
+            status.setText("Обновление всех лент уже выполняется.");
             return;
         }
+        if (sessionWebView == null || browserFeedLoading || pendingBrowserCallback != null) {
+            status.setText("Сейчас занят браузер Kinozal. Повтори обновление чуть позже.");
+            return;
+        }
+        bulkFeedRefreshInProgress = true;
         showFeedRefreshQueued(group, "Все ленты", paths.length, true);
-        final int[] current = {0};
-        final Runnable[] next = new Runnable[1];
-        next[0] = () -> {
-            if (current[0] >= paths.length || isFinishing()) {
-                TextView label = feedRefreshStatusViews.get(group);
-                ProgressBar bar = feedRefreshProgressViews.get(group);
-                if (label != null) label.setText("Обновление всех лент завершено");
-                if (bar != null) { bar.setIndeterminate(false); bar.setMax(paths.length); bar.setProgress(paths.length); }
+        TextView label = feedRefreshStatusViews.get(group);
+        ProgressBar bar = feedRefreshProgressViews.get(group);
+        if (label != null) label.setText("Одновременное обновление " + paths.length + " лент…");
+        if (bar != null) bar.setIndeterminate(true);
+
+        for (int i = 0; i < paths.length; i++) {
+            Intent running = new Intent();
+            running.putExtra("feed_group", group);
+            running.putExtra("feed_path", paths[i]);
+            running.putExtra("feed_title", titles[i]);
+            running.putExtra("feed_index", i);
+            running.putExtra("feed_total", paths.length);
+            running.putExtra("feed_bulk", true);
+            running.putExtra("refresh_state", "running");
+            handleFeedRefreshState(running);
+        }
+
+        fetchBrowserPage(paths[0], null, html -> {
+            if (isFinishing()) {
+                bulkFeedRefreshInProgress = false;
                 return;
             }
-            int index = current[0]++;
-            refreshFeedInBrowser(group, index, paths[index], titles[index], true, paths.length);
-            if (current[0] < paths.length) browserHandler.postDelayed(next[0], 5 * 60 * 1000L);
-        };
-        browserHandler.post(next[0]);
+            if (html == null || html.trim().isEmpty() || sessionWebView == null) {
+                finishBulkFeedRefresh(group, paths, titles, null,
+                        lastBrowserError == null ? "Не удалось открыть первую ленту" : lastBrowserError);
+                return;
+            }
+
+            org.json.JSONArray requests = new org.json.JSONArray();
+            try {
+                for (int i = 1; i < paths.length; i++) {
+                    org.json.JSONObject request = new org.json.JSONObject();
+                    request.put("path", paths[i]);
+                    request.put("title", titles[i]);
+                    request.put("index", i);
+                    requests.put(request);
+                }
+            } catch (Exception e) {
+                finishBulkFeedRefresh(group, paths, titles, null, safe(e.getMessage()));
+                return;
+            }
+
+            String script = buildHomeParallelExtractScript(requests.toString(), 0,
+                    org.json.JSONObject.quote(html));
+            evaluateHomeParallelBatch(sessionWebView, script, value -> {
+                List<HomeSection> refreshed = new ArrayList<>();
+                String failure = null;
+                try {
+                    if (value == null || "null".equals(value)) {
+                        throw new java.io.IOException("Истекло время ожидания ответов лент");
+                    }
+                    String json = new org.json.JSONArray("[" + value + "]").getString(0);
+                    org.json.JSONArray results = new org.json.JSONArray(json);
+                    boolean[] received = new boolean[paths.length];
+                    for (int i = 0; i < results.length(); i++) {
+                        org.json.JSONObject result = results.optJSONObject(i);
+                        if (result == null || !result.optBoolean("ok", false)) continue;
+                        int index = result.optInt("index", -1);
+                        if (index < 0 || index >= paths.length || received[index]) continue;
+                        received[index] = true;
+                        HomeSection section = new HomeSection(titles[index], paths[index]);
+                        section.items.addAll(parseHomePostersFromJsonArray(result.optJSONArray("items")));
+                        if (!section.items.isEmpty()) {
+                            List<HomeSection> oneFeed = new ArrayList<>();
+                            oneFeed.add(section);
+                            removeHomeDuplicates(oneFeed);
+                            if (!section.items.isEmpty()) {
+                                refreshed.add(section);
+                                String pageHtml = result.optString("html", "");
+                                if (!pageHtml.isEmpty()) {
+                                    diskCache.put("home|" + client.getMirror() + "|" + paths[index],
+                                            pageHtml.getBytes(StandardCharsets.UTF_8));
+                                }
+                            }
+                        }
+                    }
+                    if (refreshed.isEmpty()) {
+                        throw new java.io.IOException("Не получено ни одной ленты");
+                    }
+                    appendFeedDiagnostic("BULK_REFRESH_PARALLEL",
+                            "group=" + group + ", received=" + refreshed.size() + "/" + paths.length);
+                } catch (Exception e) {
+                    failure = safe(e.getMessage());
+                }
+                finishBulkFeedRefresh(group, paths, titles, refreshed, failure);
+            });
+        });
+    }
+
+    private void finishBulkFeedRefresh(String group, String[] paths, String[] titles,
+            List<HomeSection> refreshed, String failure) {
+        bulkFeedRefreshInProgress = false;
+        if (isFinishing()) return;
+        if (refreshed == null || refreshed.isEmpty()) {
+            for (int i = 0; i < paths.length; i++) {
+                Intent failed = new Intent();
+                failed.putExtra("feed_group", group);
+                failed.putExtra("feed_path", paths[i]);
+                failed.putExtra("feed_title", titles[i]);
+                failed.putExtra("feed_index", i);
+                failed.putExtra("feed_total", paths.length);
+                failed.putExtra("feed_bulk", true);
+                failed.putExtra("refresh_state", "failure");
+                failed.putExtra("refresh_error", failure == null ? "Нет данных от Kinozal" : failure);
+                handleFeedRefreshState(failed);
+            }
+            return;
+        }
+
+        List<HomeSection> model = "collections".equals(group)
+                ? new ArrayList<>(collectionsSectionsMemory)
+                : new ArrayList<>(homeSectionsMemory);
+        int successCount = 0;
+        for (HomeSection section : refreshed) {
+            int existing = -1;
+            for (int i = 0; i < model.size(); i++) {
+                if (section.path.equals(model.get(i).path)) { existing = i; break; }
+            }
+            if (existing >= 0) model.set(existing, section);
+            else model.add(section);
+            successCount++;
+        }
+        if ("collections".equals(group)) {
+            collectionsSectionsMemory = model;
+            saveCollectionsModel(model);
+        } else {
+            homeSectionsMemory = model;
+            saveHomeModel(model);
+        }
+
+        for (int i = 0; i < paths.length; i++) {
+            HomeSection updated = null;
+            for (HomeSection section : refreshed) if (paths[i].equals(section.path)) { updated = section; break; }
+            Intent result = new Intent();
+            result.putExtra("feed_group", group);
+            result.putExtra("feed_path", paths[i]);
+            result.putExtra("feed_title", titles[i]);
+            result.putExtra("feed_index", i);
+            result.putExtra("feed_total", paths.length);
+            result.putExtra("feed_bulk", true);
+            result.putExtra("refresh_state", updated == null ? "failure" : "success");
+            if (updated == null) result.putExtra("refresh_error", "Эта лента не вернула раздачи; прежний кэш сохранён.");
+            handleFeedRefreshState(result);
+            if (updated != null && group.equals(activeFeedScreen)) {
+                renderHomeSection(updated, homeRenderGeneration, true);
+            }
+        }
+
+        TextView label = feedRefreshStatusViews.get(group);
+        ProgressBar bar = feedRefreshProgressViews.get(group);
+        if (label != null) {
+            label.setText(successCount == paths.length
+                    ? "Все " + paths.length + " лент обновлены одновременно"
+                    : "Обновлено " + successCount + " из " + paths.length + " лент");
+        }
+        if (bar != null) {
+            bar.setIndeterminate(false);
+            bar.setMax(paths.length);
+            bar.setProgress(successCount);
+        }
+        status.setText("Обновлено лент: " + successCount + " из " + paths.length);
     }
 
     private String feedButtonKey(String group, String path) { return group + "|" + path; }
