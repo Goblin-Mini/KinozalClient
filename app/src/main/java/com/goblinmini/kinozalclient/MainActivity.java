@@ -211,6 +211,23 @@ public class MainActivity extends Activity {
                 }
             };
 
+    // Parsed detail models are kept separately from HTML so reopening a release
+    // does not repeatedly parse a large document on the UI thread.
+    private final java.util.LinkedHashMap<String, TorrentDetails> detailDataCache =
+            new java.util.LinkedHashMap<String, TorrentDetails>(32, 0.75f, true) {
+                @Override protected boolean removeEldestEntry(
+                        java.util.Map.Entry<String, TorrentDetails> eldest) {
+                    return size() > 32;
+                }
+            };
+    private TorrentDetails getCachedDetailData(String key) {
+        synchronized (detailDataCache) { return detailDataCache.get(key); }
+    }
+    private void putCachedDetailData(String key, TorrentDetails data) {
+        if (key == null || data == null) return;
+        synchronized (detailDataCache) { detailDataCache.put(key, data); }
+    }
+
     private static class Category { String title, href, method = "GET", body = ""; }
 
     private static class Torrent {
@@ -5051,30 +5068,35 @@ public class MainActivity extends Activity {
         // Render a previously validated detail page immediately. The network
         // refresh below updates ratings, peer counts and other changing fields.
         String cachedHtml = null;
-        synchronized (pageCache) { cachedHtml = pageCache.get(cacheKey); }
-        if (cachedHtml == null) {
-            byte[] saved = diskCache.get(cacheKey, 30L * 60L * 1000L);
-            if (saved != null) {
-                cachedHtml = new String(saved, StandardCharsets.UTF_8);
-                synchronized (pageCache) { pageCache.put(cacheKey, cachedHtml); }
+        TorrentDetails cachedDetails = getCachedDetailData(cacheKey);
+        if (cachedDetails == null) {
+            synchronized (pageCache) { cachedHtml = pageCache.get(cacheKey); }
+            if (cachedHtml == null) {
+                byte[] saved = diskCache.get(cacheKey, 30L * 60L * 1000L);
+                if (saved != null) {
+                    cachedHtml = new String(saved, StandardCharsets.UTF_8);
+                    synchronized (pageCache) { pageCache.put(cacheKey, cachedHtml); }
+                }
+            }
+            if (cachedHtml != null) {
+                try {
+                    Document cachedDoc = Jsoup.parse(cachedHtml, href);
+                    cachedDetails = parseTorrentDetails(cachedDoc, t);
+                    putCachedDetailData(cacheKey, cachedDetails);
+                } catch (Exception ignored) {
+                    cachedHtml = null;
+                }
             }
         }
 
-        if (cachedHtml != null) {
-            try {
-                Document cachedDoc = Jsoup.parse(cachedHtml, href);
-                TorrentDetails cachedDetails = parseTorrentDetails(cachedDoc, t);
-                t.poster = cachedDetails.poster;
-                saveRecentlyViewed(t);
-                // Show the card immediately. Screenshot AJAX is loaded only
-                // when the user opens the Screenshots tab.
-                showTorrentDetails(t, cachedDetails);
-            } catch (Exception ignored) {
-                cachedHtml = null;
-            }
+        if (cachedDetails != null) {
+            t.poster = cachedDetails.poster;
+            saveRecentlyViewed(t);
+            // Reuse the parsed model; no HTML parsing or network wait on repeat opens.
+            showTorrentDetails(t, cachedDetails);
         }
 
-        final boolean hasCachedDetails = cachedHtml != null;
+        final boolean hasCachedDetails = cachedDetails != null;
         if (!hasCachedDetails) {
             progress.setVisibility(View.VISIBLE);
             // A focused-row prefetch is already loading this exact page.
@@ -5105,6 +5127,7 @@ public class MainActivity extends Activity {
                     return;
                 }
                 synchronized (pageCache) { pageCache.put(cacheKey, html); }
+                putCachedDetailData(cacheKey, details);
                 diskCache.put(cacheKey, html.getBytes(StandardCharsets.UTF_8));
                 t.poster = details.poster;
                 saveRecentlyViewed(t);
@@ -5357,6 +5380,7 @@ public class MainActivity extends Activity {
                         || doc.selectFirst("a[href*=download.php]") != null);
                 if (!valid) return;
                 synchronized (pageCache) { pageCache.put(key, html); }
+                putCachedDetailData(key, parsed);
                 diskCache.put(key, html.getBytes(StandardCharsets.UTF_8));
                 if (href.equals(activeTorrentDetailsHref)) {
                     progress.setVisibility(View.GONE);
