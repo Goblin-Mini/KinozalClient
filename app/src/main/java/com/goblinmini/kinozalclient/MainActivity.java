@@ -6,6 +6,8 @@ import android.net.Uri;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.util.LruCache;
+import android.util.Log;
+import android.view.Choreographer;
 import android.widget.ImageView;
 import android.app.AlertDialog;
 import android.graphics.Color;
@@ -121,6 +123,43 @@ public class MainActivity extends Activity {
     private List<HomeSection> homeSectionsMemory = new ArrayList<>();
     private String homeCacheDiagnostic = "Кэш главной ещё не проверялся";
     private int homeRenderGeneration = 0;
+    // Lightweight startup diagnostics: frame gaps and expensive home-row renders.
+    private boolean homePerfMonitoring = false;
+    private long homePerfLastFrameNanos = 0L;
+    private long homePerfStartedAtMs = 0L;
+    private int homePerfSlowFrames = 0;
+    private final Choreographer.FrameCallback homePerfFrameCallback = frameTimeNanos -> {
+        if (!homePerfMonitoring) return;
+        if (homePerfLastFrameNanos != 0L) {
+            long frameGapMs = (frameTimeNanos - homePerfLastFrameNanos) / 1_000_000L;
+            if (frameGapMs >= 32L) {
+                homePerfSlowFrames++;
+                Log.w("KinozalPerf", "slow frame gap=" + frameGapMs
+                        + "ms, homeLoading=true, renderedSections=" + homeRenderGeneration);
+            }
+        }
+        homePerfLastFrameNanos = frameTimeNanos;
+        Choreographer.getInstance().postFrameCallback(homePerfFrameCallback);
+    };
+
+    private void startHomePerformanceMonitor() {
+        if (homePerfMonitoring) return;
+        homePerfMonitoring = true;
+        homePerfLastFrameNanos = 0L;
+        homePerfStartedAtMs = android.os.SystemClock.elapsedRealtime();
+        homePerfSlowFrames = 0;
+        Log.i("KinozalPerf", "home loading diagnostics started");
+        Choreographer.getInstance().postFrameCallback(homePerfFrameCallback);
+    }
+
+    private void stopHomePerformanceMonitor() {
+        if (!homePerfMonitoring) return;
+        homePerfMonitoring = false;
+        Choreographer.getInstance().removeFrameCallback(homePerfFrameCallback);
+        long elapsed = android.os.SystemClock.elapsedRealtime() - homePerfStartedAtMs;
+        Log.i("KinozalPerf", "home loading diagnostics finished: duration="
+                + elapsed + "ms, slowFrames(>=32ms)=" + homePerfSlowFrames);
+    }
 
     private volatile String lastBrowserError = "Причина пока не определена";
     // Infohash is prefetched while the native details dialog is being viewed.
@@ -753,7 +792,9 @@ public class MainActivity extends Activity {
 
     private void loadHomeSectionsInBrowser(String[] paths, String[] titles, int index,
             List<HomeSection> sections, int retry) {
+        if (index == 0 && retry == 0 && paths == HOME_PATHS) startHomePerformanceMonitor();
         if (index >= paths.length) {
+            if (paths == HOME_PATHS) stopHomePerformanceMonitor();
             removeHomeDuplicates(sections);
             if (paths == HOME_PATHS) {
                 List<HomeSection> channelSnapshot = new ArrayList<>(sections);
@@ -1445,7 +1486,14 @@ public class MainActivity extends Activity {
                 scheduleVisibleHomePosterLoad();
                 return;
             }
-            renderHomeSection(snapshot.get(index[0]++));
+            HomeSection section = snapshot.get(index[0]++);
+            long renderStarted = android.os.SystemClock.elapsedRealtime();
+            renderHomeSection(section);
+            long renderDuration = android.os.SystemClock.elapsedRealtime() - renderStarted;
+            if (renderDuration >= 16L) {
+                Log.w("KinozalPerf", "home row render=" + renderDuration + "ms, title="
+                        + section.title + ", cards=" + section.items.size());
+            }
             browserHandler.postDelayed(next[0], 24);
         };
         browserHandler.post(next[0]);
