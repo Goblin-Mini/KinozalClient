@@ -121,6 +121,22 @@ public class MainActivity extends Activity {
     private boolean browserFeedLoading = false;
     private Runnable pendingBrowserNavigation;
     private List<HomeSection> homeSectionsMemory = new ArrayList<>();
+    // Keep already-built native screens attached to their own cache entry.
+    // Switching feeds swaps the existing view instead of rebuilding its cards.
+    private final java.util.LinkedHashMap<String, LinearLayout> screenViewCache =
+            new java.util.LinkedHashMap<String, LinearLayout>(12, 0.75f, true) {
+                @Override protected boolean removeEldestEntry(java.util.Map.Entry<String, LinearLayout> eldest) {
+                    return size() > 12;
+                }
+            };
+    private final java.util.Map<String, Integer> screenScrollCache = new java.util.HashMap<>();
+    private String activeScreenKey = "home";
+    private static final long HOME_REFRESH_INTERVAL_MS = 2L * 60L * 60L * 1000L;
+    private static final long COLLECTION_REFRESH_INTERVAL_MS = 3L * 60L * 60L * 1000L;
+    private static final long CATEGORY_REFRESH_INTERVAL_MS = 2L * 60L * 60L * 1000L;
+    private boolean refreshQueueRunning;
+    private final java.util.ArrayDeque<Runnable> scheduledRefreshQueue = new java.util.ArrayDeque<>();
+    private final java.util.Map<String, Long> feedRefreshTimes = new java.util.HashMap<>();
     private String homeCacheDiagnostic = "Кэш главной ещё не проверялся";
     private int homeRenderGeneration = 0;
     // Lightweight startup diagnostics: frame gaps and expensive home-row renders.
@@ -461,6 +477,15 @@ public class MainActivity extends Activity {
 
     private void loadInitialCatalog() {
         if (deferBrowserNavigationIfBusy(this::loadInitialCatalog)) return;
+        activateCachedScreen("home");
+        currentPath = "";
+        currentTitle = "Главная";
+        heading.setText(currentTitle);
+        if (isScreenFresh("home", HOME_REFRESH_INTERVAL_MS)) {
+            progress.setVisibility(View.GONE);
+            status.setText("Главная · сохранённая лента");
+            return;
+        }
         loadInitialCatalog(0);
     }
 
@@ -523,15 +548,61 @@ public class MainActivity extends Activity {
 
     private void loadCollections() {
         if (deferBrowserNavigationIfBusy(this::loadCollections)) return;
-        browserFeedLoading = true;
+        activateCachedScreen("collections");
         currentPath = "collections";
         currentTitle = "Подборки";
         heading.setText("Подборки");
-        showPageLoading("Загрузка подборок через WebView…");
+        if (isScreenFresh("collections", COLLECTION_REFRESH_INTERVAL_MS)) {
+            progress.setVisibility(View.GONE);
+            status.setText("Подборки · сохранённые ленты");
+            return;
+        }
+        browserFeedLoading = true;
+        showPageLoading("Обновление подборок…");
         if (sessionWebView == null) restoreBrowserSession("");
         browserHandler.postDelayed(() -> loadHomeSectionsInBrowser(
                 COLLECTION_PATHS, COLLECTION_TITLES, 0, new ArrayList<>(), 0),
                 sessionWebView == null ? 350 : 100);
+    }
+
+    private String refreshPreferenceKey(String key) {
+        return "feed_refresh_" + Integer.toHexString(key.hashCode());
+    }
+
+    private boolean isScreenFresh(String key, long intervalMs) {
+        long last = getSharedPreferences(PREFS, MODE_PRIVATE)
+                .getLong(refreshPreferenceKey(key), 0L);
+        return last > 0L && System.currentTimeMillis() - last < intervalMs;
+    }
+
+    private void markScreenRefreshed(String key) {
+        long now = System.currentTimeMillis();
+        getSharedPreferences(PREFS, MODE_PRIVATE).edit()
+                .putLong(refreshPreferenceKey(key), now).apply();
+        feedRefreshTimes.put(key, now);
+    }
+
+    private void activateCachedScreen(String key) {
+        if (key == null || key.trim().isEmpty()) key = "home";
+        if (key.equals(activeScreenKey) && list != null) return;
+        if (list != null && homeScrollView != null) {
+            screenScrollCache.put(activeScreenKey, homeScrollView.getScrollY());
+            if (list.getParent() instanceof ViewGroup) ((ViewGroup) list.getParent()).removeView(list);
+            screenViewCache.put(activeScreenKey, list);
+        }
+        LinearLayout cached = screenViewCache.get(key);
+        if (cached == null) {
+            cached = new LinearLayout(this);
+            cached.setOrientation(LinearLayout.VERTICAL);
+            screenScrollCache.put(key, 0);
+        }
+        list = cached;
+        if (list.getParent() instanceof ViewGroup) ((ViewGroup) list.getParent()).removeView(list);
+        homeScrollView.removeAllViews();
+        homeScrollView.addView(list, new ScrollView.LayoutParams(-1, -2));
+        activeScreenKey = key;
+        homeScrollView.post(() -> homeScrollView.scrollTo(0,
+                screenScrollCache.containsKey(key) ? screenScrollCache.get(key) : 0));
     }
 
     private void preloadHomeCache() {
@@ -805,6 +876,8 @@ public class MainActivity extends Activity {
             // in place, so cards discarded by final normalization disappear too.
             // Reconcile duplicate cards without rebuilding every row in one frame.
             renderHomeSectionsIncrementally(sections);
+            if (paths == HOME_PATHS) markScreenRefreshed("home");
+            else if (paths == COLLECTION_PATHS) markScreenRefreshed("collections");
             int total = countHomeCards(sections);
             if (!sections.isEmpty() && paths == HOME_PATHS) homeSectionsMemory = new ArrayList<>(sections);
             progress.setVisibility(View.GONE);
@@ -2955,11 +3028,14 @@ public class MainActivity extends Activity {
 
     private void load(String path, String title, String postBody) {
         if (deferBrowserNavigationIfBusy(() -> load(path, title, postBody))) return;
+        activateCachedScreen("category:" + path);
         currentPath = path; currentTitle = title; heading.setText(title);
-
-        // Browse/category pages change frequently. Always request the current
-        // page from Kinozal; only Home feeds, posters and torrent details use
-        // their dedicated caches.
+        if (postBody == null && isScreenFresh("category:" + path, CATEGORY_REFRESH_INTERVAL_MS)
+                && list.getChildCount() > 0) {
+            progress.setVisibility(View.GONE);
+            status.setText("Категория · сохранённый экран");
+            return;
+        }
         showPageLoading("Загрузка каталога…");
         if (sessionWebView != null) {
             fetchBrowserPage(path, postBody, html -> {
@@ -3166,6 +3242,7 @@ public class MainActivity extends Activity {
         torrents.clear(); torrents.addAll(parsed);
         setCatalogStatus("Раздач", parsed.size());
         renderTorrents(parsed);
+        markScreenRefreshed("category:" + currentPath);
         if (parsed.isEmpty()) addEmpty("Страница загружена, но раздачи не найдены. Возможно, фильтр не применился.");
     }
     private List<Torrent> parseTorrents(Document doc) {
