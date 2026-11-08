@@ -3319,7 +3319,9 @@ public class MainActivity extends Activity {
         // the persistent cache is updated after a successful response, but is
         // not used as stale content during interactive navigation.
         torrents.clear();
-        showPageLoading("Загрузка каталога…");
+        // Keep the selected category name visible while the old rows are gone
+        // and the new page is being fetched.
+        showPageLoading("Загрузка: " + title + "…");
         if (sessionWebView != null) {
             fetchBrowserPage(path, postBody, html -> {
                 if (requestGeneration != catalogLoadGeneration) return;
