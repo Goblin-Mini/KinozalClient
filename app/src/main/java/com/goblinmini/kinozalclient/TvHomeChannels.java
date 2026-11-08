@@ -119,15 +119,18 @@ final class TvHomeChannels {
                         Log.i(TAG, "Created channel " + CHANNEL_NAMES[i] + " id=" + id);
                     } else {
                         channelIds[i] = channel.getId();
+                        // Re-apply the canonical Russian display name on every sync.
+                        // This also repairs channel names left by older app versions.
+                        PreviewChannel.Builder renamedBuilder = new PreviewChannel.Builder()
+                                .setDisplayName(CHANNEL_NAMES[i])
+                                .setDescription("Подборка раздач с " + savedMirror)
+                                .setInternalProviderId("kinozal:" + CHANNEL_KEYS[i])
+                                .setAppLinkIntent(channel.getAppLinkIntent());
+                        if (logo != null) renamedBuilder.setLogo(logo);
+                        helper.updatePreviewChannel(channel.getId(), renamedBuilder.build());
                         if (!CHANNEL_NAMES[i].equals(channel.getDisplayName())) {
-                            PreviewChannel.Builder renamedBuilder = new PreviewChannel.Builder()
-                                    .setDisplayName(CHANNEL_NAMES[i])
-                                    .setDescription("Подборка раздач с " + savedMirror)
-                                    .setInternalProviderId("kinozal:" + CHANNEL_KEYS[i])
-                                    .setAppLinkIntent(channel.getAppLinkIntent());
-                            if (logo != null) renamedBuilder.setLogo(logo);
-                            helper.updatePreviewChannel(channel.getId(), renamedBuilder.build());
-                            Log.i(TAG, "Renamed channel to " + CHANNEL_NAMES[i]);
+                            Log.i(TAG, "Renamed legacy channel '" + channel.getDisplayName()
+                                    + "' to '" + CHANNEL_NAMES[i] + "'");
                         }
                     }
 
