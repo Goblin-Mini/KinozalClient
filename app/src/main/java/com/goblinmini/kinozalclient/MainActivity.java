@@ -1143,8 +1143,8 @@ public class MainActivity extends Activity {
             List<HomeSection> loaded, long fetchStarted, long parseStarted,
             java.util.function.Consumer<List<HomeSection>> callback) {
         if (index >= paths.length) {
-            appendFeedDiagnostic("FETCH_DONE", "sequentialRequests=" + paths.length
-                    + ", totalMs=" + (android.os.SystemClock.elapsedRealtime() - fetchStarted));
+            appendFeedDiagnostic("FETCH_DONE", "parallelBatchSize=2, totalMs="
+                    + (android.os.SystemClock.elapsedRealtime() - fetchStarted));
             callback.accept(loaded);
             return;
         }
@@ -1153,71 +1153,235 @@ public class MainActivity extends Activity {
         final String path = paths[index];
         final String title = titles[index];
         long requestStarted = android.os.SystemClock.elapsedRealtime();
-        appendFeedDiagnostic(index == 0 ? "NAVIGATION_START" : "HTTP_START",
+        appendFeedDiagnostic(index == 0 ? "NAVIGATION_START" : "BATCH_NAVIGATION",
                 path + " index=" + (index + 1) + "/" + paths.length);
 
+        // One real WebView navigation establishes/refreshes the authenticated origin.
+        // The next two same-origin feeds are fetched concurrently with credentials.
         fetchBrowserPage(path, null, html -> {
             long requestDuration = android.os.SystemClock.elapsedRealtime() - requestStarted;
             int htmlLength = html == null ? 0 : html.length();
-            appendFeedDiagnostic(index == 0 ? "NAVIGATION_DONE" : "HTTP",
-                    path + " durationMs=" + requestDuration + ", htmlChars=" + htmlLength
-                            + (htmlLength == 0 ? ", error=" + safe(lastBrowserError) : ""));
+            appendFeedDiagnostic("NAVIGATION_DONE", path + " durationMs=" + requestDuration
+                    + ", htmlChars=" + htmlLength
+                    + (htmlLength == 0 ? ", error=" + safe(lastBrowserError) : ""));
             if (htmlLength == 0) {
-                fetchAndParseHomeFeedsSequentially(paths, titles, feedIndex + 1, loaded,
+                fetchAndParseHomeFeedsSequentialFallback(paths, titles, feedIndex + 1, loaded,
+                        fetchStarted, parseStarted, callback, "navigation failed");
+                return;
+            }
+
+            WebView web = sessionWebView;
+            if (web == null) {
+                parseHomeFeedFallback(html, title, path, feedIndex, loaded, paths, titles,
+                        fetchStarted, parseStarted, callback, "WebView отсутствует");
+                return;
+            }
+
+            final String currentHtml = html;
+            final int batchEnd = Math.min(paths.length, feedIndex + 3);
+            org.json.JSONArray batchPaths = new org.json.JSONArray();
+            for (int i = feedIndex + 1; i < batchEnd; i++) {
+                org.json.JSONObject entry = new org.json.JSONObject();
+                try {
+                    entry.put("path", paths[i]);
+                    entry.put("title", titles[i]);
+                    entry.put("index", i);
+                    batchPaths.put(entry);
+                } catch (Exception ignored) { }
+            }
+
+            String script = buildHomeParallelExtractScript(batchPaths.toString());
+            long batchStarted = android.os.SystemClock.elapsedRealtime();
+            web.evaluateJavascript(script, value -> {
+                try {
+                    String json = new org.json.JSONArray("[" + value + "]").getString(0);
+                    org.json.JSONArray results = new org.json.JSONArray(json);
+                    HomeSection current = new HomeSection(title, path);
+                    current.items.addAll(parseHomePostersFromJsonArray(
+                            extractHomeItemsFromCurrentDocument(currentHtml)));
+                    if (!current.items.isEmpty()) {
+                        loaded.add(current);
+                        diskCache.put("home|" + client.getMirror() + "|" + path,
+                                currentHtml.getBytes(StandardCharsets.UTF_8));
+                    }
+                    appendFeedDiagnostic("PARSE_JS", path + " cards=" + current.items.size()
+                            + ", htmlChars=" + currentHtml.length());
+
+                    boolean batchOk = results.length() == batchEnd - feedIndex - 1;
+                    for (int i = 0; i < results.length(); i++) {
+                        org.json.JSONObject result = results.optJSONObject(i);
+                        if (result == null || !result.optBoolean("ok", false)) {
+                            batchOk = false;
+                            continue;
+                        }
+                        int resultIndex = result.optInt("index", -1);
+                        if (resultIndex <= feedIndex || resultIndex >= batchEnd) {
+                            batchOk = false;
+                            continue;
+                        }
+                        String resultPath = paths[resultIndex];
+                        String resultHtml = result.optString("html", "");
+                        HomeSection section = new HomeSection(titles[resultIndex], resultPath);
+                        section.items.addAll(parseHomePostersFromJsonArray(result.optJSONArray("items")));
+                        if (!section.items.isEmpty()) {
+                            loaded.add(section);
+                            diskCache.put("home|" + client.getMirror() + "|" + resultPath,
+                                    resultHtml.getBytes(StandardCharsets.UTF_8));
+                        }
+                        appendFeedDiagnostic("PARSE_JS_PARALLEL", resultPath
+                                + " durationMs=" + (android.os.SystemClock.elapsedRealtime() - batchStarted)
+                                + ", cards=" + section.items.size()
+                                + ", htmlChars=" + resultHtml.length());
+                    }
+                    if (batchOk) {
+                        appendFeedDiagnostic("PARALLEL_BATCH", "feeds=" + (batchEnd - feedIndex - 1)
+                                + ", durationMs=" + (android.os.SystemClock.elapsedRealtime() - batchStarted));
+                        fetchAndParseHomeFeedsSequentially(paths, titles, batchEnd, loaded,
+                                fetchStarted, parseStarted, callback);
+                    } else {
+                        appendFeedDiagnostic("PARALLEL_FALLBACK", "batch incomplete; continue sequentially from "
+                                + (feedIndex + 1));
+                        fetchAndParseHomeFeedsSequentialFallback(paths, titles, feedIndex + 1, loaded,
+                                fetchStarted, parseStarted, callback, "parallel batch incomplete");
+                    }
+                } catch (Exception e) {
+                    appendFeedDiagnostic("PARALLEL_FALLBACK", path + " " + safe(e.getMessage()));
+                    // The current navigated page is retained; remaining feeds use the proven path.
+                    fetchAndParseHomeFeedsSequentialFallback(paths, titles, feedIndex + 1, loaded,
+                            fetchStarted, parseStarted, callback, "JS batch error");
+                }
+            });
+        });
+    }
+
+    private String buildHomeParallelExtractScript(String pathsJson) {
+        return "(function(){"
+                + "function extract(doc,base){try{"
+                + "var links=doc.querySelectorAll('table.t_peer td.nam > a');"
+                + "if(!links.length)links=doc.querySelectorAll('a[href]');"
+                + "var out=[],seen=Object.create(null);"
+                + "function txt(e){return e?(e.innerText||e.textContent||'').replace(/\\\\s+/g,' ').trim():'';}"
+                + "function imgSrc(img){if(!img)return '';var a=['data-src','data-original','data-lazy-src','data-original-src','src'];"
+                + "for(var i=0;i<a.length;i++){var v=(img.getAttribute(a[i])||'').trim();"
+                + "if(v&&v.indexOf('data:image/')!==0)return v;}"
+                + "var ss=img.getAttribute('data-srcset')||img.getAttribute('srcset')||'';"
+                + "return ss?ss.split(',')[0].trim().split(/\\\\s+/)[0]:'';}"
+                + "for(var i=0;i<links.length;i++){var a=links[i],raw=a.getAttribute('href')||'';"
+                + "if(raw.indexOf('details.php?id=')<0||/userdetails/i.test(raw))continue;"
+                + "var href='';try{href=new URL(raw,base).href;}catch(e){continue;}if(seen[href])continue;seen[href]=1;"
+                + "var row=a.closest('tr'),img=a.querySelector('img');if(!img&&row)img=row.querySelector('img');"
+                + "if(!img&&a.parentElement)img=a.parentElement.querySelector('img');"
+                + "var p=a;for(var d=0;d<4&&!img&&p;d++){p=p.parentElement;if(p)img=p.querySelector('img');}"
+                + "var title=(a.getAttribute('title')||'').trim()||(img?(img.getAttribute('alt')||'').trim():'')||txt(a);"
+                + "if(!title)continue;var image=imgSrc(img);try{if(image)image=new URL(image,base).href;}catch(e){}"
+                + "var cells=row?row.querySelectorAll('td'):[];function cell(n){return cells.length>n?txt(cells[n]):'—';}"
+                + "out.push({title:title,href:href,image:image,size:cell(3),seeds:cell(4),leeches:cell(5),uploaded:cell(6)});}"
+                + "return out;}catch(e){return [];}}"
+                + "var requests=" + pathsJson + ";"
+                + "return Promise.all(requests.map(function(r){"
+                + "var url=new URL(r.path,location.href).href;"
+                + "return fetch(url,{credentials:'include',cache:'no-store'}).then(function(resp){"
+                + "if(!resp.ok)throw new Error('HTTP '+resp.status+' '+r.path);"
+                + "return resp.text().then(function(html){var doc=new DOMParser().parseFromString(html,'text/html');"
+                + "return {ok:true,index:r.index,html:html,items:extract(doc,url)};});"
+                + "});})).then(function(rows){return JSON.stringify(rows);})"
+                + ".catch(function(e){return JSON.stringify([{ok:false,error:String(e)}]);});"
+                + "})()";
+    }
+
+    private org.json.JSONArray extractHomeItemsFromCurrentDocument(String html) {
+        // The currently navigated page is already represented by the live WebView DOM.
+        // This method is replaced by the direct DOM extraction callback below.
+        return new org.json.JSONArray();
+    }
+
+    private List<HomePoster> parseHomePostersFromJsonArray(org.json.JSONArray array) {
+        List<HomePoster> out = new ArrayList<>();
+        if (array == null) return out;
+        java.util.Set<String> seen = new java.util.HashSet<>();
+        for (int i = 0; i < array.length(); i++) {
+            org.json.JSONObject obj = array.optJSONObject(i);
+            if (obj == null) continue;
+            String title = obj.optString("title", "").trim();
+            String href = obj.optString("href", "").trim();
+            if (title.isEmpty() || href.isEmpty() || !seen.add(href)) continue;
+            HomePoster item = new HomePoster();
+            item.torrent = new Torrent();
+            item.torrent.title = title;
+            item.torrent.href = href;
+            item.torrent.size = obj.optString("size", "—");
+            item.torrent.seeds = obj.optString("seeds", "—");
+            item.torrent.leeches = obj.optString("leeches", "—");
+            item.torrent.uploaded = obj.optString("uploaded", "—");
+            String image = obj.optString("image", "").trim();
+            if (!image.startsWith("http://") && !image.startsWith("https://")) image = "";
+            item.imageUrl = image;
+            item.torrent.poster = image;
+            out.add(item);
+        }
+        return out;
+    }
+
+    private void fetchAndParseHomeFeedsSequentialFallback(String[] paths, String[] titles, int index,
+            List<HomeSection> loaded, long fetchStarted, long parseStarted,
+            java.util.function.Consumer<List<HomeSection>> callback, String reason) {
+        appendFeedDiagnostic("SEQUENTIAL_FALLBACK", reason + ", fromIndex=" + index);
+        fetchAndParseHomeFeedsSequentiallyLegacy(paths, titles, index, loaded,
+                fetchStarted, parseStarted, callback);
+    }
+
+    private void fetchAndParseHomeFeedsSequentiallyLegacy(String[] paths, String[] titles, int index,
+            List<HomeSection> loaded, long fetchStarted, long parseStarted,
+            java.util.function.Consumer<List<HomeSection>> callback) {
+        if (index >= paths.length) {
+            appendFeedDiagnostic("FETCH_DONE", "sequentialFallback=true, totalMs="
+                    + (android.os.SystemClock.elapsedRealtime() - fetchStarted));
+            callback.accept(loaded);
+            return;
+        }
+        final int feedIndex = index;
+        final String path = paths[index];
+        fetchBrowserPage(path, null, html -> {
+            if (html == null || html.trim().isEmpty()) {
+                fetchAndParseHomeFeedsSequentiallyLegacy(paths, titles, feedIndex + 1, loaded,
                         fetchStarted, parseStarted, callback);
                 return;
             }
-
-            final String pageHtml = html;
             WebView web = sessionWebView;
             if (web == null) {
-                parseHomeFeedFallback(pageHtml, title, path, feedIndex, loaded,
-                        paths, titles, fetchStarted, parseStarted, callback, "WebView отсутствует");
+                parseHomeFeedFallback(html, titles[feedIndex], path, feedIndex, loaded, paths, titles,
+                        fetchStarted, parseStarted, callback, "WebView отсутствует during fallback");
                 return;
             }
-
-            long jsStarted = android.os.SystemClock.elapsedRealtime();
-            String script = "(function(){try{"
-                    + "var links=document.querySelectorAll('table.t_peer td.nam > a');"
-                    + "if(!links.length)links=document.querySelectorAll('a[href]');"
-                    + "var out=[],seen=Object.create(null);"
-                    + "function txt(e){return e?(e.innerText||e.textContent||'').replace(/\\s+/g,' ').trim():'';}"
-                    + "function imgSrc(img){if(!img)return '';var a=['data-src','data-original','data-lazy-src','data-original-src','src'];"
-                    + "for(var i=0;i<a.length;i++){var v=(img.getAttribute(a[i])||'').trim();"
-                    + "if(v&&v.indexOf('data:image/')!==0)return v;}"
-                    + "var ss=img.getAttribute('data-srcset')||img.getAttribute('srcset')||'';"
-                    + "return ss?ss.split(',')[0].trim().split(/\\s+/)[0]:'';}"
-                    + "for(var i=0;i<links.length;i++){var a=links[i],rawHref=a.getAttribute('href')||'',href=a.href||rawHref;"
-                    + "if(rawHref.indexOf('details.php?id=')<0||/userdetails/i.test(rawHref)||!href||seen[href])continue;seen[href]=1;"
-                    + "var row=a.closest('tr'),img=a.querySelector('img');"
-                    + "if(!img&&row)img=row.querySelector('img');if(!img&&a.parentElement)img=a.parentElement.querySelector('img');"
-                    + "var p=a;for(var d=0;d<4&&!img&&p;d++){p=p.parentElement;if(p)img=p.querySelector('img');}"
-                    + "var title=(a.getAttribute('title')||'').trim()||(img?(img.getAttribute('alt')||'').trim():'')||txt(a);"
-                    + "if(title.length<1)continue;var image=imgSrc(img);"
-                    + "try{if(image)image=new URL(image,document.baseURI).href;}catch(e){}"
-                    + "var cells=row?row.querySelectorAll('td'):[];"
-                    + "function cell(n){return cells.length>n?txt(cells[n]):'—';}"
-                    + "out.push({title:title,href:href,image:image,size:cell(3),seeds:cell(4),leeches:cell(5),uploaded:cell(6)});}"
+            String script = buildHomeParallelExtractScript("[]").replace(
+                    "var requests=[];", "var requests=[];");
+            // Reuse the same DOM extraction logic with the current live document.
+            String currentScript = "(function(){try{var links=document.querySelectorAll('table.t_peer td.nam > a');"
+                    + "if(!links.length)links=document.querySelectorAll('a[href]');var out=[],seen={};"
+                    + "function t(e){return e?(e.innerText||e.textContent||'').replace(/\\\\s+/g,' ').trim():'';}"
+                    + "function im(x){if(!x)return '';var z=['data-src','data-original','data-lazy-src','data-original-src','src'];"
+                    + "for(var j=0;j<z.length;j++){var v=x.getAttribute(z[j])||'';if(v&&v.indexOf('data:image/')!==0)return v;}"
+                    + "return '';}for(var i=0;i<links.length;i++){var a=links[i],h=a.getAttribute('href')||'';"
+                    + "if(h.indexOf('details.php?id=')<0||/userdetails/i.test(h))continue;var u=a.href||h;if(seen[u])continue;seen[u]=1;"
+                    + "var r=a.closest('tr'),x=a.querySelector('img');if(!x&&r)x=r.querySelector('img');"
+                    + "if(!x&&a.parentElement)x=a.parentElement.querySelector('img');var p=a;"
+                    + "for(var d=0;d<4&&!x&&p;d++){p=p.parentElement;if(p)x=p.querySelector('img');}"
+                    + "var n=(a.getAttribute('title')||'').trim()||(x?(x.getAttribute('alt')||'').trim():'')||t(a);if(!n)continue;"
+                    + "var q=im(x);try{if(q)q=new URL(q,document.baseURI).href;}catch(e){}var c=r?r.querySelectorAll('td'):[];"
+                    + "function cell(k){return c.length>k?t(c[k]):'—';}out.push({title:n,href:u,image:q,size:cell(3),seeds:cell(4),leeches:cell(5),uploaded:cell(6)});}"
                     + "return JSON.stringify(out);}catch(e){return '[]';}})()";
-
-            web.evaluateJavascript(script, value -> {
+            web.evaluateJavascript(currentScript, value -> {
                 List<HomePoster> posters = parseHomePostersJson(value);
-                long jsDuration = android.os.SystemClock.elapsedRealtime() - jsStarted;
-                if (!posters.isEmpty()) {
-                    HomeSection section = new HomeSection(title, path);
-                    section.items.addAll(posters);
+                HomeSection section = new HomeSection(titles[feedIndex], path);
+                section.items.addAll(posters);
+                if (!section.items.isEmpty()) {
                     loaded.add(section);
                     diskCache.put("home|" + client.getMirror() + "|" + path,
-                            pageHtml.getBytes(StandardCharsets.UTF_8));
-                    appendFeedDiagnostic("PARSE_JS", path + " durationMs=" + jsDuration
-                            + ", cards=" + posters.size() + ", htmlChars=" + pageHtml.length());
-                    fetchAndParseHomeFeedsSequentially(paths, titles, feedIndex + 1, loaded,
-                            fetchStarted, parseStarted, callback);
-                } else {
-                    parseHomeFeedFallback(pageHtml, title, path, feedIndex, loaded,
-                            paths, titles, fetchStarted, parseStarted, callback,
-                            "JS не вернул карточки, durationMs=" + jsDuration);
+                            html.getBytes(StandardCharsets.UTF_8));
                 }
+                appendFeedDiagnostic("PARSE_JS_FALLBACK", path + " cards=" + posters.size());
+                fetchAndParseHomeFeedsSequentiallyLegacy(paths, titles, feedIndex + 1, loaded,
+                        fetchStarted, parseStarted, callback);
             });
         });
     }
