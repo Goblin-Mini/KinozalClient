@@ -835,9 +835,9 @@ public class MainActivity extends Activity {
                 List<HomeSection> collectionSnapshot = new ArrayList<>(sections);
                 io.execute(() -> saveCollectionsModel(collectionSnapshot));
             }
-            // Re-render the final de-duplicated model. This replaces each row
-            // in place, so cards discarded by final normalization disappear too.
-            // Reconcile duplicate cards without rebuilding every row in one frame.
+            // Keep the bulk-refresh control on both first-load screens.
+            ensureFeedActions();
+            // Reconcile each completed feed without clearing the other cached rows.
             renderHomeSectionsIncrementally(sections);
             int total = countHomeCards(sections);
             if (!sections.isEmpty() && paths == HOME_PATHS) {
@@ -1517,16 +1517,22 @@ public class MainActivity extends Activity {
         }
     }
 
-    private void renderHome(List<HomeSection> sections) {
-        list.removeAllViews();
+    private void ensureFeedActions() {
+        if (list.getChildCount() > 0 && "feed-actions".equals(list.getChildAt(0).getTag())) return;
         LinearLayout actions = new LinearLayout(this);
         actions.setGravity(Gravity.RIGHT | Gravity.CENTER_VERTICAL);
+        actions.setTag("feed-actions");
         Button refreshAll = button("Обновить всё");
         refreshAll.setTextSize(12);
         refreshAll.setOnClickListener(v -> HomeFeedScheduler.refreshAll(getApplicationContext(),
                 "collections".equals(activeFeedScreen) ? "collections" : "home"));
         actions.addView(refreshAll, new LinearLayout.LayoutParams(-2, dp(36)));
-        list.addView(actions, new LinearLayout.LayoutParams(-1, dp(42)));
+        list.addView(actions, 0, new LinearLayout.LayoutParams(-1, dp(42)));
+    }
+
+    private void renderHome(List<HomeSection> sections) {
+        list.removeAllViews();
+        ensureFeedActions();
         if (sections.isEmpty()) {
             addEmpty("Подборки пока не загружены.");
             return;
@@ -5500,11 +5506,18 @@ public class MainActivity extends Activity {
                         runOnUiThread(() -> {
                             if ("home".equals(group)) homeSectionsMemory = new ArrayList<>(snapshot);
                             else collectionsSectionsMemory = new ArrayList<>(snapshot);
-                            boolean visible = ("home".equals(group) && "home".equals(activeFeedScreen))
-                                    || ("collections".equals(group) && "collections".equals(activeFeedScreen));
-                            if (visible && !isFinishing()) {
-                                renderHomeSection(updated);
-                                status.setText("Обновлена лента: " + updated.title);
+                            if (!isFinishing()) {
+                                LinearLayout targetList = "home".equals(group) ? homeList : collectionsList;
+                                if (targetList != null) {
+                                    LinearLayout previousList = list;
+                                    list = targetList;
+                                    renderHomeSection(updated);
+                                    list = previousList;
+                                }
+                                if (("home".equals(group) && "home".equals(activeFeedScreen))
+                                        || ("collections".equals(group) && "collections".equals(activeFeedScreen))) {
+                                    status.setText("Обновлена лента: " + updated.title);
+                                }
                             }
                         });
                     });
