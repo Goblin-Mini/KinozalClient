@@ -122,6 +122,7 @@ public class MainActivity extends Activity {
     private Runnable pendingBrowserNavigation;
     private List<HomeSection> homeSectionsMemory = new ArrayList<>();
     private List<HomeSection> collectionSectionsMemory = new ArrayList<>();
+    private boolean collectionCacheLoading = false;
     private boolean refreshAllRunning = false;
     private final java.util.ArrayDeque<FeedRefreshRequest> pendingFeedRefreshes = new java.util.ArrayDeque<>();
     private static final class FeedRefreshRequest {
@@ -559,25 +560,37 @@ public class MainActivity extends Activity {
         currentPath = "collections";
         currentTitle = "Подборки";
         heading.setText("Подборки");
-        if (!collectionSectionsMemory.isEmpty() && list.getChildCount() == 0) {
-            renderHome(collectionSectionsMemory);
-        }
-        if (!collectionSectionsMemory.isEmpty() && areAllFeedsFresh(COLLECTION_PATHS, true)) {
-            progress.setVisibility(View.GONE);
-            status.setText("Подборки · все ленты актуальны");
-            return;
-        }
         if (!collectionSectionsMemory.isEmpty()) {
-            queueDueFeeds(true);
+            if (list.getChildCount() == 0) renderHome(collectionSectionsMemory);
+            if (areAllFeedsFresh(COLLECTION_PATHS, true)) {
+                progress.setVisibility(View.GONE);
+                status.setText("Подборки · все ленты актуальны");
+            } else queueDueFeeds(true);
             return;
         }
+        if (collectionCacheLoading) return;
+        collectionCacheLoading = true;
+        showPageLoading("Проверяем сохранённые подборки…");
+        io.execute(() -> {
+            List<HomeSection> cached = readModelFromFile(new java.io.File(getFilesDir(), "kinozal_collections_model_v1.json"));
+            runOnUiThread(() -> {
+                collectionCacheLoading = false;
+                if (!"collections".equals(currentPath) || isFinishing()) return;
+                if (cached != null && !cached.isEmpty()) {
+                    collectionSectionsMemory = new ArrayList<>(cached);
+                    renderHome(collectionSectionsMemory);
+                    progress.setVisibility(View.GONE);
+                    status.setText("Подборки из кэша");
+                    if (!areAllFeedsFresh(COLLECTION_PATHS, true)) queueDueFeeds(true);
+                } else startInitialCollectionsLoad();
+            });
+        });
+    }
+
+    private void startInitialCollectionsLoad() {
+        if (browserFeedLoading) return;
         browserFeedLoading = true;
-        if (list.getChildCount() == 0) {
-            showPageLoading("Загрузка подборок…");
-        } else {
-            progress.setVisibility(View.VISIBLE);
-            status.setText("Обновляем подборки · сохранённые ленты остаются на экране");
-        }
+        showPageLoading("Загрузка подборок…");
         if (sessionWebView == null) restoreBrowserSession("");
         browserHandler.postDelayed(() -> loadHomeSectionsInBrowser(
                 COLLECTION_PATHS, COLLECTION_TITLES, 0, new ArrayList<>(), 0),
