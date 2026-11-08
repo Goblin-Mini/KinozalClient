@@ -1535,8 +1535,16 @@ public class MainActivity extends Activity {
         actions.setTag("feed-actions");
         Button refreshAll = button("Обновить всё");
         refreshAll.setTextSize(12);
-        refreshAll.setOnClickListener(v -> HomeFeedScheduler.refreshAll(getApplicationContext(),
-                "collections".equals(activeFeedScreen) ? "collections" : "home"));
+        refreshAll.setOnClickListener(v -> {
+            String group = "collections".equals(activeFeedScreen) ? "collections" : "home";
+            try {
+                HomeFeedScheduler.refreshAll(getApplicationContext(), group);
+                status.setText("Запущено обновление всех лент");
+            } catch (Exception e) {
+                status.setText("Не удалось запустить обновление лент: " + e.getMessage());
+                android.util.Log.e("KinozalFeed", "Cannot enqueue bulk refresh", e);
+            }
+        });
         actions.addView(refreshAll, new LinearLayout.LayoutParams(-2, dp(36)));
         list.addView(actions, 0, new LinearLayout.LayoutParams(-1, dp(42)));
     }
@@ -1619,15 +1627,32 @@ public class MainActivity extends Activity {
         LinearLayout sectionHeader = new LinearLayout(this);
         sectionHeader.setGravity(Gravity.CENTER_VERTICAL);
         sectionHeader.setTag("home-title:" + section.path);
+        final String feedGroup = getFeedIndex("collections", section.path) >= 0
+                ? "collections" : "home";
+        Button refreshFeed = button("⟳");
+        refreshFeed.setTextSize(22);
+        refreshFeed.setGravity(Gravity.CENTER);
+        refreshFeed.setPadding(0, 0, 0, 0);
+        refreshFeed.setContentDescription("Обновить ленту " + section.title);
+        refreshFeed.setOnClickListener(v -> {
+            int feedIndex = getFeedIndex(feedGroup, section.path);
+            if (feedIndex < 0) {
+                status.setText("Не найдена лента для обновления: " + section.title);
+                return;
+            }
+            try {
+                HomeFeedScheduler.refreshNow(getApplicationContext(), feedGroup, feedIndex);
+                status.setText("Запущено обновление: " + section.title);
+            } catch (Exception e) {
+                status.setText("Не удалось обновить ленту: " + e.getMessage());
+                android.util.Log.e("KinozalFeed", "Cannot enqueue feed refresh: " + section.path, e);
+            }
+        });
+        LinearLayout.LayoutParams refreshParams = new LinearLayout.LayoutParams(dp(38), dp(38));
+        refreshParams.rightMargin = dp(10);
+        sectionHeader.addView(refreshFeed, refreshParams);
         TextView sectionTitle = text(section.title, 20, GOLD, true);
         sectionHeader.addView(sectionTitle, new LinearLayout.LayoutParams(0, dp(38), 1f));
-        Button refreshFeed = button("↻");
-        refreshFeed.setTextSize(18);
-        refreshFeed.setContentDescription("Обновить ленту " + section.title);
-        refreshFeed.setOnClickListener(v -> HomeFeedScheduler.refreshNow(getApplicationContext(),
-                "collections".equals(activeFeedScreen) ? "collections" : "home",
-                getFeedIndex("collections".equals(activeFeedScreen) ? "collections" : "home", section.path)));
-        sectionHeader.addView(refreshFeed, new LinearLayout.LayoutParams(dp(42), dp(34)));
         LinearLayout.LayoutParams titleParams = new LinearLayout.LayoutParams(-1, dp(38));
         titleParams.topMargin = dp(10);
 
