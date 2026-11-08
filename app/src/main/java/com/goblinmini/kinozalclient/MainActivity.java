@@ -111,6 +111,8 @@ public class MainActivity extends Activity {
     private boolean startupCatalogStarted = false;
     private boolean automaticUpdateCheckScheduled = false;
     private boolean homeCacheDisplayed = false;
+    private boolean homeCacheLoadFinished = false;
+    private boolean initialHomeFetchPending = false;
     private boolean homeRefreshInProgress = false;
     // Home/collection and Android TV feed refreshes share one WebView. Queue
     // interactive navigation until the background sequence releases it.
@@ -155,6 +157,10 @@ public class MainActivity extends Activity {
             }
         };
         buildShell();
+        // Read the last successful home snapshot off the UI thread. This runs
+        // alongside proxy/session initialization so a returning user sees
+        // useful content before the sequential WebView refresh begins.
+        preloadHomeCache();
         socks5Bridge = new Socks5ProxyBridge(this);
         String savedBrowserCookies = client.getSavedBrowserCookies();
         initializeNetwork(savedBrowserCookies);
@@ -486,15 +492,67 @@ public class MainActivity extends Activity {
                 sessionWebView == null ? 350 : 100);
     }
 
+    private void preloadHomeCache() {
+        String startupSource = getSharedPreferences(PREFS, MODE_PRIVATE)
+                .getString("startup_source", "home");
+        if (!"home".equals(startupSource) || !pendingTvTorrentHref.isEmpty()) {
+            homeCacheLoadFinished = true;
+            return;
+        }
+        io.execute(() -> {
+            List<HomeSection> cached = readHomeModel();
+            runOnUiThread(() -> {
+                homeCacheLoadFinished = true;
+                // Do not overwrite a screen the user has already navigated to.
+                if (cached != null && !cached.isEmpty()
+                        && "browse.php".equals(currentPath)
+                        && "Все раздачи".equals(currentTitle)
+                        && !isFinishing()) {
+                    currentPath = "";
+                    currentTitle = "Главная";
+                    heading.setText("Главная");
+                    homeSectionsMemory = new ArrayList<>(cached);
+                    homeCacheDisplayed = true;
+                    renderHome(cached);
+                    status.setText("Главная из кэша · обновляем…");
+                }
+                if (initialHomeFetchPending) {
+                    initialHomeFetchPending = false;
+                    startInitialHomeBrowserLoad();
+                }
+            });
+        });
+    }
+
     private void loadInitialCatalog(int startupRetry) {
+        currentPath = "";
+        currentTitle = "Главная";
+        heading.setText("Главная");
+        if (!homeCacheLoadFinished) {
+            initialHomeFetchPending = true;
+            progress.setVisibility(View.VISIBLE);
+            status.setText("Подготавливаем главную…");
+            return;
+        }
+        startInitialHomeBrowserLoad();
+    }
+
+    private void startInitialHomeBrowserLoad() {
+        if (browserFeedLoading) return;
         browserFeedLoading = true;
         currentPath = "";
         currentTitle = "Главная";
         heading.setText("Главная");
-        showPageLoading("Загрузка главной через WebView…");
+        if (homeCacheDisplayed) {
+            // Keep cached rows visible while fresh feeds arrive one by one.
+            progress.setVisibility(View.VISIBLE);
+            status.setText("Обновляем главную…");
+        } else {
+            showPageLoading("Загрузка главной через WebView…");
+        }
 
-        // Главная загружается только через браузерную сессию Kinozal.
-        // Нативный HTTP-загрузчик и его фоновое обновление здесь не используются.
+        // Keep the authenticated browser session as the source of fresh feeds.
+        // The local snapshot only improves first paint; it does not replace auth.
         if (sessionWebView == null) {
             restoreBrowserSession("");
         }
