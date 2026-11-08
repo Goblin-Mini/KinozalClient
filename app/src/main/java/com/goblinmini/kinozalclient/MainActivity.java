@@ -558,7 +558,12 @@ public class MainActivity extends Activity {
             return;
         }
         browserFeedLoading = true;
-        showPageLoading("Обновление подборок…");
+        if (list.getChildCount() == 0) {
+            showPageLoading("Загрузка подборок…");
+        } else {
+            progress.setVisibility(View.VISIBLE);
+            status.setText("Обновляем подборки · сохранённые ленты остаются на экране");
+        }
         if (sessionWebView == null) restoreBrowserSession("");
         browserHandler.postDelayed(() -> loadHomeSectionsInBrowser(
                 COLLECTION_PATHS, COLLECTION_TITLES, 0, new ArrayList<>(), 0),
@@ -583,26 +588,26 @@ public class MainActivity extends Activity {
     }
 
     private void activateCachedScreen(String key) {
-        if (key == null || key.trim().isEmpty()) key = "home";
-        if (key.equals(activeScreenKey) && list != null) return;
+        final String screenKey = (key == null || key.trim().isEmpty()) ? "home" : key;
+        if (screenKey.equals(activeScreenKey) && list != null) return;
         if (list != null && homeScrollView != null) {
             screenScrollCache.put(activeScreenKey, homeScrollView.getScrollY());
             if (list.getParent() instanceof ViewGroup) ((ViewGroup) list.getParent()).removeView(list);
             screenViewCache.put(activeScreenKey, list);
         }
-        LinearLayout cached = screenViewCache.get(key);
+        LinearLayout cached = screenViewCache.get(screenKey);
         if (cached == null) {
             cached = new LinearLayout(this);
             cached.setOrientation(LinearLayout.VERTICAL);
-            screenScrollCache.put(key, 0);
+            screenScrollCache.put(screenKey, 0);
         }
         list = cached;
         if (list.getParent() instanceof ViewGroup) ((ViewGroup) list.getParent()).removeView(list);
         homeScrollView.removeAllViews();
         homeScrollView.addView(list, new ScrollView.LayoutParams(-1, -2));
-        activeScreenKey = key;
+        activeScreenKey = screenKey;
         homeScrollView.post(() -> homeScrollView.scrollTo(0,
-                screenScrollCache.containsKey(key) ? screenScrollCache.get(key) : 0));
+                screenScrollCache.containsKey(screenKey) ? screenScrollCache.get(screenKey) : 0));
     }
 
     private void preloadHomeCache() {
@@ -3036,7 +3041,12 @@ public class MainActivity extends Activity {
             status.setText("Категория · сохранённый экран");
             return;
         }
-        showPageLoading("Загрузка каталога…");
+        if (list.getChildCount() == 0) {
+            showPageLoading("Загрузка каталога…");
+        } else {
+            progress.setVisibility(View.VISIBLE);
+            status.setText("Обновляем каталог · сохранённые данные остаются на экране");
+        }
         if (sessionWebView != null) {
             fetchBrowserPage(path, postBody, html -> {
                 if (html != null && !html.isEmpty()) {
