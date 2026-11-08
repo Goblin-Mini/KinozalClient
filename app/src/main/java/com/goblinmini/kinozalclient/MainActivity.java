@@ -196,6 +196,16 @@ public class MainActivity extends Activity {
                 + elapsed + "ms, slowFrames(>=32ms)=" + homePerfSlowFrames);
     }
 
+    // Per-category timing diagnostics. These measurements do not cache pages or alter request behavior.
+    private long browsePerfStartedAtMs = 0L;
+    private String browsePerfPath = "";
+
+    private void logBrowsePerf(String stage, long durationMs, String details) {
+        Log.i("KinozalPerf", "browse path=" + browsePerfPath + " stage=" + stage
+                + " duration=" + durationMs + "ms"
+                + (details == null || details.isEmpty() ? "" : " " + details));
+    }
+
     private volatile String lastBrowserError = "Причина пока не определена";
     // Infohash is prefetched while the native details dialog is being viewed.
     // This hides the Kinozal/Cloudflare round trip behind the user's reading time.
@@ -3600,6 +3610,10 @@ public class MainActivity extends Activity {
         if (deferBrowserNavigationIfBusy(() -> load(path, title, postBody))) return;
         activateBrowseScreen();
         currentPath = path; currentTitle = title; heading.setText(title);
+        browsePerfPath = path;
+        browsePerfStartedAtMs = android.os.SystemClock.elapsedRealtime();
+        Log.i("KinozalPerf", "browse start path=" + path + " transport="
+                + (sessionWebView != null ? "WebView" : "native-http"));
 
         // Browse/category pages change frequently. Always request the current
         // page from Kinozal; only Home feeds, posters and torrent details use
@@ -3716,9 +3730,15 @@ public class MainActivity extends Activity {
             @Override public void onPageFinished(WebView view, String url) {
                 super.onPageFinished(view, url);
                 if (pendingBrowserCallback != null) {
+                    long pageFinishedAt = android.os.SystemClock.elapsedRealtime();
+                    logBrowsePerf("webview-page-finished",
+                            browsePerfStartedAtMs > 0 ? pageFinishedAt - browsePerfStartedAtMs : -1,
+                            "url=" + url);
                     BrowserPageCallback cb = pendingBrowserCallback;
                     pendingBrowserCallback = null;
+                    final long evaluateStartedAt = android.os.SystemClock.elapsedRealtime();
                     view.evaluateJavascript("(document.documentElement ? document.documentElement.outerHTML : '')", value -> {
+                        long evaluateDuration = android.os.SystemClock.elapsedRealtime() - evaluateStartedAt;
                         String html = "";
                         try { html = new org.json.JSONArray("[" + value + "]").getString(0); }
                         catch (Exception ignored) { }
@@ -3730,15 +3750,21 @@ public class MainActivity extends Activity {
                         String pageUrl = view.getUrl() == null ? "" : view.getUrl().toLowerCase(java.util.Locale.ROOT);
                         final String loadedHtml = html;
                         final String loadedUrl = pageUrl;
+                        logBrowsePerf("dom-extract", evaluateDuration,
+                                "htmlChars=" + loadedHtml.length());
                         // DOM parsing on the WebView/UI thread caused visible
                         // stalls for large Kinozal pages. Validate the login
                         // redirect on the background I/O executor instead.
                         executeSafely(io, () -> {
                             boolean loginForm = false;
+                            long loginCheckStartedAt = android.os.SystemClock.elapsedRealtime();
                             try {
                                 Document loaded = Jsoup.parse(loadedHtml);
                                 loginForm = !loaded.select("form:has(input[type=password])").isEmpty();
                             } catch (Exception ignored) { }
+                            logBrowsePerf("login-check",
+                                    android.os.SystemClock.elapsedRealtime() - loginCheckStartedAt,
+                                    "htmlChars=" + loadedHtml.length());
                             final boolean redirectedToLogin = loginForm
                                     || loadedUrl.contains("login.php")
                                     || loadedUrl.contains("takelogin.php");
@@ -3812,9 +3838,13 @@ public class MainActivity extends Activity {
         // Jsoup parsing of large category pages can take long enough to block
         // DPAD input and delay the first visible list frame. Keep it off main.
         executeSafely(io, () -> {
+            final long parseStartedAt = android.os.SystemClock.elapsedRealtime();
             final List<Torrent> parsed;
             try {
                 parsed = parseTorrents(Jsoup.parse(html, client.getMirror()));
+                logBrowsePerf("catalog-parse",
+                        android.os.SystemClock.elapsedRealtime() - parseStartedAt,
+                        "htmlChars=" + html.length() + " torrents=" + parsed.size());
             } catch (Exception e) {
                 runOnUiThread(() -> {
                     if (!java.util.Objects.equals(currentPath, requestedPath)) return;
@@ -3833,7 +3863,14 @@ public class MainActivity extends Activity {
                 torrents.clear();
                 torrents.addAll(parsed);
                 setCatalogStatus("Раздач", parsed.size());
+                long renderStartedAt = android.os.SystemClock.elapsedRealtime();
                 renderTorrents(parsed);
+                long renderDuration = android.os.SystemClock.elapsedRealtime() - renderStartedAt;
+                long totalDuration = browsePerfStartedAtMs > 0
+                        ? android.os.SystemClock.elapsedRealtime() - browsePerfStartedAtMs : -1;
+                logBrowsePerf("catalog-render", renderDuration,
+                        "totalSinceTap=" + totalDuration + "ms torrents=" + parsed.size());
+                browsePerfStartedAtMs = 0L;
                 if (parsed.isEmpty()) addEmpty("Страница загружена, но раздачи не найдены. Возможно, фильтр не применился.");
             });
         });
