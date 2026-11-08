@@ -5538,7 +5538,7 @@ public class MainActivity extends Activity {
                             if ("home".equals(group)) {
                                 homeSectionsMemory = new ArrayList<>(snapshot);
                                 java.io.File tvModel = new java.io.File(getFilesDir(), "kinozal_tv_channels_v1.json");
-                                TvHomeChannels.sync(this, tvModel);
+                                TvHomeChannels.sync(MainActivity.this, tvModel);
                             } else collectionsSectionsMemory = new ArrayList<>(snapshot);
                             if (!isFinishing()) {
                                 LinearLayout targetList = "home".equals(group) ? homeList : collectionsList;
