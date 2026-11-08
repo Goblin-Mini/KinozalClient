@@ -1146,7 +1146,7 @@ public class MainActivity extends Activity {
                     status.setText("Показано лент: " + sections.size());
                     setHomeProgress(index + 1, paths.length, sections.size());
                     browserHandler.postDelayed(() -> loadHomeSectionsInBrowser(
-                            paths, titles, index + 1, sections, 0), 100);
+                            paths, titles, index + 1, sections, 0), 5L * 60L * 1000L);
                 });
             });
         });
@@ -1752,13 +1752,19 @@ public class MainActivity extends Activity {
         }
     }
 
-    private void renderHome(List<HomeSection> sections) {
-        list.removeAllViews();
+    private void ensureRefreshAllButton() {
+        if (list.getChildCount() > 0 && "refresh-all-feeds".equals(list.getChildAt(0).getTag())) return;
         Button refreshAll = button("Обновить всё");
+        refreshAll.setTag("refresh-all-feeds");
         refreshAll.setOnClickListener(v -> refreshAllFeeds());
         LinearLayout.LayoutParams refreshParams = new LinearLayout.LayoutParams(-2, dp(42));
         refreshParams.topMargin = dp(4); refreshParams.bottomMargin = dp(6);
-        list.addView(refreshAll, refreshParams);
+        list.addView(refreshAll, 0, refreshParams);
+    }
+
+    private void renderHome(List<HomeSection> sections) {
+        list.removeAllViews();
+        ensureRefreshAllButton();
         if (sections.isEmpty()) {
             addEmpty("На главной пока нет подборок.");
             return;
@@ -1776,6 +1782,7 @@ public class MainActivity extends Activity {
     private boolean homeRowsEnqueued = false;
 
     private void renderHomeSectionsIncrementally(List<HomeSection> sections) {
+        ensureRefreshAllButton();
         final int generation = ++homeRenderGeneration;
         homeCardBuildQueue.clear();
         homeCardBuildScheduled = false;
