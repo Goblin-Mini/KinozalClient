@@ -1751,6 +1751,7 @@ public class MainActivity extends Activity {
         refreshFeed.setTextSize(22);
         refreshFeed.setGravity(Gravity.CENTER);
         refreshFeed.setPadding(0, 0, 0, 0);
+        refreshFeed.setTranslationY(-dp(5));
         refreshFeed.setContentDescription("Обновить ленту " + section.title);
         refreshFeed.setOnClickListener(v -> {
             int feedIndex = getFeedIndex(feedGroup, section.path);
