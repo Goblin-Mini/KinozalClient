@@ -5619,12 +5619,12 @@ public class MainActivity extends Activity {
                 v.setBackground(shape(focused ? Color.rgb(65, 72, 73) : PANEL, focused ? GOLD : 0)));
         jackettTab.setOnFocusChangeListener((v, focused) ->
                 v.setBackground(shape(focused ? Color.rgb(65, 72, 73) : PANEL, focused ? GOLD : 0)));
-        descriptionTab.setOnClickListener(v -> { active[0] = 0; render.run(); });
-        technicalTab.setOnClickListener(v -> { active[0] = 1; render.run(); });
-        screenshotsTab.setOnClickListener(v -> { active[0] = 2; render.run(); });
-        commentsTab.setOnClickListener(v -> { active[0] = 3; render.run(); });
+        descriptionTab.setOnClickListener(v -> { active[0] = 0; render[0].run(); });
+        technicalTab.setOnClickListener(v -> { active[0] = 1; render[0].run(); });
+        screenshotsTab.setOnClickListener(v -> { active[0] = 2; render[0].run(); });
+        commentsTab.setOnClickListener(v -> { active[0] = 3; render[0].run(); });
         jackettTab.setOnClickListener(v -> searchJackett(torrent.title, data.poster));
-        render.run();
+        render[0].run();
 
         watch.setOnClickListener(v -> playTorrent(data));
         downloadTorrent.setOnClickListener(v -> downloadTorrentFile(data));
