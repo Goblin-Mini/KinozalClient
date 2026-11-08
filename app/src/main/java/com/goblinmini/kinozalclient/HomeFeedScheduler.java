@@ -54,7 +54,7 @@ public final class HomeFeedScheduler {
         String[] titles = "home".equals(group) ? HOME_TITLES : COLLECTION_TITLES;
         String mirror = context.getSharedPreferences("kinozal_settings", Context.MODE_PRIVATE)
                 .getString("mirror", KinozalHttpClient.DEFAULT_MIRROR);
-        String marker = "v1|" + mirror;
+        String marker = "v2|" + mirror;
         String key = "scheduled_" + group;
         android.content.SharedPreferences prefs = context.getSharedPreferences("kinozal_feed_schedule", Context.MODE_PRIVATE);
         if (marker.equals(prefs.getString(key, ""))) return;
