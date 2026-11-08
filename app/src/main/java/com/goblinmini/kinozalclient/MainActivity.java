@@ -3807,13 +3807,36 @@ public class MainActivity extends Activity {
     }
 
     private void showLoadedPage(String html) {
-        lastHtml = html;
-        List<Torrent> parsed = parseTorrents(Jsoup.parse(html, client.getMirror()));
-        progress.setVisibility(View.GONE);
-        torrents.clear(); torrents.addAll(parsed);
-        setCatalogStatus("Раздач", parsed.size());
-        renderTorrents(parsed);
-        if (parsed.isEmpty()) addEmpty("Страница загружена, но раздачи не найдены. Возможно, фильтр не применился.");
+        if (html == null || html.isEmpty()) return;
+        final String requestedPath = currentPath;
+        // Jsoup parsing of large category pages can take long enough to block
+        // DPAD input and delay the first visible list frame. Keep it off main.
+        executeSafely(io, () -> {
+            final List<Torrent> parsed;
+            try {
+                parsed = parseTorrents(Jsoup.parse(html, client.getMirror()));
+            } catch (Exception e) {
+                runOnUiThread(() -> {
+                    if (!java.util.Objects.equals(currentPath, requestedPath)) return;
+                    progress.setVisibility(View.GONE);
+                    status.setText("Ошибка обработки каталога");
+                    addEmpty("Не удалось обработать список раздач: " + safe(e.getMessage()));
+                });
+                return;
+            }
+            runOnUiThread(() -> {
+                // Ignore late parsing results after the user has switched category.
+                if (!java.util.Objects.equals(currentPath, requestedPath)
+                        || !"browse".equals(activeFeedScreen)) return;
+                lastHtml = html;
+                progress.setVisibility(View.GONE);
+                torrents.clear();
+                torrents.addAll(parsed);
+                setCatalogStatus("Раздач", parsed.size());
+                renderTorrents(parsed);
+                if (parsed.isEmpty()) addEmpty("Страница загружена, но раздачи не найдены. Возможно, фильтр не применился.");
+            });
+        });
     }
     private List<Torrent> parseTorrents(Document doc) {
         List<Torrent> out = new ArrayList<>();
