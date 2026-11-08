@@ -120,6 +120,7 @@ public class MainActivity extends Activity {
     private Runnable pendingBrowserNavigation;
     private List<HomeSection> homeSectionsMemory = new ArrayList<>();
     private String homeCacheDiagnostic = "Кэш главной ещё не проверялся";
+    private int homeRenderGeneration = 0;
 
     private volatile String lastBrowserError = "Причина пока не определена";
     // Infohash is prefetched while the native details dialog is being viewed.
@@ -760,7 +761,8 @@ public class MainActivity extends Activity {
             }
             // Re-render the final de-duplicated model. This replaces each row
             // in place, so cards discarded by final normalization disappear too.
-            for (HomeSection section : sections) renderHomeSection(section);
+            // Reconcile duplicate cards without rebuilding every row in one frame.
+            renderHomeSectionsIncrementally(sections);
             int total = countHomeCards(sections);
             if (!sections.isEmpty() && paths == HOME_PATHS) homeSectionsMemory = new ArrayList<>(sections);
             progress.setVisibility(View.GONE);
@@ -1420,9 +1422,33 @@ public class MainActivity extends Activity {
 
     private void renderHome(List<HomeSection> sections) {
         list.removeAllViews();
-        for (HomeSection section : sections) renderHomeSection(section);
-        if (sections.isEmpty()) addEmpty("На главной пока нет подборок.");
-        scheduleVisibleHomePosterLoad();
+        if (sections.isEmpty()) {
+            addEmpty("На главной пока нет подборок.");
+            return;
+        }
+        renderHomeSectionsIncrementally(sections);
+    }
+
+    /**
+     * Build poster rows across separate UI frames instead of creating every
+     * card in one long main-thread pass. This is especially important on
+     * low-memory Android TV boxes.
+     */
+    private void renderHomeSectionsIncrementally(List<HomeSection> sections) {
+        final int generation = ++homeRenderGeneration;
+        final List<HomeSection> snapshot = new ArrayList<>(sections);
+        final int[] index = {0};
+        Runnable[] next = new Runnable[1];
+        next[0] = () -> {
+            if (generation != homeRenderGeneration || isFinishing()) return;
+            if (index[0] >= snapshot.size()) {
+                scheduleVisibleHomePosterLoad();
+                return;
+            }
+            renderHomeSection(snapshot.get(index[0]++));
+            browserHandler.postDelayed(next[0], 24);
+        };
+        browserHandler.post(next[0]);
     }
 
     /** Append one completed home feed without rebuilding rows already on screen. */
@@ -2934,16 +2960,32 @@ public class MainActivity extends Activity {
                             cb.onPage(null, lastBrowserError);
                             return;
                         }
-                        Document loaded = Jsoup.parse(html);
-                        boolean loginForm = !loaded.select("form:has(input[type=password])").isEmpty();
                         String pageUrl = view.getUrl() == null ? "" : view.getUrl().toLowerCase(java.util.Locale.ROOT);
-                        if (loginForm || pageUrl.contains("login.php") || pageUrl.contains("takelogin.php")) {
-                            lastBrowserError = "Сайт перенаправил на авторизацию. URL: " + view.getUrl();
-                            cb.onPage(null, lastBrowserError);
-                            return;
-                        }
-                        lastBrowserError = "Первичная страница загружена: " + url + ", HTML=" + html.length() + " символов";
-                        cb.onPage(html, null);
+                        final String loadedHtml = html;
+                        final String loadedUrl = pageUrl;
+                        // DOM parsing on the WebView/UI thread caused visible
+                        // stalls for large Kinozal pages. Validate the login
+                        // redirect on the background I/O executor instead.
+                        io.execute(() -> {
+                            boolean loginForm = false;
+                            try {
+                                Document loaded = Jsoup.parse(loadedHtml);
+                                loginForm = !loaded.select("form:has(input[type=password])").isEmpty();
+                            } catch (Exception ignored) { }
+                            final boolean redirectedToLogin = loginForm
+                                    || loadedUrl.contains("login.php")
+                                    || loadedUrl.contains("takelogin.php");
+                            runOnUiThread(() -> {
+                                if (redirectedToLogin) {
+                                    lastBrowserError = "Сайт перенаправил на авторизацию. URL: " + view.getUrl();
+                                    cb.onPage(null, lastBrowserError);
+                                    return;
+                                }
+                                lastBrowserError = "Первичная страница загружена: " + url
+                                        + ", HTML=" + loadedHtml.length() + " символов";
+                                cb.onPage(loadedHtml, null);
+                            });
+                        });
                     });
                 }
                 String currentCookies = manager.getCookie(client.getMirror());
