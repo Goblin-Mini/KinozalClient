@@ -825,6 +825,10 @@ public class MainActivity extends Activity {
 
     private void activateCachedScreen(String key) {
         final String screenKey = (key == null || key.trim().isEmpty()) ? "home" : key;
+        android.util.Log.i("KZ_LISTTRACE", "SCREEN_SWITCH requested=" + screenKey
+                + " previous=" + activeScreenKey + " currentPath=" + currentPath
+                + " oldList=" + (list == null ? 0 : System.identityHashCode(list))
+                + " oldChildren=" + (list == null ? -1 : list.getChildCount()));
         if (screenKey.equals(activeScreenKey) && list != null) return;
         if (list != null && homeScrollView != null) {
             screenScrollCache.put(activeScreenKey, homeScrollView.getScrollY());
@@ -838,6 +842,8 @@ public class MainActivity extends Activity {
             screenScrollCache.put(screenKey, 0);
         }
         list = cached;
+        android.util.Log.i("KZ_LISTTRACE", "SCREEN_ATTACH key=" + screenKey
+                + " list=" + System.identityHashCode(list) + " children=" + list.getChildCount());
         if (list.getParent() instanceof ViewGroup) ((ViewGroup) list.getParent()).removeView(list);
         homeScrollView.removeAllViews();
         homeScrollView.addView(list, new ScrollView.LayoutParams(-1, -2));
@@ -3320,6 +3326,9 @@ public class MainActivity extends Activity {
     private void showMessage(String message) { Toast.makeText(this, message, Toast.LENGTH_LONG).show(); }
 
     private void showPageLoading(String message) {
+        android.util.Log.i("KZ_LISTTRACE", "SHOW_LOADING message=" + message + " path=" + currentPath
+                + " title=" + currentTitle + " list=" + (list == null ? 0 : System.identityHashCode(list))
+                + " childrenBefore=" + (list == null ? -1 : list.getChildCount()));
         // A thin activity indicator sits directly below the search field.
         progress.setVisibility(View.VISIBLE);
         list.removeAllViews();
@@ -3754,6 +3763,29 @@ public class MainActivity extends Activity {
 
     private void renderTorrents(List<Torrent> items) {
         if (list == null) return;
+        StringBuilder sample = new StringBuilder();
+        if (items != null) {
+            int limit = Math.min(5, items.size());
+            for (int i = 0; i < limit; i++) {
+                Torrent item = items.get(i);
+                if (i > 0) sample.append(" || ");
+                sample.append(item == null ? "<null>" : item.title);
+                if (item != null) sample.append(" [").append(item.href).append("]");
+            }
+        }
+        String renderCaller = "unknown";
+        for (StackTraceElement frame : Thread.currentThread().getStackTrace()) {
+            if (frame.getClassName().equals(getClass().getName())
+                    && !frame.getMethodName().equals("renderTorrents")) {
+                renderCaller = frame.getMethodName() + ":" + frame.getLineNumber();
+                break;
+            }
+        }
+        android.util.Log.i("KZ_LISTTRACE", "RENDER_TORRENTS caller=" + renderCaller
+                + " path=" + currentPath + " title=" + currentTitle + " activeScreen=" + activeScreenKey
+                + " list=" + System.identityHashCode(list) + " count=" + (items == null ? -1 : items.size())
+                + " childrenBefore=" + list.getChildCount() + " renderGeneration=" + torrentRenderGeneration
+                + " sample=" + sample);
         List<Torrent> displayItems = new ArrayList<>(items);
         boolean isSearch = currentPath != null && currentPath.contains("s=");
         if (isSearch) {
@@ -3790,6 +3822,9 @@ public class MainActivity extends Activity {
                 return searchSortDescending ? -cmp : cmp;
             });
         } else {
+            android.util.Log.i("KZ_LISTTRACE", "LIST_CLEAR_RENDER path=" + currentPath
+                    + " title=" + currentTitle + " list=" + System.identityHashCode(list)
+                    + " previousChildren=" + list.getChildCount());
             list.removeAllViews();
             searchSortBar = null;
             sortDateButton = sortSizeButton = sortSeedsButton = null;
@@ -3816,6 +3851,9 @@ public class MainActivity extends Activity {
         list.addView(header);
 
         final int renderGeneration = ++torrentRenderGeneration;
+        android.util.Log.i("KZ_LISTTRACE", "RENDER_BEGIN path=" + currentPath + " title=" + currentTitle
+                + " generation=" + renderGeneration + " list=" + System.identityHashCode(list)
+                + " cards=" + displayItems.size());
         final java.util.ArrayDeque<Runnable> pendingCards = new java.util.ArrayDeque<>();
         for (Torrent t : displayItems) {
             pendingCards.addLast(() -> {
@@ -5817,6 +5855,9 @@ public class MainActivity extends Activity {
     }
 
     private void addEmpty(String message) {
+        android.util.Log.w("KZ_LISTTRACE", "ADD_EMPTY message=" + message + " path=" + currentPath
+                + " title=" + currentTitle + " list=" + (list == null ? 0 : System.identityHashCode(list))
+                + " childrenBefore=" + (list == null ? -1 : list.getChildCount()));
         list.removeAllViews(); TextView empty = text(message, 17, Color.LTGRAY, false);
         empty.setPadding(dp(22), dp(24), dp(22), dp(24)); list.addView(empty);
     }
