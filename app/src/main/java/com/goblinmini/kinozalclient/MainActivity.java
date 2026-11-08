@@ -5098,10 +5098,13 @@ public class MainActivity extends Activity {
                 saveRecentlyViewed(t);
                 // Do not wait for the secondary screenshot request before
                 // presenting the already parsed release details.
-                if (href.equals(activeTorrentDetailsHref)) {
+                if (href.equals(activeTorrentDetailsHref) && !hasCachedDetails) {
                     progress.setVisibility(View.GONE);
                     showTorrentDetails(t, details);
                 }
+                // If a cached card is already open, keep it and its DPAD focus
+                // intact; the fresh HTML is saved for the next visit instead
+                // of rebuilding the dialog underneath the user.
             } catch (Exception e) {
                 if (!hasCachedDetails && href.equals(activeTorrentDetailsHref)) {
                     progress.setVisibility(View.GONE);
