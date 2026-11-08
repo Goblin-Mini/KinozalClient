@@ -541,6 +541,13 @@ public class MainActivity extends Activity {
 
     private void loadCollections() {
         if (deferBrowserNavigationIfBusy(this::loadCollections)) return;
+        ScreenState collectionScreen = obtainScreen("collections", "Подборки", null);
+        activateScreen(collectionScreen);
+        if (collectionScreen.rendered && collectionScreen.loadedAt > 0L
+                && System.currentTimeMillis() - collectionScreen.loadedAt < SCREEN_TTL_MS) {
+            status.setText("Подборки · из памяти");
+            return;
+        }
         browserFeedLoading = true;
         currentPath = "collections";
         currentTitle = "Подборки";
@@ -827,10 +834,16 @@ public class MainActivity extends Activity {
                 List<HomeSection> channelSnapshot = new ArrayList<>(sections);
                 io.execute(() -> saveHomeModel(channelSnapshot));
             }
-            // Re-render the final de-duplicated model. This replaces each row
-            // in place, so cards discarded by final normalization disappear too.
-            // Reconcile duplicate cards without rebuilding every row in one frame.
-            renderHomeSectionsIncrementally(sections);
+            // Render into the screen that initiated this feed request. Home refreshes
+            // must never append their rows to a category currently shown by the user.
+            ScreenState feedScreen = screenCache.get(paths == HOME_PATHS ? "home" : "collections");
+            LinearLayout targetList = feedScreen == null ? list : feedScreen.list;
+            renderHomeSectionsIncrementally(sections, targetList);
+            if (feedScreen != null) {
+                feedScreen.rendered = true;
+                feedScreen.viewBuilt = true;
+                feedScreen.loadedAt = System.currentTimeMillis();
+            }
             int total = countHomeCards(sections);
             if (!sections.isEmpty() && paths == HOME_PATHS) homeSectionsMemory = new ArrayList<>(sections);
             progress.setVisibility(View.GONE);
@@ -1524,6 +1537,10 @@ public class MainActivity extends Activity {
     private boolean homeRowsEnqueued = false;
 
     private void renderHomeSectionsIncrementally(List<HomeSection> sections) {
+        renderHomeSectionsIncrementally(sections, homeScreenList);
+    }
+
+    private void renderHomeSectionsIncrementally(List<HomeSection> sections, LinearLayout targetList) {
         final int generation = ++homeRenderGeneration;
         homeCardBuildQueue.clear();
         homeCardBuildScheduled = false;
@@ -1540,7 +1557,7 @@ public class MainActivity extends Activity {
                 return;
             }
             HomeSection section = snapshot.get(index[0]++);
-            renderHomeSection(section, generation);
+            renderHomeSection(section, generation, targetList);
             browserHandler.postDelayed(next[0], 24);
         };
         browserHandler.post(next[0]);
@@ -1573,10 +1590,14 @@ public class MainActivity extends Activity {
 
     /** Append a feed shell immediately, then construct poster cards over separate UI frames. */
     private void renderHomeSection(HomeSection section) {
-        renderHomeSection(section, homeRenderGeneration);
+        renderHomeSection(section, homeRenderGeneration, homeScreenList);
     }
 
     private void renderHomeSection(HomeSection section, int generation) {
+        renderHomeSection(section, generation, homeScreenList);
+    }
+
+    private void renderHomeSection(HomeSection section, int generation, LinearLayout targetList) {
         if (section == null || section.items.isEmpty()) return;
 
         TextView sectionTitle = text(section.title, 20, GOLD, true);
@@ -1597,19 +1618,19 @@ public class MainActivity extends Activity {
         // Replace only this feed's existing views, preserving other rows and DPAD focus.
         String titleTag = "home-title:" + section.path;
         boolean replaced = false;
-        for (int i = 0; i + 1 < homeScreenList.getChildCount(); i++) {
-            if (titleTag.equals(homeScreenList.getChildAt(i).getTag())) {
-                homeScreenList.removeViewAt(i + 1);
-                homeScreenList.removeViewAt(i);
-                homeScreenList.addView(sectionTitle, i, titleParams);
-                homeScreenList.addView(horizontal, i + 1, rowParams);
+        for (int i = 0; i + 1 < targetList.getChildCount(); i++) {
+            if (titleTag.equals(targetList.getChildAt(i).getTag())) {
+                targetList.removeViewAt(i + 1);
+                targetList.removeViewAt(i);
+                targetList.addView(sectionTitle, i, titleParams);
+                targetList.addView(horizontal, i + 1, rowParams);
                 replaced = true;
                 break;
             }
         }
         if (!replaced) {
-            homeScreenList.addView(sectionTitle, titleParams);
-            homeScreenList.addView(horizontal, rowParams);
+            targetList.addView(sectionTitle, titleParams);
+            targetList.addView(horizontal, rowParams);
         }
         horizontal.post(this::scheduleVisibleHomePosterLoad);
 
