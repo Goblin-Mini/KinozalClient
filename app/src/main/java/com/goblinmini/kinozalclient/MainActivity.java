@@ -5074,10 +5074,12 @@ public class MainActivity extends Activity {
                             decoded = java.net.URLDecoder.decode(raw, "UTF-8");
                         } catch (Exception ignored) { }
                         String url = decoded;
-                        if (!url.matches("(?i)^https?://.*")) {
+                        // Match the reference client's rule: decoded src values
+                        // containing an absolute HTTP URL are used as-is.
+                        if (!url.toLowerCase(java.util.Locale.ROOT).contains("http")) {
                             url = image.absUrl("src");
                         }
-                        if (url != null && url.matches("(?i)^https?://.*")
+                        if (url != null && url.toLowerCase(java.util.Locale.ROOT).contains("http")
                                 && !details.screenshotThumbs.contains(url)) {
                             details.screenshotThumbs.add(url);
                         }
@@ -5086,7 +5088,11 @@ public class MainActivity extends Activity {
                     Log.w("KinozalScreenshots", "Cannot parse AJAX screenshot response", e);
                 }
             }
-            callback.accept(details);
+            if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) {
+                callback.accept(details);
+            } else {
+                runOnUiThread(() -> callback.accept(details));
+            }
         };
 
         if (sessionWebView != null) {
