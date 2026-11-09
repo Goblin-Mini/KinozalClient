@@ -37,6 +37,36 @@ jobs:
           test -d "$ANDROID_HOME/platforms/android-35"
           test -d "$ANDROID_HOME/build-tools/35.0.0"
 
+      - name: Normalize poster placeholder PNG for AAPT2
+        shell: python
+        run: |
+          import pathlib, struct, zlib
+          path = pathlib.Path("app/src/main/res/drawable-nodpi/kinozal_poster_placeholder.png")
+          data = path.read_bytes()
+          if data[:8] != b"\\x89PNG\\r\\n\\x1a\\n":
+              raise SystemExit("Invalid PNG signature")
+          pos = 8
+          kept = [data[:8]]
+          while pos + 12 <= len(data):
+              length = struct.unpack(">I", data[pos:pos+4])[0]
+              kind = data[pos+4:pos+8]
+              end = pos + 12 + length
+              if end > len(data):
+                  raise SystemExit("Truncated PNG chunk")
+              payload = data[pos+8:pos+8+length]
+              if zlib.crc32(kind + payload) & 0xffffffff != struct.unpack(">I", data[pos+8+length:end])[0]:
+                  raise SystemExit("PNG CRC mismatch in " + kind.decode("ascii", "replace"))
+              if kind in (b"IHDR", b"PLTE", b"IDAT", b"IEND", b"tRNS"):
+                  chunk = kind + payload
+                  kept.append(struct.pack(">I", length) + chunk + struct.pack(">I", zlib.crc32(chunk) & 0xffffffff))
+              pos = end
+              if kind == b"IEND":
+                  break
+          if pos != len(data):
+              raise SystemExit("Unexpected trailing PNG data")
+          path.write_bytes(b"".join(kept))
+          print("Stripped ancillary PNG metadata; retained image pixels and verified chunk CRCs")
+
       - name: Build debug APK for pull requests
         if: github.event_name == 'pull_request' || (github.ref_name == 'feature/magnet-playback' || github.ref_name == 'feature/performance' || github.ref_name == 'feature/screen-cache-background-refresh' || github.ref_name == 'feature/sidebar-login-status-stable-restore' || github.ref_name == 'fix/home-feed-js-extractor-diagnostics')
         run: gradle --no-daemon assembleDebug
@@ -73,6 +103,8 @@ jobs:
           mkdir -p dist
           cp app/build/outputs/apk/release/app-release.apk dist/KinozalClient-update-test-v2.apk
           test -s dist/KinozalClient-update-test-v2.apk
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --print-certs dist/KinozalClient-update-test-v2.apk
+          "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging dist/KinozalClient-update-test-v2.apk | head -n 1
 
       - name: Upload signed update-test APK
         if: github.ref_name == 'fix/home-feed-js-extractor-diagnostics' && github.event_name == 'push'
