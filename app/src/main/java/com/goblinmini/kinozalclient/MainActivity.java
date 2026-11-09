@@ -2954,7 +2954,7 @@ public class MainActivity extends Activity {
         categoriesButton.setOnClickListener(v -> {
             boolean expand = categoryGroup.getVisibility() != View.VISIBLE;
             categoryGroup.setVisibility(expand ? View.VISIBLE : View.GONE);
-            categoriesButton.setText(expand ? "Категории  ▾" : "Категории  ▸");
+            categoriesButton.setText(menuIconText(expand ? "▦   Категории  ▾" : "▦   Категории  ▸"));
             if (expand) categoryGroup.getChildAt(0).requestFocus();
         });
 
@@ -3309,7 +3309,7 @@ public class MainActivity extends Activity {
                     0, iconEnd, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
             menuLabel.setSpan(new android.text.style.StyleSpan(android.graphics.Typeface.BOLD),
                     0, iconEnd, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-            b.setText(menuLabel);
+            b.setText(menuIconText(displayLabel));
         }
         b.setGravity(Gravity.CENTER_VERTICAL | Gravity.LEFT);
         b.setTextSize(fontSize(12));
@@ -4511,6 +4511,7 @@ public class MainActivity extends Activity {
                     0, icon.length(), android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
             b.setText(menuText);
         }
+        b.setText(menuIconText(icon + "   " + label));
         b.setGravity(Gravity.CENTER_VERTICAL | Gravity.LEFT);
         b.setTextSize(fontSize(14));
         b.setPadding(dp(14), 0, dp(8), 0);
