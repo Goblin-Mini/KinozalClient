@@ -2362,6 +2362,16 @@ public class MainActivity extends Activity {
                             + ". Следующая лента будет обновляться по очереди");
                 } else {
                     label.setText("Лента обновлена: " + title);
+                    final String completedMessage = label.getText().toString();
+                    browserHandler.postDelayed(() -> {
+                        TextView currentLabel = feedRefreshStatusViews.get(group);
+                        LinearLayout currentPanel = feedRefreshPanels.get(group);
+                        if (!bulkFeedRefreshInProgress && currentLabel != null
+                                && currentPanel != null
+                                && completedMessage.contentEquals(currentLabel.getText())) {
+                            currentPanel.setVisibility(View.GONE);
+                        }
+                    }, 3500L);
                 }
             }
         } else if ("failure".equals(state)) {
