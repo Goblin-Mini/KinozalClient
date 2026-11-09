@@ -2947,6 +2947,10 @@ public class MainActivity extends Activity {
         addSubMenu(categoryGroup, "▧  Российские мульты", "browse.php?c=22");
         addSubMenu(categoryGroup, "▧  Зарубежные мульты", "browse.php?c=21");
         addSubMenu(categoryGroup, "✧  Аниме", "browse.php?c=20");
+        addSubMenu(categoryGroup, "Концерты", "browse.php?c=48");
+        addSubMenu(categoryGroup, "Видеоклипы", "browse.php?c=1");
+        addSubMenu(categoryGroup, "Аудиокниги", "browse.php?c=2");
+        addSubMenu(categoryGroup, "Игры", "browse.php?c=23");
         categoriesButton.setOnClickListener(v -> {
             boolean expand = categoryGroup.getVisibility() != View.VISIBLE;
             categoryGroup.setVisibility(expand ? View.VISIBLE : View.GONE);
@@ -3274,6 +3278,10 @@ public class MainActivity extends Activity {
         if (value.contains("эрот")) return "♡";
         if (value.contains("мульт")) return "▧";
         if (value.contains("аниме")) return "✧";
+        if (value.contains("концерт")) return "🎤";
+        if (value.contains("видеоклип")) return "🎬";
+        if (value.contains("аудиокниг")) return "🎧";
+        if (value.contains("игр")) return "🎮";
         return "◆";
     }
 
