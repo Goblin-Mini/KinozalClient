@@ -216,15 +216,44 @@ public class MainActivity extends Activity {
         }
     };
 
-    private void startHomePerformanceMonitor() { }
+    private void startHomePerformanceMonitor() {
+        if (homePerfMonitoring) return;
+        homePerfMonitoring = true;
+        homePerfStartedAtMs = android.os.SystemClock.elapsedRealtime();
+        homePerfLastFrameNanos = 0L;
+        homePerfSlowFrames = 0;
+        FeedDiagnostics.log(this, "home", "PERF_DEVICE",
+                "model=" + android.os.Build.MODEL
+                + ", manufacturer=" + android.os.Build.MANUFACTURER
+                + ", sdk=" + android.os.Build.VERSION.SDK_INT
+                + ", abi=" + android.os.Build.SUPPORTED_ABIS[0]
+                + ", screen=" + getResources().getDisplayMetrics().widthPixels + "x"
+                + getResources().getDisplayMetrics().heightPixels
+                + ", density=" + getResources().getDisplayMetrics().density
+                + ", totalRamMB=" + ((android.app.ActivityManager)getSystemService(ACTIVITY_SERVICE))
+                    .getMemoryClass()
+                + ", lowRamDevice=" + getSystemService(android.app.ActivityManager.class).isLowRamDevice());
+        Choreographer.getInstance().postFrameCallback(homePerfFrameCallback);
+    }
 
-    private void stopHomePerformanceMonitor() { }
+    private void stopHomePerformanceMonitor() {
+        if (!homePerfMonitoring) return;
+        homePerfMonitoring = false;
+        Choreographer.getInstance().removeFrameCallback(homePerfFrameCallback);
+        long duration = android.os.SystemClock.elapsedRealtime() - homePerfStartedAtMs;
+        FeedDiagnostics.log(this, "home", "PERF_SUMMARY",
+                "durationMs=" + duration + ", slowFramesOver32ms=" + homePerfSlowFrames
+                + ", renderedSections=" + homeRenderGeneration);
+    }
 
     // Per-category timing diagnostics. These measurements do not cache pages or alter request behavior.
     private long browsePerfStartedAtMs = 0L;
     private String browsePerfPath = "";
 
-    private void logBrowsePerf(String stage, long durationMs, String details) { }
+    private void logBrowsePerf(String stage, long durationMs, String details) {
+        FeedDiagnostics.log(this, "catalog", "PERF_" + stage,
+                "durationMs=" + durationMs + ", " + details);
+    }
 
     private volatile String lastBrowserError = "Причина пока не определена";
     // Infohash is prefetched while the native details dialog is being viewed.
