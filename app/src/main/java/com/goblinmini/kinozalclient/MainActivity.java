@@ -3505,18 +3505,43 @@ public class MainActivity extends Activity {
         page.addView(bottomRow, new LinearLayout.LayoutParams(-1, dp(56)));
 
         channelsButton.setOnClickListener(v -> {
-            boolean enabled = !getSharedPreferences(PREFS, MODE_PRIVATE)
-                    .getBoolean("tv_channels_enabled", true);
-            getSharedPreferences(PREFS, MODE_PRIVATE).edit()
-                    .putBoolean("tv_channels_enabled", enabled).apply();
-            channelsButton.setText("Каналы Android TV: " + (enabled ? "Вкл." : "Выкл."));
-            if (enabled) {
-                browserHandler.postDelayed(this::loadTvChannelFeedsInBrowser, 150);
-                showMessage("Каналы Android TV включены");
-            } else {
-                TvHomeChannels.removeAll(this);
-                showMessage("Каналы Android TV отключены");
-            }
+            String[] actions = {"Включить", "Отключить", "Обновить", "Очистить данные"};
+            new AlertDialog.Builder(this)
+                    .setTitle("Каналы Android TV")
+                    .setItems(actions, (dialog, which) -> {
+                        if (which == 0) {
+                            getSharedPreferences(PREFS, MODE_PRIVATE).edit()
+                                    .putBoolean("tv_channels_enabled", true).apply();
+                            channelsButton.setText("Каналы Android TV: Вкл.");
+                            browserHandler.postDelayed(this::loadTvChannelFeedsInBrowser, 150);
+                            showMessage("Каналы Android TV включены");
+                        } else if (which == 1) {
+                            getSharedPreferences(PREFS, MODE_PRIVATE).edit()
+                                    .putBoolean("tv_channels_enabled", false).apply();
+                            channelsButton.setText("Каналы Android TV: Выкл.");
+                            TvHomeChannels.removeAll(this);
+                            showMessage("Каналы Android TV отключены");
+                        } else if (which == 2) {
+                            boolean enabled = getSharedPreferences(PREFS, MODE_PRIVATE)
+                                    .getBoolean("tv_channels_enabled", true);
+                            if (!enabled) {
+                                showMessage("Сначала включите каналы Android TV");
+                                return;
+                            }
+                            browserHandler.postDelayed(this::loadTvChannelFeedsInBrowser, 150);
+                            TvHomeChannels.refreshNow(this);
+                            showMessage("Запущено обновление каналов Android TV");
+                        } else {
+                            new AlertDialog.Builder(this)
+                                    .setTitle("Очистить данные каналов?")
+                                    .setMessage("Будут удалены каналы и программы Кинозал ТВ с главного экрана Android TV. Настройки приложения и кэш раздач останутся.")
+                                    .setNegativeButton("Отмена", null)
+                                    .setPositiveButton("Очистить", (d, w) -> {
+                                        TvHomeChannels.clearChannelData(this);
+                                        showMessage("Данные каналов очищаются");
+                                    }).show();
+                        }
+                    }).show();
         });
         aboutButton.setOnClickListener(v -> showAbout());
 
@@ -3856,6 +3881,10 @@ public class MainActivity extends Activity {
         panel.addView(info);
 
         Button feedsButton = settingsPillButton("Диагностика лент");
+        Button channelsDiagButton = settingsPillButton("Диагностика каналов Android TV");
+        LinearLayout.LayoutParams channelsDiagParams = new LinearLayout.LayoutParams(-1, dp(46));
+        channelsDiagParams.topMargin = dp(8);
+        panel.addView(channelsDiagButton, channelsDiagParams);
         LinearLayout.LayoutParams feedsParams = new LinearLayout.LayoutParams(-1, dp(46));
         feedsParams.topMargin = dp(10);
         panel.addView(feedsButton, feedsParams);
@@ -3867,6 +3896,10 @@ public class MainActivity extends Activity {
                 .setNeutralButton("Отправить отчёт", null)
                 .create();
         dialog.setOnShowListener(d -> {
+            channelsDiagButton.setOnClickListener(v -> {
+                dialog.dismiss();
+                showTvChannelDiagnostics();
+            });
             feedsButton.setOnClickListener(v -> {
                 dialog.dismiss();
                 showFeedDiagnostics();
@@ -3946,6 +3979,44 @@ public class MainActivity extends Activity {
             showMessage("Не удалось сохранить диагностику: " + safe(e.getMessage()));
         } finally {
             pendingFeedDiagnosticsExport = null;
+        }
+    }
+
+    private void showTvChannelDiagnostics() {
+        String report = TvHomeChannels.readDiagnostics(this);
+        ScrollView scroll = new ScrollView(this);
+        TextView content = text(report.isEmpty()
+                ? "Диагностика каналов пока пуста. Нажмите «Обновить» в меню «Каналы Android TV»."
+                : report, 12, Color.WHITE, false);
+        content.setTextIsSelectable(true);
+        content.setTypeface(android.graphics.Typeface.MONOSPACE);
+        content.setPadding(dp(12), dp(10), dp(12), dp(10));
+        scroll.addView(content);
+        AlertDialog dialog = new AlertDialog.Builder(this)
+                .setTitle("Диагностика каналов Android TV")
+                .setView(scroll)
+                .setPositiveButton("Закрыть", null)
+                .setNeutralButton("Отправить", null)
+                .create();
+        dialog.setOnShowListener(d -> {
+            Button send = dialog.getButton(AlertDialog.BUTTON_NEUTRAL);
+            send.setTextColor(GOLD);
+            send.setEnabled(!report.isEmpty());
+            send.setOnClickListener(v -> {
+                Intent share = new Intent(Intent.ACTION_SEND);
+                share.setType("text/plain");
+                share.putExtra(Intent.EXTRA_SUBJECT, "Кинозал ТВ — диагностика каналов Android TV");
+                share.putExtra(Intent.EXTRA_TEXT, report);
+                startActivity(Intent.createChooser(share, "Отправить диагностику каналов"));
+            });
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setTextColor(GOLD);
+        });
+        dialog.show();
+        if (dialog.getWindow() != null) {
+            dialog.getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(BG));
+            dialog.getWindow().setLayout(Math.min(dp(760),
+                    getResources().getDisplayMetrics().widthPixels - dp(48)),
+                    Math.min(dp(620), getResources().getDisplayMetrics().heightPixels - dp(100)));
         }
     }
 
