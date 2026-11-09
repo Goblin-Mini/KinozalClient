@@ -3487,6 +3487,7 @@ public class MainActivity extends Activity {
                         }).show());
         addSettingsAction(right, "Обновления", () -> new UpdateManager(this).check());
         addSettingsAction(right, "Диагностика", () -> showCrashDiagnostics());
+        addSettingsAction(right, "Проверка лент", () -> showManualFeedDiagnostic());
 
         LinearLayout bottomRow = new LinearLayout(this);
         bottomRow.setOrientation(LinearLayout.HORIZONTAL);
@@ -3889,6 +3890,36 @@ public class MainActivity extends Activity {
                     getResources().getDisplayMetrics().widthPixels - dp(48)),
                     ViewGroup.LayoutParams.WRAP_CONTENT);
         }
+    }
+
+    private void showManualFeedDiagnostic() {
+        String[] choices = {
+                "Главная — Топ раздач месяца",
+                "Подборки — Netflix",
+                "Главная — Новинки кино"
+        };
+        new AlertDialog.Builder(this)
+                .setTitle("Проверить ленту сейчас")
+                .setItems(choices, (dialog, which) -> {
+                    String group;
+                    int index;
+                    String title;
+                    if (which == 0) {
+                        group = "home"; index = 1; title = "Топ раздач месяца";
+                    } else if (which == 1) {
+                        group = "collections"; index = 0; title = "Netflix";
+                    } else {
+                        group = "home"; index = 0; title = "Новинки кино";
+                    }
+                    FeedDiagnostics.log(this, group, "MANUAL_DIAGNOSTIC_REQUEST",
+                            "user requested immediate refresh: " + title);
+                    HomeFeedScheduler.refreshNow(getApplicationContext(), group, index);
+                    showMessage("Запустил проверку «" + title
+                            + "». Обычно результат появляется через 1–2 минуты. "
+                            + "Откройте Настройки → Диагностика лент → Сохранить в файл.");
+                })
+                .setNegativeButton("Отмена", null)
+                .show();
     }
 
     private void exportFeedDiagnostics() {
