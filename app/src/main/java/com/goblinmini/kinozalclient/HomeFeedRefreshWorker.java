@@ -165,34 +165,43 @@ public final class HomeFeedRefreshWorker extends Worker {
             throw new java.io.IOException("Kinozal вернул проверку Cloudflare");
         }
         Elements anchors = doc.select("table.t_peer td.nam > a[href*=details.php?id=]");
-        if (anchors.isEmpty()) anchors = doc.select("a[href*=details.php?id=]");
         JSONArray result = new JSONArray();
         Set<String> seen = new HashSet<>();
         Set<String> seenIds = new HashSet<>();
         Set<String> seenTitles = new HashSet<>();
+        Set<String> seenImages = new HashSet<>();
         java.util.regex.Pattern idPattern = java.util.regex.Pattern.compile("[?&]id=(\\d+)",
                 java.util.regex.Pattern.CASE_INSENSITIVE);
         for (Element a : anchors) {
             String href = a.absUrl("href");
             if (href == null || !href.startsWith("http")) href = mirror + "/" + a.attr("href").replaceFirst("^/+", "");
-            if (!href.contains("details.php?id=") || !seen.add(href)) continue;
+            if (!href.contains("/details.php?id=") || href.toLowerCase(java.util.Locale.ROOT).contains("userdetails") || !seen.add(href)) continue;
+            Element row = a.closest("tr");
+            if (row == null || row.select("td").size() < 6 || a.parent() == null || !a.parent().hasClass("nam")) continue;
             java.util.regex.Matcher idMatcher = idPattern.matcher(href);
             String torrentId = idMatcher.find() ? idMatcher.group(1) : "";
             if (!torrentId.isEmpty() && seenIds.contains(torrentId)) continue;
             Element img = a.selectFirst("img");
-            if (img == null) {
-                Element row = a.closest("tr");
-                if (row != null) img = row.selectFirst("img");
-            }
+            if (img == null) img = row.selectFirst("img");
             if (img == null && a.parent() != null) img = a.parent().selectFirst("img");
             String title = a.attr("title").trim();
             if (title.isEmpty() && img != null) title = img.attr("alt").trim();
             if (title.isEmpty()) title = a.text().replaceAll("\\s+", " ").trim();
             if (title.isEmpty()) continue;
             String titleKey = normalizeFeedTitle(title);
+            String imageKey = "";
+            if (img != null) {
+                String rawImage = img.hasAttr("data-src") ? img.attr("data-src")
+                        : img.hasAttr("data-original") ? img.attr("data-original") : img.attr("src");
+                try { imageKey = java.net.URI.create(rawImage).getPath(); }
+                catch (Exception ignored) { imageKey = rawImage; }
+                if (imageKey != null) imageKey = imageKey.toLowerCase(java.util.Locale.ROOT);
+            }
             if (!titleKey.isEmpty() && seenTitles.contains(titleKey)) continue;
+            if (!imageKey.isEmpty() && seenImages.contains(imageKey)) continue;
             if (!torrentId.isEmpty()) seenIds.add(torrentId);
             if (!titleKey.isEmpty()) seenTitles.add(titleKey);
+            if (!imageKey.isEmpty()) seenImages.add(imageKey);
             String image = "";
             if (img != null) {
                 String raw = img.hasAttr("data-src") ? img.attr("data-src")
@@ -203,8 +212,7 @@ public final class HomeFeedRefreshWorker extends Worker {
                 else if (!raw.isEmpty() && !raw.startsWith("http")) raw = mirror + "/" + raw;
                 if (raw.startsWith("http://") || raw.startsWith("https://")) image = raw;
             }
-            Element row = a.closest("tr");
-            Elements cells = row == null ? new Elements() : row.select("td");
+            Elements cells = row.select("td");
             JSONObject item = new JSONObject();
             item.put("title", title);
             item.put("href", href);
