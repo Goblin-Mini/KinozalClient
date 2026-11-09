@@ -212,34 +212,15 @@ public class MainActivity extends Activity {
         }
     };
 
-    private void startHomePerformanceMonitor() {
-        if (homePerfMonitoring) return;
-        homePerfMonitoring = true;
-        homePerfLastFrameNanos = 0L;
-        homePerfStartedAtMs = android.os.SystemClock.elapsedRealtime();
-        homePerfSlowFrames = 0;
-        Log.i("KinozalPerf", "home loading diagnostics started");
-        Choreographer.getInstance().postFrameCallback(homePerfFrameCallback);
-    }
+    private void startHomePerformanceMonitor() { }
 
-    private void stopHomePerformanceMonitor() {
-        if (!homePerfMonitoring) return;
-        homePerfMonitoring = false;
-        Choreographer.getInstance().removeFrameCallback(homePerfFrameCallback);
-        long elapsed = android.os.SystemClock.elapsedRealtime() - homePerfStartedAtMs;
-        Log.i("KinozalPerf", "home loading diagnostics finished: duration="
-                + elapsed + "ms, slowFrames(>=32ms)=" + homePerfSlowFrames);
-    }
+    private void stopHomePerformanceMonitor() { }
 
     // Per-category timing diagnostics. These measurements do not cache pages or alter request behavior.
     private long browsePerfStartedAtMs = 0L;
     private String browsePerfPath = "";
 
-    private void logBrowsePerf(String stage, long durationMs, String details) {
-        Log.i("KinozalPerf", "browse path=" + browsePerfPath + " stage=" + stage
-                + " duration=" + durationMs + "ms"
-                + (details == null || details.isEmpty() ? "" : " " + details));
-    }
+    private void logBrowsePerf(String stage, long durationMs, String details) { }
 
     private volatile String lastBrowserError = "Причина пока не определена";
     // Infohash is prefetched while the native details dialog is being viewed.
