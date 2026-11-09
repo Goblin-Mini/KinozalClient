@@ -3384,16 +3384,22 @@ public class MainActivity extends Activity {
                     showMessage("Очищаем кэш…");
                     executeSafely(io, () -> {
                         if (diskCache != null) diskCache.clear();
-                        homeModelFile().delete();
+                        boolean homeModelDeleted = homeModelFile().delete();
+                        boolean collectionsModelDeleted = collectionsModelFile().delete();
+                        FeedDiagnostics.log(getApplicationContext(), "all", "CACHE_CLEAR",
+                                "diskCache=cleared, homeModelDeleted=" + homeModelDeleted
+                                        + ", collectionsModelDeleted=" + collectionsModelDeleted);
                         runOnUiThread(() -> {
                             pageCache.clear();
                             if (decodedImageCache != null) decodedImageCache.evictAll();
                             homeSectionsMemory.clear();
+                            collectionsSectionsMemory.clear();
                             homeCacheDisplayed = false;
                             homeCacheLoadFinished = true;
                             initialHomeFetchPending = false;
+                            collectionsLoadedOnce = false;
                             if (sessionWebView != null) sessionWebView.clearCache(true);
-                            showMessage("Кэш очищен. Следующая загрузка каталога будет выполнена без старых данных.");
+                            showMessage("Кэш главной и подборок очищен. Следующее открытие загрузит их заново.");
                         });
                     });
                 })
