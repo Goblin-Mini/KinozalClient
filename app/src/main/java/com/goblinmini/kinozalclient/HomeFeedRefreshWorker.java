@@ -168,10 +168,17 @@ public final class HomeFeedRefreshWorker extends Worker {
         if (anchors.isEmpty()) anchors = doc.select("a[href*=details.php?id=]");
         JSONArray result = new JSONArray();
         Set<String> seen = new HashSet<>();
+        Set<String> seenIds = new HashSet<>();
+        Set<String> seenTitles = new HashSet<>();
+        java.util.regex.Pattern idPattern = java.util.regex.Pattern.compile("[?&]id=(\\d+)",
+                java.util.regex.Pattern.CASE_INSENSITIVE);
         for (Element a : anchors) {
             String href = a.absUrl("href");
             if (href == null || !href.startsWith("http")) href = mirror + "/" + a.attr("href").replaceFirst("^/+", "");
             if (!href.contains("details.php?id=") || !seen.add(href)) continue;
+            java.util.regex.Matcher idMatcher = idPattern.matcher(href);
+            String torrentId = idMatcher.find() ? idMatcher.group(1) : "";
+            if (!torrentId.isEmpty() && seenIds.contains(torrentId)) continue;
             Element img = a.selectFirst("img");
             if (img == null) {
                 Element row = a.closest("tr");
@@ -182,6 +189,10 @@ public final class HomeFeedRefreshWorker extends Worker {
             if (title.isEmpty() && img != null) title = img.attr("alt").trim();
             if (title.isEmpty()) title = a.text().replaceAll("\\s+", " ").trim();
             if (title.isEmpty()) continue;
+            String titleKey = normalizeFeedTitle(title);
+            if (!titleKey.isEmpty() && seenTitles.contains(titleKey)) continue;
+            if (!torrentId.isEmpty()) seenIds.add(torrentId);
+            if (!titleKey.isEmpty()) seenTitles.add(titleKey);
             String image = "";
             if (img != null) {
                 String raw = img.hasAttr("data-src") ? img.attr("data-src")
@@ -206,6 +217,16 @@ public final class HomeFeedRefreshWorker extends Worker {
             if (result.length() >= 15) break;
         }
         return result;
+    }
+
+    private static String normalizeFeedTitle(String title) {
+        if (title == null) return "";
+        String value = title.toLowerCase(java.util.Locale.ROOT).trim();
+        int slash = value.indexOf(" / ");
+        if (slash > 0) value = value.substring(0, slash);
+        value = value.replaceAll("\\b(2160p|1080p|720p|480p|4k|uhd|hdr10?|web[- .]?dl|webrip|blu[- .]?ray|bdrip|brrip|dvdrip|hdtv|h265|h264|x265|x264|hevc|avc|aac|dts|ac3|proper|repack|remux|extended|directors cut|theatrical|dubbed|subbed)\\b", " ");
+        return value.replaceAll("[^\\p{L}\\p{N}]+", " ")
+                .replaceAll("\\s+", " ").trim();
     }
 
     private static void mergeModel(File target, int version, String mirror, String title,
