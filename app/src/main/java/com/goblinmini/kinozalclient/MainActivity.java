@@ -6514,14 +6514,14 @@ public class MainActivity extends Activity {
                 boolean fullWidth = active[0] == 0
                         && ("В ролях".equals(key) || "О фильме".equals(key));
                 if (fullWidth) {
-                    addDetailField(detailContent, key, value, -1);
+                    addDetailField(detailContent, key, value, -1, true);
                     index++;
                     continue;
                 }
                 LinearLayout pair = new LinearLayout(this);
                 pair.setOrientation(LinearLayout.HORIZONTAL);
                 pair.setGravity(Gravity.TOP);
-                addDetailField(pair, key, value, 0);
+                addDetailField(pair, key, value, 0, active[0] == 0);
                 index++;
                 if (index < keys.length) {
                     String nextKey = keys[index];
@@ -6529,7 +6529,7 @@ public class MainActivity extends Activity {
                     boolean nextFullWidth = active[0] == 0
                             && ("В ролях".equals(nextKey) || "О фильме".equals(nextKey));
                     if (!nextFullWidth && nextValue != null && !nextValue.trim().isEmpty()) {
-                        addDetailField(pair, nextKey, nextValue, 1);
+                        addDetailField(pair, nextKey, nextValue, 1, active[0] == 0);
                         index++;
                     }
                 }
@@ -6618,12 +6618,12 @@ public class MainActivity extends Activity {
         prefetchInfoHash(data);
     }
 
-    private void addDetailField(LinearLayout parent, String key, String value, int column) {
+    private void addDetailField(LinearLayout parent, String key, String value, int column, boolean description) {
         LinearLayout block = new LinearLayout(this);
         block.setOrientation(LinearLayout.VERTICAL);
         block.setPadding(dp(8), dp(7), dp(10), dp(9));
-        TextView label = text(key, 12, TEAL, true);
-        TextView valueView = text(value, 14, Color.WHITE, false);
+        TextView label = text(key, description ? 16 : 12, TEAL, true);
+        TextView valueView = text(value, description ? 16 : 14, Color.WHITE, false);
         valueView.setLineSpacing(dp(1), 1f);
         block.addView(label);
         block.addView(valueView);
