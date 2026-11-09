@@ -1277,7 +1277,7 @@ public class MainActivity extends Activity {
                 + "for(var i=0;i<links.length;i++){var a=links[i],raw=a.getAttribute('href')||'';"
                 + "if(raw.indexOf('details.php?id=')<0||/userdetails/i.test(raw))continue;"
                 + "var href='';try{href=new URL(raw,base).href;}catch(e){continue;}if(seen[href])continue;"
-                + "var row=a.closest('tr');if(!row||!a.parentElement||!a.parentElement.classList.contains('nam')||row.querySelectorAll('td').length<6)continue;seen[href]=1;"
+                + "var row=a.closest('tr');if(!row||row.querySelectorAll('td').length<6)continue;seen[href]=1;"
                 + "var img=a.querySelector('img');if(!img&&row)img=row.querySelector('img');"
                 + "if(!img&&a.parentElement)img=a.parentElement.querySelector('img');"
                 + "var p=a;for(var d=0;d<4&&!img&&p;d++){p=p.parentElement;if(p)img=p.querySelector('img');}"
@@ -1399,7 +1399,7 @@ public class MainActivity extends Activity {
                     + "for(var j=0;j<z.length;j++){var v=x.getAttribute(z[j])||'';if(v&&v.indexOf('data:image/')!==0)return v;}"
                     + "return '';}for(var i=0;i<links.length;i++){var a=links[i],h=a.getAttribute('href')||'';"
                     + "if(h.indexOf('details.php?id=')<0||/userdetails/i.test(h))continue;var u=a.href||h;if(seen[u])continue;"
-                    + "var r=a.closest('tr');if(!r||!a.parentElement||!a.parentElement.classList.contains('nam')||r.querySelectorAll('td').length<6)continue;seen[u]=1;var x=a.querySelector('img');if(!x&&r)x=r.querySelector('img');"
+                    + "var r=a.closest('tr');if(!r||r.querySelectorAll('td').length<6)continue;seen[u]=1;var x=a.querySelector('img');if(!x&&r)x=r.querySelector('img');"
                     + "if(!x&&a.parentElement)x=a.parentElement.querySelector('img');var p=a;"
                     + "for(var d=0;d<4&&!x&&p;d++){p=p.parentElement;if(p)x=p.querySelector('img');}"
                     + "var n=(a.getAttribute('title')||'').trim()||(x?(x.getAttribute('alt')||'').trim():'')||t(a);if(!n)continue;"
@@ -1527,15 +1527,14 @@ public class MainActivity extends Activity {
     private List<HomePoster> parseHomePosters(Document doc) {
         List<HomePoster> out = new ArrayList<>();
         java.util.Set<String> seenLinks = new java.util.HashSet<>();
-        Elements anchors = doc.select("table.t_peer td.nam > a[href*=details.php?id=]");
+        Elements anchors = doc.select("a[href*=details.php?id=]");
         for (Element a : anchors) {
             String linkPath = a.attr("href").toLowerCase(java.util.Locale.ROOT);
             if (linkPath.contains("userdetails") || !linkPath.contains("details.php?id=")) continue;
             String href = mirrorUrl(a.absUrl("href"), a.attr("href"));
             if (href.isEmpty() || !seenLinks.add(href)) continue;
             Element row = a.closest("tr");
-            if (row == null || row.select("td").size() < 6
-                    || a.parent() == null || !a.parent().hasClass("nam")) continue;
+            if (row == null || row.select("td").size() < 6) continue;
 
             // Resolve the table row once and reuse it for poster and statistics lookup.
             Element img = a.selectFirst("img");
