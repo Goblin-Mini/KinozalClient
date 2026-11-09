@@ -3378,7 +3378,7 @@ public class MainActivity extends Activity {
     private void confirmClearCache() {
         new AlertDialog.Builder(this)
                 .setTitle("Очистить кэш?")
-                .setMessage("Будут удалены сохранённая главная, кэш страниц и изображений. Авторизация, избранное, история и настройки останутся без изменений.")
+                .setMessage("Будут удалены сохранённые главная и подборки, кэш страниц и изображений. Авторизация, избранное, история и настройки останутся без изменений.")
                 .setNegativeButton("Отмена", null)
                 .setPositiveButton("Очистить", (dialog, which) -> {
                     showMessage("Очищаем кэш…");
