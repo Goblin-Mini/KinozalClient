@@ -652,6 +652,11 @@ public class MainActivity extends Activity {
         currentPath = "collections";
         currentTitle = "Подборки";
         heading.setText("Подборки");
+        synchronized (feedDiagnosticsLock) {
+            feedLoadDiagnostics.setLength(0);
+            feedDiagnosticStartedAtMs = android.os.SystemClock.elapsedRealtime();
+            feedDiagnosticGroup = "Подборки";
+        }
         FeedDiagnostics.start(this, "Подборки", client == null ? "?" : client.getMirror(),
                 COLLECTION_PATHS, "вход на экран подборок");
         if (!collectionsSectionsMemory.isEmpty()) {
