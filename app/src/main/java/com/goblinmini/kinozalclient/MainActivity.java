@@ -6437,7 +6437,7 @@ public class MainActivity extends Activity {
                         loadScreenshotThumbnails(data, ready -> {
                             data.screenshotsLoading = false;
                             data.screenshotsLoaded = true;
-                            if (active[0] == 2) render[0].run();
+                            if (active[0] == 3) render[0].run();
                         });
                     } else if (data.screenshotRequestId.isEmpty()
                             || data.screenshotPagesd.isEmpty()) {
