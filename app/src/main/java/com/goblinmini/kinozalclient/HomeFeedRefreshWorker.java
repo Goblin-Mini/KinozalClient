@@ -46,6 +46,13 @@ public final class HomeFeedRefreshWorker extends Worker {
         Socks5ProxyBridge bridge = new Socks5ProxyBridge(context);
         KinozalHttpClient client = new KinozalHttpClient(context, mirror);
         boolean proxyStarted = false;
+        long workerStarted = android.os.SystemClock.elapsedRealtime();
+        String requestUrl = client.getMirror() + "/" + path.replaceFirst("^/+", "");
+        FeedDiagnostics.log(context, group, "WORKER_START", "feed=" + (index + 1) + "/" + total
+                + ", title=" + title + ", path=" + path + ", url=" + requestUrl
+                + ", bulk=" + bulk + ", cacheModelExists="
+                + new File(context.getFilesDir(), "collections".equals(group)
+                        ? "kinozal_collections_model_v1.json" : "kinozal_home_model_v2.json").isFile());
         sendRefreshState(context, group, index, path, title, bulk, total, "running", null);
         try {
             // A headless WebView runs on Android's main Looper even when the
@@ -57,16 +64,29 @@ public final class HomeFeedRefreshWorker extends Worker {
                 proxyStarted = true;
                 webViewProxyPort = bridge.getLocalPort();
             }
+            FeedDiagnostics.log(context, group, "REQUEST_START", "url=" + requestUrl
+                    + ", transport=authenticated-headless-WebView, proxy=" + (webViewProxyPort == null ? "off" : "on"));
             BrowserFeedFetcher.Result browserResult = BrowserFeedFetcher.fetch(
-                    context, client.getMirror() + "/" + path.replaceFirst("^/+", ""),
-                    client.getUserAgent(), webViewProxyPort, 75000L);
+                    context, requestUrl, client.getUserAgent(), webViewProxyPort, 75000L);
             String html = browserResult.html;
+            FeedDiagnostics.log(context, group, "RESPONSE", "requestedUrl=" + requestUrl
+                    + ", finalUrl=" + browserResult.finalUrl + ", httpStatus="
+                    + (browserResult.httpStatus < 0 ? "not-reported" : browserResult.httpStatus)
+                    + ", durationMs=" + browserResult.durationMs + ", htmlChars="
+                    + (html == null ? 0 : html.length()));
             if (browserResult.cookies != null && !browserResult.cookies.trim().isEmpty()) {
                 client.saveBrowserCookies(browserResult.cookies);
                 client.importBrowserCookies(browserResult.cookies);
             }
             if (html == null || html.trim().isEmpty()) throw new java.io.IOException("Пустой ответ Kinozal");
             JSONArray items = parseItems(html, client.getMirror());
+            FeedDiagnostics.log(context, group, "PARSE", "path=" + path + ", parsedCards=" + items.length());
+            for (int itemIndex = 0; itemIndex < items.length(); itemIndex++) {
+                JSONObject item = items.optJSONObject(itemIndex);
+                if (item != null) FeedDiagnostics.log(context, group, "ITEM",
+                        "feed=" + title + ", n=" + (itemIndex + 1) + ", title=" + item.optString("title")
+                                + ", href=" + item.optString("href"));
+            }
             if (items.length() == 0) throw new java.io.IOException("В ответе нет раздач: кэш оставлен без изменений");
 
             synchronized (MODEL_LOCK) {
@@ -82,6 +102,10 @@ public final class HomeFeedRefreshWorker extends Worker {
                     return Result.failure();
                 }
             }
+            FeedDiagnostics.log(context, group, "CACHE_WRITE", "updated feed=" + title
+                    + ", cards=" + items.length() + ", model=committed");
+            FeedDiagnostics.log(context, group, "WORKER_DONE", "elapsedMs="
+                    + (android.os.SystemClock.elapsedRealtime() - workerStarted));
             Log.i(TAG, "Updated " + group + " feed " + index + ": " + title + ", cards=" + items.length());
             android.content.Intent changed = new android.content.Intent("com.goblinmini.kinozalclient.FEED_CACHE_UPDATED");
             changed.setPackage(context.getPackageName());
@@ -94,11 +118,16 @@ public final class HomeFeedRefreshWorker extends Worker {
             return Result.success();
         } catch (SecurityException e) {
             Log.w(TAG, "Feed refresh requires a fresh Kinozal login: " + path, e);
+            FeedDiagnostics.log(context, group, "WORKER_AUTH_ERROR", "path=" + path + ", reason=" + e.getMessage());
             notifyFailure(context, group, index, path, title, bulk, total, "нужен повторный вход на Kinozal");
             return Result.retry();
         } catch (Exception e) {
             Log.w(TAG, "Feed refresh failed; previous cache is preserved: " + path, e);
             String reason = e.getMessage();
+            FeedDiagnostics.log(context, group, "WORKER_ERROR", "path=" + path + ", type="
+                    + e.getClass().getSimpleName() + ", reason=" + (reason == null ? "unknown" : reason)
+                    + ", elapsedMs=" + (android.os.SystemClock.elapsedRealtime() - workerStarted)
+                    + ", previousCachePreserved=true");
             notifyFailure(context, group, index, path, title, bulk, total,
                     reason == null || reason.trim().isEmpty() ? "ошибка сети или ответа сайта" : reason);
             return Result.retry();
