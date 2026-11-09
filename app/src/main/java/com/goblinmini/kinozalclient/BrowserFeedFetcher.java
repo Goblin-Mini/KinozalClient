@@ -39,7 +39,7 @@ final class BrowserFeedFetcher {
 
     private BrowserFeedFetcher() { }
 
-    static Result fetch(Context context, String url, String userAgent, Integer localProxyPort,
+    // ProxyController is process-wide. Serialize feed WebViews so one worker cannot clear\n    // another worker's override while its page is still loading.\n    static synchronized Result fetch(Context context, String url, String userAgent, Integer localProxyPort,
             long timeoutMs) throws Exception {
         final CountDownLatch done = new CountDownLatch(1);
         final AtomicReference<Result> result = new AtomicReference<>();
