@@ -2605,14 +2605,13 @@ public class MainActivity extends Activity {
             if (focused) loadHomePosterForCard(card);
         });
 
-        FrameLayout posterFrame = new FrameLayout(this);
-        posterFrame.setBackground(shape(Color.rgb(40, 45, 49), 0));
         ImageView poster = new ImageView(this);
         poster.setScaleType(ImageView.ScaleType.CENTER_CROP);
         poster.setBackground(shape(Color.rgb(40, 45, 49), 0));
         poster.setImageResource(R.drawable.kinozal_poster_placeholder);
-        posterFrame.addView(poster, new FrameLayout.LayoutParams(-1, -1));
-        card.addView(posterFrame, new LinearLayout.LayoutParams(dp(126), dp(178)));
+        // The image fills the same 126x178 area as the old FrameLayout wrapper.
+        // loadHomePosterForCard() already supports an ImageView as the first child.
+        card.addView(poster, new LinearLayout.LayoutParams(dp(126), dp(178)));
 
         List<String> badges = item.preparedBadges != null
                 ? item.preparedBadges : extractHomeBadges(item.torrent.title, section.title);
