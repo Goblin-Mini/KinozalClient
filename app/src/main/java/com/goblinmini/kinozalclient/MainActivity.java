@@ -3514,7 +3514,7 @@ public class MainActivity extends Activity {
         torrServeAddressField = new EditText(this);
         torrServeAddressField.setSingleLine(true);
         torrServeAddressField.setText(getSharedPreferences(PREFS, MODE_PRIVATE)
-                .getString("torrserve_url", ""));
+                .getString("torrserve_url", "http://localhost:8090"));
         torrServeAddressField.setHint("http://адрес:8090");
         styleSettingsEdit(torrServeAddressField);
         panel.addView(torrServeAddressField, new LinearLayout.LayoutParams(-1, dp(46)));
@@ -3609,7 +3609,7 @@ public class MainActivity extends Activity {
 
     private void checkTorrServerViewingHistory() {
         String base = getSharedPreferences(PREFS, MODE_PRIVATE)
-                .getString("torrserve_url", "").trim().replaceAll("/+$", "");
+                .getString("torrserve_url", "http://localhost:8090").trim().replaceAll("/+$", "");
         if (base.isEmpty()) {
             showMessage("Сначала укажите адрес TorrServer в настройках.");
             return;
@@ -6931,7 +6931,7 @@ public class MainActivity extends Activity {
             String magnet = "magnet:?xt=urn:btih:" + hash
                     + "&dn=" + Uri.encode(data.title == null ? "" : data.title);
             String remote = getSharedPreferences(PREFS, MODE_PRIVATE)
-                    .getString("torrserve_url", "").trim().replaceAll("/+$", "");
+                    .getString("torrserve_url", "http://localhost:8090").trim().replaceAll("/+$", "");
             String remoteHost = remote.isEmpty() ? "" : Uri.parse(remote).getHost();
             boolean localTorrServer = "127.0.0.1".equals(remoteHost)
                     || "localhost".equalsIgnoreCase(remoteHost)
