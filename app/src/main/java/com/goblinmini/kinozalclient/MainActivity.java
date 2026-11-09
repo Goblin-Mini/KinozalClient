@@ -67,6 +67,8 @@ public class MainActivity extends Activity {
     private static final java.util.regex.Pattern LOGIN_PASSWORD_TYPE =
             java.util.regex.Pattern.compile("\\btype\\s*=\\s*(['\\\"]?)password\\1");
     private static final String PREFS = "kinozal_settings";
+    private static final String FONT_SIZE_OFFSET_KEY = "font_size_offset_sp";
+    private int fontOffsetSp = 0;
     private static final String[] MIRRORS = {
             "https://kinozal.me", "https://kinozal.guru",
             "https://kinozal.jumpingcrab.com"
@@ -263,6 +265,7 @@ public class MainActivity extends Activity {
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
         GOLD = getAccentColor(getSharedPreferences(PREFS, MODE_PRIVATE).getString("accent_color", "gold"));
+        fontOffsetSp = getSharedPreferences(PREFS, MODE_PRIVATE).getInt(FONT_SIZE_OFFSET_KEY, 0);
         readTvLaunchIntent(getIntent());
         mirror = getSharedPreferences(PREFS, MODE_PRIVATE).getString("mirror", MIRRORS[0]);
         if ("https://kinozal.tv".equalsIgnoreCase(mirror)) {
@@ -484,7 +487,7 @@ public class MainActivity extends Activity {
         field.setHint(hint);
         field.setTextColor(Color.WHITE);
         field.setHintTextColor(TEAL);
-        field.setTextSize(14);
+        field.setTextSize(fontSize(14));
         field.setInputType(inputType);
         field.setPadding(dp(10), dp(7), dp(10), dp(7));
         field.setBackground(shape(PANEL, TEAL));
@@ -2477,7 +2480,7 @@ public class MainActivity extends Activity {
                 ? "collections" : "home";
         Button refreshFeed = button("⟳");
         // Icon-only refresh control: no button plate, only the glyph changes color on focus.
-        refreshFeed.setTextSize(20);
+        refreshFeed.setTextSize(fontSize(20));
         refreshFeed.setTextColor(Color.rgb(192, 198, 202)); // Серебристый
         refreshFeed.setMinWidth(0);
         refreshFeed.setMinimumWidth(0);
@@ -2512,7 +2515,7 @@ public class MainActivity extends Activity {
         String[] firstFeedPaths = feedPaths(feedGroup);
         if (firstFeedPaths.length > 0 && firstFeedPaths[0].equals(section.path)) {
             Button refreshAll = button("Обновить всё");
-            refreshAll.setTextSize(12);
+            refreshAll.setTextSize(fontSize(12));
             refreshAll.setTranslationY(-dp(3));
             LinearLayout.LayoutParams allParams = new LinearLayout.LayoutParams(-2, dp(36));
             allParams.leftMargin = dp(8);
@@ -2727,7 +2730,7 @@ public class MainActivity extends Activity {
     }
 
     private TextView text(String value, int size, int color, boolean bold) {
-        TextView t = new TextView(this); t.setText(value); t.setTextSize(size);
+        TextView t = new TextView(this); t.setText(value); t.setTextSize(fontSize(size));
         t.setTextColor(color); if (bold) t.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
         return t;
     }
@@ -2737,7 +2740,7 @@ public class MainActivity extends Activity {
         b.setText(label);
         b.setAllCaps(false);
         b.setTextColor(GOLD);
-        b.setTextSize(14);
+        b.setTextSize(fontSize(14));
         b.setMinWidth(0);
         b.setMinHeight(0);
         b.setIncludeFontPadding(false);
@@ -2790,7 +2793,7 @@ public class MainActivity extends Activity {
 
         Button categoriesButton = button("▦   Категории  ▾");
         categoriesButton.setGravity(Gravity.CENTER_VERTICAL | Gravity.LEFT);
-        categoriesButton.setTextSize(14);
+        categoriesButton.setTextSize(fontSize(14));
         categoriesButton.setPadding(dp(14), 0, dp(8), 0);
         LinearLayout.LayoutParams categoryButtonParams = new LinearLayout.LayoutParams(-1, dp(47));
         categoryButtonParams.rightMargin = dp(5);
@@ -2808,7 +2811,7 @@ public class MainActivity extends Activity {
 
         Button moviesButton = button("▤  Фильмы  ▾");
         moviesButton.setGravity(Gravity.CENTER_VERTICAL | Gravity.LEFT);
-        moviesButton.setTextSize(12);
+        moviesButton.setTextSize(fontSize(12));
         moviesButton.setPadding(dp(34), 0, dp(8), 0);
         LinearLayout.LayoutParams moviesButtonParams = new LinearLayout.LayoutParams(-1, dp(39));
         moviesButtonParams.rightMargin = dp(5);
@@ -2894,7 +2897,7 @@ public class MainActivity extends Activity {
         search.setTextColor(Color.WHITE);
         search.setHintTextColor(TEAL);
         search.setHint("Название фильма или раздачи");
-        search.setTextSize(16);
+        search.setTextSize(fontSize(16));
         search.setImeOptions(EditorInfo.IME_ACTION_SEARCH);
         LinearLayout searchField = new LinearLayout(this);
         searchField.setGravity(Gravity.CENTER_VERTICAL);
@@ -2943,7 +2946,7 @@ public class MainActivity extends Activity {
         voiceSearch.setOnClickListener(v -> startVoiceSearch());
         searchField.addView(search, new LinearLayout.LayoutParams(0, -1, 1f));
         Button clearSearch = button("×");
-        clearSearch.setTextSize(23);
+        clearSearch.setTextSize(fontSize(23));
         clearSearch.setContentDescription("Очистить поиск");
         clearSearch.setVisibility(View.GONE);
         searchField.addView(clearSearch, new LinearLayout.LayoutParams(dp(38), dp(40)));
@@ -2957,7 +2960,7 @@ public class MainActivity extends Activity {
         });
         searchBar.addView(searchField, searchParams);
         Button history = button("История");
-        history.setTextSize(12);
+        history.setTextSize(fontSize(12));
         history.setMinWidth(0);
         history.setMinimumWidth(0);
         history.setGravity(Gravity.CENTER);
@@ -2967,7 +2970,7 @@ public class MainActivity extends Activity {
         searchBar.addView(history, historyParams);
         history.setOnClickListener(v -> showSearchHistory());
         Button find = button("Найти");
-        find.setTextSize(12);
+        find.setTextSize(fontSize(12));
         find.setMinWidth(0);
         find.setMinimumWidth(0);
         find.setGravity(Gravity.CENTER);
@@ -3199,7 +3202,7 @@ public class MainActivity extends Activity {
             b.setText(menuLabel);
         }
         b.setGravity(Gravity.CENTER_VERTICAL | Gravity.LEFT);
-        b.setTextSize(12);
+        b.setTextSize(fontSize(12));
         b.setPadding(dp(34), 0, dp(8), 0);
         LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(-1, dp(39));
         p.rightMargin = dp(5);
@@ -3216,6 +3219,91 @@ public class MainActivity extends Activity {
         if ("silver".equals(key)) return Color.rgb(214, 219, 224);
         if ("bronze".equals(key)) return Color.rgb(205, 145, 96);
         return Color.rgb(251, 226, 173);
+    }
+
+    private float fontSize(float baseSp) {
+        return Math.max(10f, Math.min(30f, baseSp + fontOffsetSp));
+    }
+
+    private void applyFontDelta(View view, int deltaSp) {
+        if (view == null || deltaSp == 0) return;
+        if (view instanceof TextView) {
+            TextView textView = (TextView) view;
+            float scaledDensity = getResources().getDisplayMetrics().scaledDensity;
+            float currentSp = textView.getTextSize() / scaledDensity;
+            float nextSp = Math.max(10f, Math.min(30f, currentSp + deltaSp));
+            textView.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, nextSp);
+        }
+        if (view instanceof ViewGroup) {
+            ViewGroup group = (ViewGroup) view;
+            for (int i = 0; i < group.getChildCount(); i++)
+                applyFontDelta(group.getChildAt(i), deltaSp);
+        }
+    }
+
+    private void changeFontSize(int deltaSp, TextView valueLabel) {
+        int next = Math.max(-6, Math.min(6, fontOffsetSp + deltaSp));
+        if (next == fontOffsetSp) return;
+        int appliedDelta = next - fontOffsetSp;
+        fontOffsetSp = next;
+        getSharedPreferences(PREFS, MODE_PRIVATE).edit()
+                .putInt(FONT_SIZE_OFFSET_KEY, fontOffsetSp).apply();
+        applyFontDelta(getWindow() == null ? null : getWindow().getDecorView(), appliedDelta);
+        if (settingsDialog != null && settingsDialog.isShowing()
+                && settingsDialog.getWindow() != null)
+            applyFontDelta(settingsDialog.getWindow().getDecorView(), appliedDelta);
+        if (valueLabel != null) valueLabel.setText(fontOffsetSp == 0
+                ? "Размер по умолчанию"
+                : (fontOffsetSp > 0 ? "+" : "") + fontOffsetSp + " sp");
+    }
+
+    private void showFontSizeSettings() {
+        LinearLayout panel = new LinearLayout(this);
+        panel.setOrientation(LinearLayout.VERTICAL);
+        panel.setPadding(dp(18), dp(14), dp(18), dp(12));
+        panel.setBackgroundColor(BG);
+        TextView value = text(fontOffsetSp == 0 ? "Размер по умолчанию"
+                : (fontOffsetSp > 0 ? "+" : "") + fontOffsetSp + " sp", 16, GOLD, true);
+        value.setGravity(Gravity.CENTER);
+        value.setPadding(0, dp(4), 0, dp(14));
+        panel.addView(value, new LinearLayout.LayoutParams(-1, dp(48)));
+        LinearLayout controls = new LinearLayout(this);
+        controls.setGravity(Gravity.CENTER);
+        Button smaller = button("А−");
+        smaller.setTextSize(fontSize(20));
+        Button larger = button("А+");
+        larger.setTextSize(fontSize(20));
+        LinearLayout.LayoutParams controlParams = new LinearLayout.LayoutParams(0, dp(52), 1f);
+        controlParams.rightMargin = dp(8);
+        controls.addView(smaller, controlParams);
+        controls.addView(larger, new LinearLayout.LayoutParams(0, dp(52), 1f));
+        panel.addView(controls);
+        TextView hint = text("Каждое нажатие меняет размер на 2 пункта.", 12, TEAL, false);
+        hint.setGravity(Gravity.CENTER);
+        hint.setPadding(0, dp(12), 0, 0);
+        panel.addView(hint);
+        AlertDialog dialog = new AlertDialog.Builder(this)
+                .setTitle("Размер шрифта")
+                .setView(panel)
+                .setPositiveButton("Готово", null)
+                .setNeutralButton("Сбросить", null)
+                .create();
+        smaller.setOnClickListener(v -> changeFontSize(-2, value));
+        larger.setOnClickListener(v -> changeFontSize(2, value));
+        dialog.setOnShowListener(d -> {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setTextColor(GOLD);
+            Button reset = dialog.getButton(AlertDialog.BUTTON_NEUTRAL);
+            reset.setTextColor(GOLD);
+            reset.setOnClickListener(v -> changeFontSize(-fontOffsetSp, value));
+        });
+        dialog.show();
+        if (dialog.getWindow() != null) {
+            dialog.getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(BG));
+            dialog.getWindow().setLayout(Math.min(dp(440),
+                    getResources().getDisplayMetrics().widthPixels - dp(48)),
+                    ViewGroup.LayoutParams.WRAP_CONTENT);
+            applyFontDelta(dialog.getWindow().getDecorView(), fontOffsetSp);
+        }
     }
 
     private void showAccentPicker() {
@@ -3264,6 +3352,7 @@ public class MainActivity extends Activity {
 
         addSettingsAction(left, "Авторизация", () -> showLogin());
         addSettingsAction(left, "Начальный раздел", () -> chooseStartupSource());
+        addSettingsAction(left, "Размер шрифта", () -> showFontSizeSettings());
         addSettingsAction(left, "Поиск Jackett", () -> showJackettSettings());
         addSettingsAction(left, "Прокси", () -> showSocks5Settings());
         addSettingsAction(left, "Очистить кэш", () -> confirmClearCache());
@@ -3322,7 +3411,7 @@ public class MainActivity extends Activity {
 
     private Button settingsPillButton(String title) {
         Button b = button(title);
-        b.setTextSize(13);
+        b.setTextSize(fontSize(13));
         b.setGravity(Gravity.CENTER_VERTICAL | Gravity.LEFT);
         b.setPadding(dp(12), 0, dp(8), 0);
         return b;
@@ -3494,7 +3583,7 @@ public class MainActivity extends Activity {
 
     private void addSettingsAction(LinearLayout parent, String title, Runnable action) {
         Button button = button(title);
-        button.setTextSize(13);
+        button.setTextSize(fontSize(13));
         button.setGravity(Gravity.CENTER_VERTICAL | Gravity.LEFT);
         button.setPadding(dp(10), 0, dp(8), 0);
         LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-1, dp(44));
@@ -3506,7 +3595,7 @@ public class MainActivity extends Activity {
     private void styleSettingsEdit(EditText field) {
         field.setTextColor(Color.WHITE);
         field.setHintTextColor(TEAL);
-        field.setTextSize(13);
+        field.setTextSize(fontSize(13));
         field.setPadding(dp(10), dp(5), dp(10), dp(5));
         field.setBackground(shape(PANEL, TEAL));
     }
@@ -3801,7 +3890,7 @@ public class MainActivity extends Activity {
             field.setText(values[i]);
             field.setTextColor(Color.WHITE);
             field.setHintTextColor(TEAL);
-            field.setTextSize(14);
+            field.setTextSize(fontSize(14));
             field.setPadding(dp(10), dp(7), dp(10), dp(7));
             field.setBackground(shape(PANEL, TEAL));
             if (i == 3) field.setInputType(android.text.InputType.TYPE_CLASS_TEXT
@@ -4108,7 +4197,7 @@ public class MainActivity extends Activity {
             b.setText(menuText);
         }
         b.setGravity(Gravity.CENTER_VERTICAL | Gravity.LEFT);
-        b.setTextSize(14);
+        b.setTextSize(fontSize(14));
         b.setPadding(dp(14), 0, dp(8), 0);
         b.setMaxLines(1);
         b.setEllipsize(android.text.TextUtils.TruncateAt.END);
@@ -5427,7 +5516,7 @@ public class MainActivity extends Activity {
         field.setTextColor(Color.WHITE);
         field.setHintTextColor(TEAL);
         field.setHint(hint);
-        field.setTextSize(14);
+        field.setTextSize(fontSize(14));
         field.setSelectAllOnFocus(true);
         field.setFocusable(true);
         field.setFocusableInTouchMode(true);
@@ -5676,7 +5765,7 @@ public class MainActivity extends Activity {
     private void addHistoryClearButton() {
         Button clear = button("Очистить историю");
         clear.setAllCaps(false);
-        clear.setTextSize(14);
+        clear.setTextSize(fontSize(14));
         clear.setOnClickListener(v -> clearRecentlyViewed());
         LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-1, dp(44));
         params.topMargin = dp(8);
@@ -5687,7 +5776,7 @@ public class MainActivity extends Activity {
     private void addFavoritesClearButton() {
         Button clear = button("Очистить избранное");
         clear.setAllCaps(false);
-        clear.setTextSize(14);
+        clear.setTextSize(fontSize(14));
         clear.setOnClickListener(v -> {
             writeFavorites(new java.util.LinkedHashMap<>());
             showFavorites();
@@ -6139,7 +6228,7 @@ public class MainActivity extends Activity {
         actionRow.setGravity(Gravity.CENTER_VERTICAL);
 
         Button watch = button("Просмотр");
-        watch.setTextSize(15);
+        watch.setTextSize(fontSize(15));
         watch.setTextColor(Color.WHITE);
         watch.setBackground(shape(RED, 0));
         watch.setOnFocusChangeListener((v, focused) ->
@@ -6149,7 +6238,7 @@ public class MainActivity extends Activity {
         actionRow.addView(watch, watchParams);
 
         Button favorite = button(isFavorite(torrent) ? "★" : "☆");
-        favorite.setTextSize(25);
+        favorite.setTextSize(fontSize(25));
         favorite.setTextColor(GOLD);
         favorite.setGravity(Gravity.CENTER);
         favorite.setContentDescription(isFavorite(torrent) ? "Убрать из избранного" : "Добавить в избранное");
@@ -6166,7 +6255,7 @@ public class MainActivity extends Activity {
         posterColumn.addView(actionRow);
 
         Button downloadTorrent = button("↓  Скачать торрент");
-        downloadTorrent.setTextSize(14);
+        downloadTorrent.setTextSize(fontSize(14));
         downloadTorrent.setTextColor(GOLD);
         downloadTorrent.setBackground(shape(PANEL, 0));
         downloadTorrent.setOnFocusChangeListener((v, focused) ->
