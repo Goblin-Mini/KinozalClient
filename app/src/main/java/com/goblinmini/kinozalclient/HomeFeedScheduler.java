@@ -72,6 +72,37 @@ public final class HomeFeedScheduler {
         prefs.edit().putString(key, marker).apply();
     }
 
+    /**
+     * Cached screens are shown immediately, then refreshed in the background when
+     * their last cache-triggered refresh is older than the cooldown. This does
+     * not rely on the old one-time mirror marker, which could permanently suppress
+     * refreshes after its original WorkManager chain had completed.
+     */
+    public static void refreshCachedIfStale(Context context, String group) {
+        String[] paths = "home".equals(group) ? HOME_PATHS : COLLECTION_PATHS;
+        String[] titles = "home".equals(group) ? HOME_TITLES : COLLECTION_TITLES;
+        String mirror = context.getSharedPreferences("kinozal_settings", Context.MODE_PRIVATE)
+                .getString("mirror", KinozalHttpClient.DEFAULT_MIRROR);
+        android.content.SharedPreferences prefs = context.getSharedPreferences(
+                "kinozal_feed_schedule", Context.MODE_PRIVATE);
+        String key = "cache_refresh_at_" + group;
+        long last = prefs.getLong(key, 0L);
+        long now = System.currentTimeMillis();
+        long cooldownMs = TimeUnit.MINUTES.toMillis(30L);
+        if (last > 0L && now - last < cooldownMs) {
+            FeedDiagnostics.log(context, group, "CACHE_REFRESH_SKIP",
+                    "reason=cooldown, ageMs=" + (now - last) + ", mirror=" + mirror);
+            return;
+        }
+        FeedDiagnostics.log(context, group, "CACHE_REFRESH_ENQUEUE",
+                "feeds=" + paths.length + ", firstDelayMinutes=0, staggerMinutes=5, mirror=" + mirror);
+        for (int i = 0; i < paths.length; i++) {
+            enqueue(context, group, i, paths[i], titles[i], i * 5L,
+                    ExistingWorkPolicy.REPLACE, true, paths.length);
+        }
+        prefs.edit().putLong(key, now).apply();
+    }
+
     /** Queue every feed in order, with a five-minute gap between requests. */
     public static void refreshAll(Context context, String group) {
         String[] paths = "home".equals(group) ? HOME_PATHS : COLLECTION_PATHS;
