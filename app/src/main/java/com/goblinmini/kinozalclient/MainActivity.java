@@ -1997,6 +1997,10 @@ public class MainActivity extends Activity {
     /** Refresh through the already-cleared WebView session so Cloudflare JavaScript runs. */
     private void refreshFeedInBrowser(String group, int index, String path, String title,
             boolean bulk, int total) {
+        appendFeedDiagnostic("REFRESH_REQUEST", "mode=" + (bulk ? "bulk-item" : "single")
+                + ", group=" + group + ", path=" + path + ", title=" + title
+                + ", modelSections=" + ("collections".equals(group)
+                    ? collectionsSectionsMemory.size() : homeSectionsMemory.size()));
         if (sessionWebView == null) {
             status.setText("Браузерная сессия ещё не готова. Открой Kinozal и повтори обновление.");
             return;
@@ -2067,12 +2071,24 @@ public class MainActivity extends Activity {
                     List<HomeSection> model = "collections".equals(group)
                             ? new ArrayList<>(collectionsSectionsMemory)
                             : new ArrayList<>(homeSectionsMemory);
+                    int oldCardCount = 0;
+                    for (HomeSection old : model) {
+                        if (path.equals(old.path)) { oldCardCount = old.items.size(); break; }
+                    }
+                    appendFeedDiagnostic("REFRESH_MODEL_BEFORE",
+                            "mode=" + (bulk ? "bulk-item" : "single") + ", path=" + path
+                            + ", oldCards=" + oldCardCount + ", incomingCards=" + refreshed.items.size()
+                            + ", modelSections=" + model.size());
                     int existing = -1;
                     for (int i = 0; i < model.size(); i++) {
                         if (path.equals(model.get(i).path)) { existing = i; break; }
                     }
                     if (existing >= 0) model.set(existing, refreshed);
                     else model.add(refreshed);
+                    appendFeedDiagnostic("REFRESH_MODEL_AFTER",
+                            "path=" + path + ", action=" + (existing >= 0 ? "replace" : "append")
+                            + ", replacedIndex=" + existing + ", newCards=" + refreshed.items.size()
+                            + ", modelSections=" + model.size());
                     if ("collections".equals(group)) {
                         collectionsSectionsMemory = model;
                         saveCollectionsModel(model);
@@ -2231,16 +2247,26 @@ public class MainActivity extends Activity {
         List<HomeSection> model = "collections".equals(group)
                 ? new ArrayList<>(collectionsSectionsMemory)
                 : new ArrayList<>(homeSectionsMemory);
+        appendFeedDiagnostic("BULK_MODEL_BEFORE",
+                "group=" + group + ", modelSections=" + model.size()
+                + ", successfulFeeds=" + refreshed.size() + "/" + paths.length);
         int successCount = 0;
         for (HomeSection section : refreshed) {
             int existing = -1;
             for (int i = 0; i < model.size(); i++) {
                 if (section.path.equals(model.get(i).path)) { existing = i; break; }
             }
+            int oldCards = existing >= 0 ? model.get(existing).items.size() : 0;
             if (existing >= 0) model.set(existing, section);
             else model.add(section);
+            appendFeedDiagnostic("BULK_MODEL_ITEM",
+                    "path=" + section.path + ", action=" + (existing >= 0 ? "replace" : "append")
+                    + ", oldCards=" + oldCards + ", incomingCards=" + section.items.size());
             successCount++;
         }
+        appendFeedDiagnostic("BULK_MODEL_AFTER",
+                "group=" + group + ", modelSections=" + model.size()
+                + ", successfulFeeds=" + successCount);
         if ("collections".equals(group)) {
             collectionsSectionsMemory = model;
             saveCollectionsModel(model);
@@ -2497,6 +2523,25 @@ public class MainActivity extends Activity {
     private void renderHomeSection(HomeSection section, int generation, boolean immediate) {
         if (section == null || section.items.isEmpty()) return;
 
+        int oldRowCards = 0;
+        String expectedTitleTag = "home-title:" + section.path;
+        for (int i = 0; i + 1 < list.getChildCount(); i++) {
+            if (expectedTitleTag.equals(list.getChildAt(i).getTag())
+                    && list.getChildAt(i + 1) instanceof android.widget.HorizontalScrollView) {
+                View oldRow = list.getChildAt(i + 1);
+                if (oldRow instanceof android.widget.HorizontalScrollView) {
+                    View oldStrip = ((android.widget.HorizontalScrollView) oldRow).getChildAt(0);
+                    if (oldStrip instanceof ViewGroup) oldRowCards = ((ViewGroup) oldStrip).getChildCount();
+                }
+                break;
+            }
+        }
+        appendFeedDiagnostic("FEED_UI_APPLY_START",
+                "path=" + section.path + ", title=" + section.title
+                + ", mode=" + (immediate ? "refresh-immediate" : "initial-incremental")
+                + ", oldRenderedCards=" + oldRowCards + ", incomingCards=" + section.items.size()
+                + ", listChildrenBefore=" + list.getChildCount());
+
         LinearLayout sectionHeader = new LinearLayout(this);
         sectionHeader.setGravity(Gravity.CENTER_VERTICAL);
         sectionHeader.setTag("home-title:" + section.path);
@@ -2583,6 +2628,11 @@ public class MainActivity extends Activity {
             for (HomePoster item : section.items) {
                 strip.addView(createHomePosterCard(item, section));
             }
+            appendFeedDiagnostic("FEED_UI_APPLY_DONE",
+                    "path=" + section.path + ", action=" + (replaced ? "replace-row" : "append-row")
+                    + ", oldRenderedCards=" + oldRowCards + ", renderedCards=" + strip.getChildCount()
+                    + ", incomingCards=" + section.items.size()
+                    + ", listChildrenAfter=" + list.getChildCount());
             horizontal.post(this::scheduleVisibleHomePosterLoad);
         } else {
             final long[] startedAt = {0L};
@@ -2601,6 +2651,10 @@ public class MainActivity extends Activity {
                     }
                     cardIndex[0]++;
                     if (cardIndex[0] == cardCount) {
+                        appendFeedDiagnostic("FEED_UI_APPLY_DONE",
+                                "path=" + section.path + ", action=" + (replaced ? "replace-row" : "append-row")
+                                + ", mode=initial-incremental, renderedCards=" + strip.getChildCount()
+                                + ", incomingCards=" + cardCount);
                         long duration = android.os.SystemClock.elapsedRealtime() - startedAt[0];
                         Log.i("KinozalPerf", "home row complete=" + duration
                                 + "ms, title=" + section.title + ", cards=" + cardCount);
