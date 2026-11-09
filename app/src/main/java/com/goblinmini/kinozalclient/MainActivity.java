@@ -2623,6 +2623,7 @@ public class MainActivity extends Activity {
         }
         horizontal.post(this::scheduleVisibleHomePosterLoad);
 
+        final boolean rowWasReplaced = replaced;
         if (immediate) {
             // Replace and build only this feed. Other rows and their pending work remain intact.
             for (HomePoster item : section.items) {
