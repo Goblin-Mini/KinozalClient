@@ -2528,7 +2528,8 @@ public class MainActivity extends Activity {
         horizontal.setHorizontalScrollBarEnabled(false);
         horizontal.setFillViewport(false);
         horizontal.setTag("home-row:" + section.path);
-        horizontal.setOnScrollChangeListener((View v, int x, int y, int oldX, int oldY) -> scheduleVisibleHomePosterLoad());
+        horizontal.setOnScrollChangeListener((View v, int x, int y, int oldX, int oldY) ->
+                loadVisibleHomePosters((android.widget.HorizontalScrollView) v));
         LinearLayout strip = new LinearLayout(this);
         strip.setOrientation(LinearLayout.HORIZONTAL);
         horizontal.addView(strip);
@@ -2551,14 +2552,14 @@ public class MainActivity extends Activity {
             list.addView(sectionHeader, titleParams);
             list.addView(horizontal, rowParams);
         }
-        horizontal.post(this::scheduleVisibleHomePosterLoad);
+        horizontal.post(() -> loadVisibleHomePosters(horizontal));
 
         if (immediate) {
             // Replace and build only this feed. Other rows and their pending work remain intact.
             for (HomePoster item : section.items) {
                 strip.addView(createHomePosterCard(item, section));
             }
-            horizontal.post(this::scheduleVisibleHomePosterLoad);
+            horizontal.post(() -> loadVisibleHomePosters(horizontal));
         } else {
             final long[] startedAt = {0L};
             final int[] cardIndex = {0};
@@ -2579,7 +2580,7 @@ public class MainActivity extends Activity {
                         long duration = android.os.SystemClock.elapsedRealtime() - startedAt[0];
                         Log.i("KinozalPerf", "home row complete=" + duration
                                 + "ms, title=" + section.title + ", cards=" + cardCount);
-                        scheduleVisibleHomePosterLoad();
+                        horizontal.post(() -> loadVisibleHomePosters(horizontal));
                     }
                 });
             }
@@ -2605,14 +2606,13 @@ public class MainActivity extends Activity {
             if (focused) loadHomePosterForCard(card);
         });
 
-        FrameLayout posterFrame = new FrameLayout(this);
-        posterFrame.setBackground(shape(Color.rgb(40, 45, 49), 0));
         ImageView poster = new ImageView(this);
         poster.setScaleType(ImageView.ScaleType.CENTER_CROP);
         poster.setBackground(shape(Color.rgb(40, 45, 49), 0));
         poster.setImageResource(R.drawable.kinozal_poster_placeholder);
-        posterFrame.addView(poster, new FrameLayout.LayoutParams(-1, -1));
-        card.addView(posterFrame, new LinearLayout.LayoutParams(dp(126), dp(178)));
+        // The image fills the same 126x178 area as the old FrameLayout wrapper.
+        // loadHomePosterForCard() already supports an ImageView as the first child.
+        card.addView(poster, new LinearLayout.LayoutParams(dp(126), dp(178)));
 
         List<String> badges = item.preparedBadges != null
                 ? item.preparedBadges : extractHomeBadges(item.torrent.title, section.title);
