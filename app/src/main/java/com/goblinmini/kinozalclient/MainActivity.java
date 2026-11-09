@@ -2881,7 +2881,7 @@ public class MainActivity extends Activity {
         addMenu("▤", "Подборки", () -> loadCollections());
         addMenu("⇩", "Все раздачи", () -> load("browse.php", "Все раздачи"));
 
-        Button categoriesButton = button("▦   Категории  ▾");
+        Button categoriesButton = button(menuIconText("▦   Категории  ▾"));
         categoriesButton.setGravity(Gravity.CENTER_VERTICAL | Gravity.LEFT);
         categoriesButton.setTextSize(fontSize(14));
         categoriesButton.setPadding(dp(14), 0, dp(8), 0);
@@ -2899,7 +2899,7 @@ public class MainActivity extends Activity {
         addSubMenu(categoryGroup, "▣  Зарубежные сериалы", "browse.php?c=46");
         addSubMenu(categoryGroup, "▣  Российские сериалы", "browse.php?c=45");
 
-        Button moviesButton = button("▤  Фильмы  ▾");
+        Button moviesButton = button(menuIconText("▤  Фильмы  ▾"));
         moviesButton.setGravity(Gravity.CENTER_VERTICAL | Gravity.LEFT);
         moviesButton.setTextSize(fontSize(12));
         moviesButton.setPadding(dp(34), 0, dp(8), 0);
@@ -2940,7 +2940,7 @@ public class MainActivity extends Activity {
         moviesButton.setOnClickListener(v -> {
             boolean expand = moviesGroup.getVisibility() != View.VISIBLE;
             moviesGroup.setVisibility(expand ? View.VISIBLE : View.GONE);
-            moviesButton.setText(expand ? "▤  Фильмы  ▾" : "▤  Фильмы  ▸");
+            moviesButton.setText(menuIconText(expand ? "▤  Фильмы  ▾" : "▤  Фильмы  ▸"));
             if (expand && moviesGroup.getChildCount() > 0) moviesGroup.getChildAt(0).requestFocus();
         });
         addSubMenu(categoryGroup, "▧  Мультфильмы", "browse.php?c=1003");
@@ -3254,35 +3254,44 @@ public class MainActivity extends Activity {
 
     private String categoryIcon(String label) {
         String value = label == null ? "" : label.toLowerCase(java.util.Locale.ROOT);
-        if (value.contains("сериал")) return "▣";
-        if (value.contains("все фильмы") || value.contains("наше кино")) return "▰";
-        if (value.contains("комедия")) return "☻";
-        if (value.contains("боевик") || value.contains("военный")) return "⚔";
+        if (value.contains("сериал") || value.contains("передач") || value.contains("тв-шоу")) return "▣";
+        if (value.contains("фильм") || value.contains("кино")) return "▰";
+        if (value.contains("комедия")) return "●";
+        if (value.contains("боевик") || value.contains("военный")) return "✦";
         if (value.contains("триллер") || value.contains("детектив")) return "⌕";
         if (value.contains("драма")) return "◈";
-        if (value.contains("мелодрама")) return "♡";
+        if (value.contains("мелодрама") || value.contains("эрот")) return "♡";
         if (value.contains("индий")) return "✿";
-        if (value.contains("фантаст")) return "✧";
+        if (value.contains("фантаст") || value.contains("аниме")) return "✧";
         if (value.contains("фэнтези")) return "✦";
-        if (value.contains("ужас") || value.contains("мистик")) return "☾";
+        if (value.contains("ужас") || value.contains("мистик")) return "◐";
         if (value.contains("приключ")) return "➤";
-        if (value.contains("истор")) return "⌛";
+        if (value.contains("истор")) return "◷";
         if (value.contains("азиат")) return "❖";
         if (value.contains("документ")) return "▤";
-        if (value.contains("спорт")) return "⚑";
+        if (value.contains("спорт")) return "◇";
         if (value.contains("детский") || value.contains("семейн")) return "☆";
         if (value.contains("классик")) return "▥";
         if (value.contains("концерт")) return "♫";
-        if (value.contains("передач") || value.contains("тв-шоу")) return "▣";
         if (value.contains("театр") || value.contains("опера") || value.contains("балет")) return "♟";
-        if (value.contains("эрот")) return "♡";
         if (value.contains("мульт")) return "▧";
-        if (value.contains("аниме")) return "✧";
-        if (value.contains("концерт")) return "🎤";
-        if (value.contains("видеоклип")) return "🎬";
-        if (value.contains("аудиокниг")) return "🎧";
-        if (value.contains("игр")) return "🎮";
+        if (value.contains("видеоклип")) return "▶";
+        if (value.contains("аудиокниг")) return "◖";
+        if (value.contains("игр")) return "⌘";
         return "◆";
+    }
+
+    private CharSequence menuIconText(String value) {
+        int end = value.indexOf("  ");
+        if (end <= 0 || end > 4) return value;
+        android.text.SpannableString styled = new android.text.SpannableString(value);
+        styled.setSpan(new android.text.style.ForegroundColorSpan(Color.rgb(174, 55, 18)),
+                0, end, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        styled.setSpan(new android.text.style.StyleSpan(android.graphics.Typeface.BOLD),
+                0, end, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        styled.setSpan(new android.text.style.RelativeSizeSpan(1.05f),
+                0, end, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        return styled;
     }
 
     private void addSubMenu(LinearLayout parent, String label, String path) {
@@ -3291,7 +3300,7 @@ public class MainActivity extends Activity {
         if (existingIconEnd <= 0 || existingIconEnd > 3) {
             displayLabel = categoryIcon(label) + "  " + label;
         }
-        Button b = button(displayLabel);
+        Button b = button(menuIconText(displayLabel));
         // One uniform icon size and weight across every category row.
         int iconEnd = displayLabel.indexOf("  ");
         if (iconEnd > 0 && iconEnd <= 3) {
@@ -4494,7 +4503,7 @@ public class MainActivity extends Activity {
     }
 
     private void addMenu(String icon, String label, Runnable action) {
-        Button b = button(icon + "   " + label);
+        Button b = button(menuIconText(icon + "   " + label));
         if ("Недавно смотрели".equals(label)) {
             android.text.SpannableString menuText =
                     new android.text.SpannableString(icon + "   " + label);
