@@ -4040,6 +4040,8 @@ public class MainActivity extends Activity {
         EditText[] fields = {primary, backup, custom, key};
         String[] labels = {"Основной сервер", "Резервный сервер", "Свой сервер (необязательно)", "API Key"};
         String[] values = {jackettPrimary(), jackettBackup(), jackettCustom(), jackettApiKey()};
+        TextView[] indicators = new TextView[3];
+        Button[] checks = new Button[3];
         for (int i = 0; i < fields.length; i++) {
             TextView label = text(labels[i], 13, TEAL, true);
             label.setPadding(0, dp(5), 0, dp(2));
@@ -4052,29 +4054,31 @@ public class MainActivity extends Activity {
             field.setTextSize(fontSize(14));
             field.setPadding(dp(10), dp(7), dp(10), dp(7));
             field.setBackground(shape(PANEL, TEAL));
-            if (i == 3) field.setInputType(android.text.InputType.TYPE_CLASS_TEXT
-                    | android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD);
-            if (i == 2) {
-                LinearLayout customRow = new LinearLayout(this);
-                customRow.setOrientation(LinearLayout.HORIZONTAL);
-                customRow.setGravity(Gravity.CENTER_VERTICAL);
-                customRow.addView(field, new LinearLayout.LayoutParams(0, dp(44), 1f));
+            if (i == 3) {
+                field.setInputType(android.text.InputType.TYPE_CLASS_TEXT
+                        | android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD);
+                panel.addView(field, new LinearLayout.LayoutParams(-1, dp(44)));
+            } else {
+                final int index = i;
+                LinearLayout row = new LinearLayout(this);
+                row.setOrientation(LinearLayout.HORIZONTAL);
+                row.setGravity(Gravity.CENTER_VERTICAL);
+                row.addView(field, new LinearLayout.LayoutParams(0, dp(44), 1f));
                 Button check = settingsPillButton("Проверить");
                 LinearLayout.LayoutParams checkParams =
                         new LinearLayout.LayoutParams(dp(112), dp(44));
                 checkParams.leftMargin = dp(8);
-                customRow.addView(check, checkParams);
+                row.addView(check, checkParams);
                 TextView result = text("—", 23, Color.LTGRAY, true);
                 result.setGravity(Gravity.CENTER);
                 LinearLayout.LayoutParams resultParams =
-                        new LinearLayout.LayoutParams(dp(34), dp(44));
-                resultParams.leftMargin = dp(5);
-                customRow.addView(result, resultParams);
-                check.setOnClickListener(v -> checkJackettCustomServer(
-                        field, key, check, result));
-                panel.addView(customRow, new LinearLayout.LayoutParams(-1, dp(46)));
-            } else {
-                panel.addView(field, new LinearLayout.LayoutParams(-1, dp(44)));
+                        new LinearLayout.LayoutParams(dp(30), dp(44));
+                resultParams.leftMargin = dp(4);
+                row.addView(result, resultParams);
+                panel.addView(row, new LinearLayout.LayoutParams(-1, dp(46)));
+                indicators[index] = result;
+                checks[index] = check;
+                check.setOnClickListener(v -> checkJackettCustomServer(field, key, check, result));
             }
         }
         TextView note = text("Используется Torznab API. Для указанных публичных серверов API Key не требуется. Для своего сервера ключ можно оставить пустым или указать при необходимости.",
@@ -4110,7 +4114,7 @@ public class MainActivity extends Activity {
         dialog.show();
         if (dialog.getWindow() != null) {
             dialog.getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(BG));
-            dialog.getWindow().setLayout(Math.min(dp(760),
+            dialog.getWindow().setLayout(Math.min(dp(820),
                     getResources().getDisplayMetrics().widthPixels - dp(48)),
                     ViewGroup.LayoutParams.WRAP_CONTENT);
         }
@@ -4122,7 +4126,7 @@ public class MainActivity extends Activity {
         if (!validJackettBase(base)) {
             resultView.setText("✕");
             resultView.setTextColor(Color.RED);
-            showMessage("Укажите корректный адрес своего сервера");
+            showMessage("Укажите корректный адрес сервера");
             return;
         }
         checkButton.setEnabled(false);
@@ -4151,9 +4155,7 @@ public class MainActivity extends Activity {
                         success = body.contains("<caps") || body.contains(":caps");
                         if (!success) error = "Ответ не похож на Torznab API";
                     }
-                } else {
-                    error = "HTTP " + code;
-                }
+                } else error = "HTTP " + code;
             } catch (Exception e) {
                 error = safe(e.getMessage());
             } finally {
@@ -4165,8 +4167,8 @@ public class MainActivity extends Activity {
                 checkButton.setEnabled(true);
                 resultView.setText(passed ? "✓" : "✕");
                 resultView.setTextColor(passed ? Color.GREEN : Color.RED);
-                if (!passed) showMessage("Проверка Jackett не пройдена: " + failure);
-                else showMessage("Свой сервер Jackett доступен");
+                if (!passed) showMessage("Проверка сервера не пройдена: " + failure);
+                else showMessage("Сервер Jackett доступен");
             });
         });
     }
