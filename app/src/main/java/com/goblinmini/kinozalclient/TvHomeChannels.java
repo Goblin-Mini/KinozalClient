@@ -29,6 +29,31 @@ import java.util.concurrent.Executors;
 
 final class TvHomeChannels {
     private static final String TAG = "KinozalTvChannels";
+    private static final String DIAG_FILE = "kinozal_tv_channels_diagnostics.txt";
+    private static void diag(Activity a, String event, String details) {
+        if (a == null) return;
+        String line = new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.ROOT).format(new java.util.Date()) + " " + event + " " + details + "\n";
+        synchronized (TvHomeChannels.class) {
+            try (java.io.FileOutputStream out = new java.io.FileOutputStream(new File(a.getFilesDir(), DIAG_FILE), true)) { out.write(line.getBytes(StandardCharsets.UTF_8)); out.getFD().sync(); }
+            catch (Exception e) { Log.w(TAG, "Diagnostic write failed", e); }
+        }
+    }
+    static String readDiagnostics(Activity a) {
+        File f = new File(a.getFilesDir(), DIAG_FILE);
+        try { return f.isFile() ? new String(Files.readAllBytes(f.toPath()), StandardCharsets.UTF_8) : ""; }
+        catch (Exception e) { return "Ошибка чтения: " + e.getMessage(); }
+    }
+    static void refreshNow(Activity a) {
+        if (a == null) return;
+        File model = new File(a.getFilesDir(), "kinozal_home_model_v2.json");
+        diag(a, "MANUAL_REFRESH", "modelExists=" + model.isFile());
+        sync(a, model);
+    }
+    static void clearChannelData(Activity a) {
+        diag(a, "CLEAR_REQUEST", "remove all Kinozal channels");
+        removeAll(a);
+    }
+
     private static final String PREFS = "kinozal_settings";
     private static final String RECENT_KEY = "recently_viewed";
     private static final String[] CHANNEL_KEYS = {
@@ -67,6 +92,7 @@ final class TvHomeChannels {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O || activity == null || modelFile == null) return;
         if (!activity.getSharedPreferences(PREFS, Activity.MODE_PRIVATE)
                 .getBoolean("tv_channels_enabled", true)) return;
+        diag(activity, "SYNC_START", "modelExists=" + modelFile.isFile());
         EXECUTOR.execute(() -> {
             try {
                 if (!modelFile.isFile() || modelFile.length() <= 0 || modelFile.length() > 8L * 1024L * 1024L) return;
@@ -75,7 +101,8 @@ final class TvHomeChannels {
                 String savedMirror = root.optString("mirror", "");
                 if (savedMirror.isEmpty()) return;
                 JSONArray feeds = root.optJSONArray("feeds");
-                if (feeds == null) return;
+                if (feeds == null) { diag(activity, "SYNC_ERROR", "feeds array missing"); return; }
+                diag(activity, "MODEL_READ", "feeds=" + feeds.length() + ", mirror=" + savedMirror);
 
                 PreviewChannelHelper helper = new PreviewChannelHelper(activity);
                 boolean hadChannels = !helper.getAllChannels().isEmpty();
@@ -138,6 +165,7 @@ final class TvHomeChannels {
                     replacePrograms(activity, helper, channelIds[i], CHANNEL_KEYS[i], programs);
                 }
 
+                diag(activity, "SYNC_DONE", "channels=" + helper.getAllChannels().size());
                 // Ask Android TV to pin only the first collection (Новинки кино).
                 // Other collections are published silently and must not trigger
                 // a chain of system confirmation dialogs.
@@ -157,8 +185,10 @@ final class TvHomeChannels {
                     }
                 });
             } catch (SecurityException e) {
+                diag(activity, "SYNC_ERROR", "SecurityException: " + e.getMessage());
                 Log.w(TAG, "TV provider permission is unavailable on this device", e);
             } catch (Exception e) {
+                diag(activity, "SYNC_ERROR", e.getClass().getSimpleName() + ": " + e.getMessage());
                 Log.w(TAG, "Channel synchronization failed", e);
             }
         });
