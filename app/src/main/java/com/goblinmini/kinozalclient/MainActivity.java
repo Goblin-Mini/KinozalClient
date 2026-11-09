@@ -2431,30 +2431,36 @@ public class MainActivity extends Activity {
         browserHandler.post(next[0]);
     }
 
+    // Build a small batch per display frame instead of sleeping 48 ms after
+    // every card. The time budget leaves room for drawing and DPAD input.
+    private static final int HOME_MAX_CARDS_PER_FRAME = 3;
+    private static final long HOME_CARD_BUILD_BUDGET_NS = 5_000_000L;
+
     private void scheduleNextHomeCardBuild(int generation) {
         if (generation != homeRenderGeneration || isFinishing() || homeCardBuildScheduled) return;
         homeCardBuildScheduled = true;
-        browserHandler.post(() -> {
+        Choreographer.getInstance().postFrameCallback(frameTimeNanos -> {
             homeCardBuildScheduled = false;
             if (generation != homeRenderGeneration || isFinishing()) return;
-            Runnable task = homeCardBuildQueue.pollFirst();
-            if (task == null) {
-                if (homeRowsEnqueued) {
-                    scheduleVisibleHomePosterLoad();
-                    stopHomePerformanceMonitor();
-                } else {
-                    browserHandler.postDelayed(() -> scheduleNextHomeCardBuild(generation), 24);
-                }
-                return;
+
+            long sliceStartedAt = android.os.SystemClock.elapsedRealtimeNanos();
+            int builtThisFrame = 0;
+            while (builtThisFrame < HOME_MAX_CARDS_PER_FRAME
+                    && android.os.SystemClock.elapsedRealtimeNanos() - sliceStartedAt
+                            < HOME_CARD_BUILD_BUDGET_NS) {
+                Runnable task = homeCardBuildQueue.pollFirst();
+                if (task == null) break;
+                task.run();
+                builtThisFrame++;
             }
-            task.run();
-            // Yield several display frames between card constructions. The
-            // handler runs on the UI thread; an 8 ms cadence starves DPAD and
-            // click handling on slower Android TV hardware while rows are built.
-            if (!homeCardBuildQueue.isEmpty()) {
-                browserHandler.postDelayed(() -> scheduleNextHomeCardBuild(generation), 48L);
+
+            if (!homeCardBuildQueue.isEmpty() || !homeRowsEnqueued) {
+                // Continue on the next vsync; never monopolize the UI thread
+                // with the entire catalogue, even on faster hardware.
+                scheduleNextHomeCardBuild(generation);
             } else {
-                browserHandler.postDelayed(() -> scheduleNextHomeCardBuild(generation), 48L);
+                scheduleVisibleHomePosterLoad();
+                stopHomePerformanceMonitor();
             }
         });
     }
