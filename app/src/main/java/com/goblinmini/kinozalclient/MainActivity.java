@@ -3286,12 +3286,16 @@ public class MainActivity extends Activity {
     private CharSequence menuIconText(String value) {
         int end = value.indexOf("  ");
         if (end <= 0 || end > 4) return value;
+        float iconScale = 1.05f;
+        if (value.contains("Недавно смотрели") || value.contains("Все раздачи")) {
+            iconScale = 1.5f;
+        }
         android.text.SpannableString styled = new android.text.SpannableString(value);
         styled.setSpan(new android.text.style.ForegroundColorSpan(Color.rgb(174, 55, 18)),
                 0, end, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
         styled.setSpan(new android.text.style.StyleSpan(android.graphics.Typeface.BOLD),
                 0, end, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-        styled.setSpan(new android.text.style.RelativeSizeSpan(1.05f),
+        styled.setSpan(new android.text.style.RelativeSizeSpan(iconScale),
                 0, end, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
         return styled;
     }
@@ -4508,13 +4512,6 @@ public class MainActivity extends Activity {
     private void addMenu(String icon, String label, Runnable action) {
         Button b = button(icon + "   " + label);
         b.setText(menuIconText(icon + "   " + label));
-        if ("Недавно смотрели".equals(label)) {
-            android.text.SpannableString menuText =
-                    new android.text.SpannableString(icon + "   " + label);
-            menuText.setSpan(new android.text.style.RelativeSizeSpan(1.2f),
-                    0, icon.length(), android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-            b.setText(menuText);
-        }
         b.setText(menuIconText(icon + "   " + label));
         b.setGravity(Gravity.CENTER_VERTICAL | Gravity.LEFT);
         b.setTextSize(fontSize(14));
