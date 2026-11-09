@@ -4186,6 +4186,10 @@ public class MainActivity extends Activity {
         panel.setOrientation(LinearLayout.VERTICAL);
         panel.setPadding(dp(12), dp(8), dp(12), dp(8));
         panel.setBackgroundColor(BG);
+        TextView dialogTitle = text("Другие трекеры", 20, GOLD, true);
+        dialogTitle.setTypeface(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.BOLD);
+        dialogTitle.setPadding(dp(4), dp(6), dp(4), dp(10));
+        panel.addView(dialogTitle);
         TextView mainRelease = text(query == null ? "" : query.trim(), 16, Color.WHITE, true);
         mainRelease.setMaxLines(2);
         mainRelease.setEllipsize(android.text.TextUtils.TruncateAt.END);
@@ -4194,6 +4198,20 @@ public class MainActivity extends Activity {
         TextView status = text("Поиск по: " + searchTitle + "\nПодключение к Jackett…", 13, TEAL, false);
         status.setPadding(dp(4), 0, dp(4), dp(8));
         panel.addView(status);
+        LinearLayout sortBar = new LinearLayout(this);
+        sortBar.setGravity(Gravity.CENTER_VERTICAL);
+        sortBar.setPadding(dp(4), dp(2), dp(4), dp(8));
+        Button dateSort = button("Дата ↓");
+        Button sizeSort = button("Размер");
+        Button seedsSort = button("Сиды");
+        Button[] sortButtons = {dateSort, sizeSort, seedsSort};
+        for (Button b : sortButtons) {
+            b.setTextSize(fontSize(12));
+            LinearLayout.LayoutParams bp = new LinearLayout.LayoutParams(0, dp(38), 1f);
+            bp.rightMargin = dp(5);
+            sortBar.addView(b, bp);
+        }
+        panel.addView(sortBar);
         ScrollView scroll = new ScrollView(this);
         scroll.setFocusable(false);
         scroll.setDescendantFocusability(ViewGroup.FOCUS_AFTER_DESCENDANTS);
@@ -4201,13 +4219,7 @@ public class MainActivity extends Activity {
         results.setOrientation(LinearLayout.VERTICAL);
         scroll.addView(results);
         panel.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1));
-        TextView dialogTitle = text("Другие раздачи", 20, GOLD, true);
-        dialogTitle.setTypeface(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.BOLD);
-        dialogTitle.setPadding(dp(4), dp(6), dp(4), dp(10));
-        panel.addView(dialogTitle, 0);
-        // No bottom Close button: Android TV Back dismisses this dialog.
-        AlertDialog dialog = new AlertDialog.Builder(this)
-                .setView(panel).create();
+        AlertDialog dialog = new AlertDialog.Builder(this).setView(panel).create();
         dialog.show();
         if (dialog.getWindow() != null) {
             dialog.getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(BG));
@@ -4245,7 +4257,8 @@ public class MainActivity extends Activity {
                     StringBuilder xml = new StringBuilder();
                     byte[] buffer = new byte[8192];
                     int count;
-                    while ((count = input.read(buffer)) != -1) xml.append(new String(buffer, 0, count, StandardCharsets.UTF_8));
+                    while ((count = input.read(buffer)) != -1)
+                        xml.append(new String(buffer, 0, count, StandardCharsets.UTF_8));
                     input.close();
                     connection.disconnect();
                     Document rss = Jsoup.parse(xml.toString(), "", org.jsoup.parser.Parser.xmlParser());
@@ -4264,88 +4277,129 @@ public class MainActivity extends Activity {
                 if (serverUsed == null) {
                     status.setText("Не удалось выполнить поиск. " + failure
                             + "\nПроверьте доступность сервера и адрес API.");
+                    for (Button b : sortButtons) b.setVisibility(View.GONE);
                     return;
                 }
                 status.setText("Найдено: " + items.size() + " · " + serverUsed);
                 if (items.isEmpty()) {
+                    for (Button b : sortButtons) b.setVisibility(View.GONE);
                     results.addView(text("По этому названию ничего не найдено.", 14, Color.LTGRAY, false));
                     return;
                 }
-                View firstResult = null;
-                for (Element item : items) {
-                    String name = item.selectFirst("title") == null ? "Без названия" : item.selectFirst("title").text();
-                    String size = jackettAttribute(item, "size");
-                    if ("—".equals(size)) {
-                        Element enclosure = item.selectFirst("enclosure");
-                        if (enclosure != null) size = enclosure.attr("length");
-                    }
-                    size = formatJackettSize(size);
-                    String seeders = jackettAttribute(item, "seeders");
-                    String peers = jackettAttribute(item, "peers");
-                    String tracker = jackettAttribute(item, "jackettindexer");
-                    if ("—".equals(tracker)) tracker = "";
-                    Element link = item.selectFirst("link");
-                    String target = link == null ? "" : link.text().trim();
-                    if (target.isEmpty() && link != null) target = link.attr("href");
-                    if (target.isEmpty()) {
-                        Element enclosure = item.selectFirst("enclosure");
-                        if (enclosure != null) target = enclosure.attr("url");
-                    }
-                    final String resultUrl = target;
-                    LinearLayout row = new LinearLayout(this);
-                    row.setOrientation(LinearLayout.VERTICAL);
-                    row.setPadding(dp(14), dp(10), dp(14), dp(10));
-                    row.setBackground(shape(PANEL, 0));
-                    row.setFocusable(true);
-                    row.setFocusableInTouchMode(true);
-                    row.setClickable(true);
-                    row.setOnFocusChangeListener((view, focused) ->
-                            view.setBackground(shape(focused ? Color.rgb(65, 72, 73) : PANEL, focused ? GOLD : 0)));
-                    TextView titleView = text(name, 15, Color.WHITE, true);
-                    row.addView(titleView);
-                    String metaValue = (tracker.isEmpty() ? "" : tracker + "  ·  ")
-                            + "Размер: " + size + "  ·  Сиды: " + seeders + "  ·  Пиры: " + peers;
-                    android.text.SpannableString metaText = new android.text.SpannableString(metaValue);
-                    int trackerColor = Color.rgb(231, 186, 134); // #E7BA86 tracker accent
-                    int trackerStart = 0;
-                    if (!tracker.isEmpty()) {
-                        metaText.setSpan(new android.text.style.ForegroundColorSpan(trackerColor),
-                                trackerStart, tracker.length(), android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-                    }
-                    int seedsStart = metaValue.indexOf("Сиды:");
-                    int seedsEnd = metaValue.indexOf("  ·  Пиры:");
-                    if (seedsStart >= 0 && seedsEnd > seedsStart) {
-                        metaText.setSpan(new android.text.style.ForegroundColorSpan(TEAL),
-                                seedsStart, seedsEnd, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-                    }
-                    int peersStart = metaValue.indexOf("Пиры:");
-                    if (peersStart >= 0) {
-                        metaText.setSpan(new android.text.style.ForegroundColorSpan(RED),
-                                peersStart, metaValue.length(), android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-                    }
-                    TextView meta = text("", 12, TEAL, false);
-                    meta.setText(metaText);
-                    meta.setPadding(0, dp(4), 0, 0);
-                    row.addView(meta);
-                    if (!resultUrl.isEmpty()) row.setOnClickListener(v -> {
-                        try {
-                            Intent open = new Intent(Intent.ACTION_VIEW, Uri.parse(resultUrl));
-                            open.putExtra("poster", posterUrl == null ? "" : posterUrl);
-                            open.putExtra("title", name);
-                            startActivity(open);
-                        } catch (Exception e) { showMessage("Не удалось открыть ссылку результата."); }
+                final String[] sortKey = {"date"};
+                final boolean[] descending = {true};
+                Runnable render = () -> {
+                    results.removeAllViews();
+                    dateSort.setText("Дата" + ("date".equals(sortKey[0]) ? (descending[0] ? " ↓" : " ↑") : ""));
+                    sizeSort.setText("Размер" + ("size".equals(sortKey[0]) ? (descending[0] ? " ↓" : " ↑") : ""));
+                    seedsSort.setText("Сиды" + ("seeds".equals(sortKey[0]) ? (descending[0] ? " ↓" : " ↑") : ""));
+                    List<Element> sorted = new ArrayList<>(items);
+                    java.util.Collections.sort(sorted, (left, right) -> {
+                        int cmp;
+                        if ("size".equals(sortKey[0])) {
+                            cmp = Double.compare(sizeValue(jackettAttribute(left, "size")),
+                                    sizeValue(jackettAttribute(right, "size")));
+                        } else if ("seeds".equals(sortKey[0])) {
+                            cmp = Integer.compare(parseInt(jackettAttribute(left, "seeders")),
+                                    parseInt(jackettAttribute(right, "seeders")));
+                        } else {
+                            cmp = Long.compare(jackettPubDateValue(left), jackettPubDateValue(right));
+                        }
+                        return descending[0] ? -cmp : cmp;
                     });
-                    LinearLayout.LayoutParams rowParams = new LinearLayout.LayoutParams(-1, -2);
-                    rowParams.bottomMargin = dp(6);
-                    results.addView(row, rowParams);
-                    if (firstResult == null && !resultUrl.isEmpty()) firstResult = row;
+                    View firstResult = null;
+                    for (Element item : sorted) {
+                        String name = item.selectFirst("title") == null ? "Без названия" : item.selectFirst("title").text();
+                        String size = jackettAttribute(item, "size");
+                        if ("—".equals(size)) {
+                            Element enclosure = item.selectFirst("enclosure");
+                            if (enclosure != null) size = enclosure.attr("length");
+                        }
+                        size = formatJackettSize(size);
+                        String seeders = jackettAttribute(item, "seeders");
+                        String peers = jackettAttribute(item, "peers");
+                        String tracker = jackettAttribute(item, "jackettindexer");
+                        if ("—".equals(tracker)) tracker = "";
+                        Element link = item.selectFirst("link");
+                        String target = link == null ? "" : link.text().trim();
+                        if (target.isEmpty() && link != null) target = link.attr("href");
+                        if (target.isEmpty()) {
+                            Element enclosure = item.selectFirst("enclosure");
+                            if (enclosure != null) target = enclosure.attr("url");
+                        }
+                        final String resultUrl = target;
+                        LinearLayout row = new LinearLayout(this);
+                        row.setOrientation(LinearLayout.VERTICAL);
+                        row.setPadding(dp(14), dp(10), dp(14), dp(10));
+                        row.setBackground(shape(PANEL, 0));
+                        row.setFocusable(true);
+                        row.setFocusableInTouchMode(true);
+                        row.setClickable(true);
+                        row.setOnFocusChangeListener((view, focused) ->
+                                view.setBackground(shape(focused ? Color.rgb(65, 72, 73) : PANEL, focused ? GOLD : 0)));
+                        row.addView(text(name, 15, Color.WHITE, true));
+                        String metaValue = (tracker.isEmpty() ? "" : tracker + "  ·  ")
+                                + "Размер: " + size + "  ·  Сиды: " + seeders + "  ·  Пиры: " + peers;
+                        android.text.SpannableString metaText = new android.text.SpannableString(metaValue);
+                        if (!tracker.isEmpty()) metaText.setSpan(new android.text.style.ForegroundColorSpan(
+                                Color.rgb(231, 186, 134)), 0, tracker.length(),
+                                android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+                        int seedsStart = metaValue.indexOf("Сиды:");
+                        int seedsEnd = metaValue.indexOf("  ·  Пиры:");
+                        if (seedsStart >= 0 && seedsEnd > seedsStart) metaText.setSpan(
+                                new android.text.style.ForegroundColorSpan(TEAL), seedsStart, seedsEnd,
+                                android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+                        int peersStart = metaValue.indexOf("Пиры:");
+                        if (peersStart >= 0) metaText.setSpan(new android.text.style.ForegroundColorSpan(RED),
+                                peersStart, metaValue.length(), android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+                        TextView meta = text("", 12, TEAL, false);
+                        meta.setText(metaText);
+                        meta.setPadding(0, dp(4), 0, 0);
+                        row.addView(meta);
+                        if (!resultUrl.isEmpty()) row.setOnClickListener(v -> {
+                            try {
+                                Intent open = new Intent(Intent.ACTION_VIEW, Uri.parse(resultUrl));
+                                open.putExtra("poster", posterUrl == null ? "" : posterUrl);
+                                open.putExtra("title", name);
+                                startActivity(open);
+                            } catch (Exception e) { showMessage("Не удалось открыть ссылку результата."); }
+                        });
+                        LinearLayout.LayoutParams rowParams = new LinearLayout.LayoutParams(-1, -2);
+                        rowParams.bottomMargin = dp(6);
+                        results.addView(row, rowParams);
+                        if (firstResult == null && !resultUrl.isEmpty()) firstResult = row;
+                    }
+                    if (firstResult != null) {
+                        View focusTarget = firstResult;
+                        focusTarget.post(focusTarget::requestFocus);
+                    }
+                };
+                for (int i = 0; i < sortButtons.length; i++) {
+                    final String key = i == 0 ? "date" : i == 1 ? "size" : "seeds";
+                    sortButtons[i].setOnClickListener(v -> {
+                        if (key.equals(sortKey[0])) descending[0] = !descending[0];
+                        else { sortKey[0] = key; descending[0] = true; }
+                        render.run();
+                    });
                 }
-                if (firstResult != null) {
-                    View focusTarget = firstResult;
-                    focusTarget.post(focusTarget::requestFocus);
-                }
+                render.run();
             });
         });
+    }
+
+    private long jackettPubDateValue(Element item) {
+        String value = item.selectFirst("pubDate") == null ? "" : item.selectFirst("pubDate").text().trim();
+        if (value.isEmpty()) return 0L;
+        String[] patterns = {"EEE, dd MMM yyyy HH:mm:ss Z", "dd MMM yyyy HH:mm:ss Z",
+                "yyyy-MM-dd'T'HH:mm:ss'Z'", "yyyy-MM-dd"};
+        for (String pattern : patterns) {
+            try {
+                java.text.SimpleDateFormat format = new java.text.SimpleDateFormat(pattern, java.util.Locale.US);
+                format.setLenient(true);
+                return format.parse(value).getTime();
+            } catch (Exception ignored) { }
+        }
+        return 0L;
     }
 
     private String extractJackettSearchTitle(String fullTitle) {
