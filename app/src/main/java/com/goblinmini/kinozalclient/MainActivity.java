@@ -230,7 +230,7 @@ public class MainActivity extends Activity {
                 + ", screen=" + getResources().getDisplayMetrics().widthPixels + "x"
                 + getResources().getDisplayMetrics().heightPixels
                 + ", density=" + getResources().getDisplayMetrics().density
-                + ", totalRamMB=" + ((android.app.ActivityManager)getSystemService(ACTIVITY_SERVICE))
+                + ", appMemoryClassMB=" + ((android.app.ActivityManager)getSystemService(ACTIVITY_SERVICE))
                     .getMemoryClass()
                 + ", lowRamDevice=" + getSystemService(android.app.ActivityManager.class).isLowRamDevice());
         Choreographer.getInstance().postFrameCallback(homePerfFrameCallback);
