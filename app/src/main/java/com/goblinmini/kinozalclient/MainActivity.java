@@ -2881,7 +2881,8 @@ public class MainActivity extends Activity {
         addMenu("▤", "Подборки", () -> loadCollections());
         addMenu("⇩", "Все раздачи", () -> load("browse.php", "Все раздачи"));
 
-        Button categoriesButton = button(menuIconText("▦   Категории  ▾"));
+        Button categoriesButton = button("▦   Категории  ▾");
+        categoriesButton.setText(menuIconText("▦   Категории  ▾"));
         categoriesButton.setGravity(Gravity.CENTER_VERTICAL | Gravity.LEFT);
         categoriesButton.setTextSize(fontSize(14));
         categoriesButton.setPadding(dp(14), 0, dp(8), 0);
@@ -2899,7 +2900,8 @@ public class MainActivity extends Activity {
         addSubMenu(categoryGroup, "▣  Зарубежные сериалы", "browse.php?c=46");
         addSubMenu(categoryGroup, "▣  Российские сериалы", "browse.php?c=45");
 
-        Button moviesButton = button(menuIconText("▤  Фильмы  ▾"));
+        Button moviesButton = button("▤  Фильмы  ▾");
+        moviesButton.setText(menuIconText("▤  Фильмы  ▾"));
         moviesButton.setGravity(Gravity.CENTER_VERTICAL | Gravity.LEFT);
         moviesButton.setTextSize(fontSize(12));
         moviesButton.setPadding(dp(34), 0, dp(8), 0);
@@ -3300,7 +3302,8 @@ public class MainActivity extends Activity {
         if (existingIconEnd <= 0 || existingIconEnd > 3) {
             displayLabel = categoryIcon(label) + "  " + label;
         }
-        Button b = button(menuIconText(displayLabel));
+        Button b = button(displayLabel);
+        b.setText(menuIconText(displayLabel));
         // One uniform icon size and weight across every category row.
         int iconEnd = displayLabel.indexOf("  ");
         if (iconEnd > 0 && iconEnd <= 3) {
@@ -4503,7 +4506,8 @@ public class MainActivity extends Activity {
     }
 
     private void addMenu(String icon, String label, Runnable action) {
-        Button b = button(menuIconText(icon + "   " + label));
+        Button b = button(icon + "   " + label);
+        b.setText(menuIconText(icon + "   " + label));
         if ("Недавно смотрели".equals(label)) {
             android.text.SpannableString menuText =
                     new android.text.SpannableString(icon + "   " + label);
