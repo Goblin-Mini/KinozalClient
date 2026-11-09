@@ -2046,6 +2046,11 @@ public class MainActivity extends Activity {
                 } else {
                     try {
                         refreshed.items.addAll(parseHomePosters(Jsoup.parse(html, client.getMirror() + "/")));
+                        // Keep single-feed refresh consistent with initial and bulk loading:
+                        // collapse alternate encodes of the same movie before saving/rendering.
+                        List<HomeSection> singleFeed = new ArrayList<>();
+                        singleFeed.add(refreshed);
+                        removeHomeDuplicates(singleFeed);
                     } catch (Exception e) {
                         failure = "Не удалось разобрать ленту: " + e.getMessage();
                     }
