@@ -582,6 +582,8 @@ public class MainActivity extends Activity {
     private static class HomePoster {
         Torrent torrent;
         String imageUrl;
+        // Prepared away from the UI thread before the card enters the view tree.
+        List<String> preparedBadges;
     }
 
     private void loadInitialCatalog() {
@@ -2367,14 +2369,34 @@ public class MainActivity extends Activity {
         }
     }
 
+    private int homePreparationGeneration = 0;
+
     private void renderHome(List<HomeSection> sections) {
-        list.removeAllViews();
-        ensureFeedActions();
-        if (sections.isEmpty()) {
-            addEmpty("Подборки пока не загружены.");
-            return;
-        }
-        renderHomeSectionsIncrementally(sections);
+        if (list == null || isFinishing()) return;
+        final int preparation = ++homePreparationGeneration;
+        final List<HomeSection> snapshot = new ArrayList<>(sections);
+        // Regex matching and badge classification are pure data work. Do it on
+        // the I/O executor so the first few cards do not stall DPAD handling.
+        executeSafely(io, () -> {
+            for (HomeSection section : snapshot) {
+                if (section == null || section.items == null) continue;
+                for (HomePoster poster : section.items) {
+                    if (poster == null || poster.torrent == null) continue;
+                    poster.preparedBadges = extractHomeBadges(
+                            poster.torrent.title, section.title);
+                }
+            }
+            runOnUiThread(() -> {
+                if (preparation != homePreparationGeneration || isFinishing() || list == null) return;
+                list.removeAllViews();
+                ensureFeedActions();
+                if (snapshot.isEmpty()) {
+                    addEmpty("Подборки пока не загружены.");
+                    return;
+                }
+                renderHomeSectionsIncrementally(snapshot);
+            });
+        });
     }
 
     /**
@@ -2430,9 +2452,9 @@ public class MainActivity extends Activity {
             // handler runs on the UI thread; an 8 ms cadence starves DPAD and
             // click handling on slower Android TV hardware while rows are built.
             if (!homeCardBuildQueue.isEmpty()) {
-                browserHandler.postDelayed(() -> scheduleNextHomeCardBuild(generation), 32L);
+                browserHandler.postDelayed(() -> scheduleNextHomeCardBuild(generation), 48L);
             } else {
-                browserHandler.postDelayed(() -> scheduleNextHomeCardBuild(generation), 32L);
+                browserHandler.postDelayed(() -> scheduleNextHomeCardBuild(generation), 48L);
             }
         });
     }
@@ -2592,7 +2614,8 @@ public class MainActivity extends Activity {
         posterFrame.addView(poster, new FrameLayout.LayoutParams(-1, -1));
         card.addView(posterFrame, new LinearLayout.LayoutParams(dp(126), dp(178)));
 
-        List<String> badges = extractHomeBadges(item.torrent.title, section.title);
+        List<String> badges = item.preparedBadges != null
+                ? item.preparedBadges : extractHomeBadges(item.torrent.title, section.title);
         LinearLayout badgeRow = new LinearLayout(this);
         badgeRow.setOrientation(LinearLayout.HORIZONTAL);
         badgeRow.setGravity(Gravity.CENTER_VERTICAL);
