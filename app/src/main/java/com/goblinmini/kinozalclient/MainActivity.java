@@ -3747,6 +3747,12 @@ public class MainActivity extends Activity {
                 14, Color.WHITE, false);
         info.setLineSpacing(dp(4), 1f);
         panel.addView(info);
+
+        Button feedsButton = settingsPillButton("Диагностика лент");
+        LinearLayout.LayoutParams feedsParams = new LinearLayout.LayoutParams(-1, dp(46));
+        feedsParams.topMargin = dp(10);
+        panel.addView(feedsButton, feedsParams);
+
         AlertDialog dialog = new AlertDialog.Builder(this)
                 .setTitle("Диагностика")
                 .setView(panel)
@@ -3754,6 +3760,10 @@ public class MainActivity extends Activity {
                 .setNeutralButton("Отправить отчёт", null)
                 .create();
         dialog.setOnShowListener(d -> {
+            feedsButton.setOnClickListener(v -> {
+                dialog.dismiss();
+                showFeedDiagnostics();
+            });
             Button send = dialog.getButton(AlertDialog.BUTTON_NEUTRAL);
             send.setEnabled(!report.isEmpty());
             send.setTextColor(GOLD);
@@ -3772,6 +3782,45 @@ public class MainActivity extends Activity {
             dialog.getWindow().setLayout(Math.min(dp(520),
                     getResources().getDisplayMetrics().widthPixels - dp(48)),
                     ViewGroup.LayoutParams.WRAP_CONTENT);
+        }
+    }
+
+    private void showFeedDiagnostics() {
+        String report = FeedDiagnostics.read(this);
+        ScrollView scroll = new ScrollView(this);
+        TextView content = text(report.isEmpty()
+                ? "Диагностика лент пока пуста. Откройте Главную или Подборки и дождитесь завершения загрузки."
+                : report, 12, Color.WHITE, false);
+        content.setTextIsSelectable(true);
+        content.setTypeface(android.graphics.Typeface.MONOSPACE);
+        content.setPadding(dp(12), dp(10), dp(12), dp(10));
+        scroll.addView(content);
+
+        AlertDialog dialog = new AlertDialog.Builder(this)
+                .setTitle("Диагностика лент")
+                .setView(scroll)
+                .setPositiveButton("Закрыть", null)
+                .setNeutralButton("Отправить отчёт", null)
+                .create();
+        dialog.setOnShowListener(d -> {
+            Button send = dialog.getButton(AlertDialog.BUTTON_NEUTRAL);
+            send.setEnabled(!report.isEmpty());
+            send.setTextColor(GOLD);
+            send.setOnClickListener(v -> {
+                Intent share = new Intent(Intent.ACTION_SEND);
+                share.setType("text/plain");
+                share.putExtra(Intent.EXTRA_SUBJECT, "Kinozal ТВ — диагностика лент");
+                share.putExtra(Intent.EXTRA_TEXT, report);
+                startActivity(Intent.createChooser(share, "Отправить диагностику лент"));
+            });
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setTextColor(GOLD);
+        });
+        dialog.show();
+        if (dialog.getWindow() != null) {
+            dialog.getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(BG));
+            dialog.getWindow().setLayout(Math.min(dp(760),
+                    getResources().getDisplayMetrics().widthPixels - dp(48)),
+                    Math.min(dp(620), getResources().getDisplayMetrics().heightPixels - dp(100)));
         }
     }
 
