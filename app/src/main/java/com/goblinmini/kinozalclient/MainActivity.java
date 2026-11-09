@@ -550,7 +550,13 @@ public class MainActivity extends Activity {
             showTorrent(selected);
             return;
         }
-        String source = getSharedPreferences(PREFS, MODE_PRIVATE).getString("startup_source", "home");
+        android.content.SharedPreferences startupPrefs = getSharedPreferences(PREFS, MODE_PRIVATE);
+        // A clean installation must always start on Home. Only honor a startup
+        // section after the user explicitly selected it in settings.
+        if (!startupPrefs.getBoolean("startup_source_user_set", false)) {
+            startupPrefs.edit().putString("startup_source", "home").apply();
+        }
+        String source = startupPrefs.getString("startup_source", "home");
         if ("collections".equals(source)) loadCollections();
         else if ("browse.php".equals(source)) load("browse.php", "Все раздачи");
         else if ("browse.php?c=1002".equals(source)) load(source, "Все фильмы");
@@ -3700,7 +3706,8 @@ public class MainActivity extends Activity {
         new AlertDialog.Builder(this).setTitle("Открывать при запуске")
                 .setSingleChoiceItems(labels, selected, (d, which) -> {
                     getSharedPreferences(PREFS, MODE_PRIVATE).edit()
-                            .putString("startup_source", values[which]).apply();
+                            .putString("startup_source", values[which])
+                            .putBoolean("startup_source_user_set", true).apply();
                     d.dismiss();
                     showMessage("Стартовый раздел сохранён");
                 }).setNegativeButton("Отмена", null).show();
