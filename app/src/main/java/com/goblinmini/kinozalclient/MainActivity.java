@@ -2518,7 +2518,7 @@ public class MainActivity extends Activity {
         if (firstFeedPaths.length > 0 && firstFeedPaths[0].equals(section.path)) {
             Button refreshAll = button("Обновить всё");
             refreshAll.setTextSize(fontSize(12));
-            refreshAll.setTranslationY(-dp(3));
+            refreshAll.setTranslationY(dp(3));
             LinearLayout.LayoutParams allParams = new LinearLayout.LayoutParams(-2, dp(36));
             allParams.leftMargin = dp(8);
             sectionHeader.addView(refreshAll, allParams);
