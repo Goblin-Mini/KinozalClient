@@ -80,12 +80,24 @@ public final class HomeFeedRefreshWorker extends Worker {
             }
             if (html == null || html.trim().isEmpty()) throw new java.io.IOException("Пустой ответ Kinozal");
             Document diagnosticDoc = Jsoup.parse(html, client.getMirror() + "/");
+            Elements diagnosticAnchors = diagnosticDoc.select("a[href*=details.php?id=]");
+            StringBuilder anchorSamples = new StringBuilder();
+            for (int sample = 0; sample < Math.min(3, diagnosticAnchors.size()); sample++) {
+                Element anchor = diagnosticAnchors.get(sample);
+                Element parent = anchor.parent();
+                String parentHtml = parent == null ? "" : parent.outerHtml();
+                if (parentHtml.length() > 900) parentHtml = parentHtml.substring(0, 900);
+                if (anchorSamples.length() > 0) anchorSamples.append(" || ");
+                anchorSamples.append("a=").append(anchor.outerHtml().replaceAll("\\s+", " "))
+                        .append("; parent=").append(parentHtml.replaceAll("\\s+", " "));
+            }
             FeedDiagnostics.log(context, group, "HTML_SHAPE", "path=" + path
                     + ", pageTitle=" + diagnosticDoc.title()
-                    + ", detailsAnchors=" + diagnosticDoc.select("a[href*=details.php?id=]").size()
+                    + ", detailsAnchors=" + diagnosticAnchors.size()
                     + ", tableRows=" + diagnosticDoc.select("tr").size()
                     + ", tableCells=" + diagnosticDoc.select("tr td").size()
                     + ", bodyChars=" + (diagnosticDoc.body() == null ? 0 : diagnosticDoc.body().text().length())
+                    + ", anchorSamples=" + anchorSamples
                     + ", finalUrl=" + browserResult.finalUrl
                     + ", httpStatus=" + browserResult.httpStatus);
             JSONArray items = parseItems(html, client.getMirror());
@@ -195,20 +207,41 @@ public final class HomeFeedRefreshWorker extends Worker {
                 java.util.regex.Pattern.CASE_INSENSITIVE);
         for (Element a : anchors) {
             String href = a.absUrl("href");
-            if (href == null || !href.startsWith("http")) href = mirror + "/" + a.attr("href").replaceFirst("^/+", "");
-            if (!href.contains("/details.php?id=") || href.toLowerCase(java.util.Locale.ROOT).contains("userdetails") || !seen.add(href)) continue;
-            Element row = a.closest("tr");
-            if (row == null || row.select("td").size() < 6) continue;
+            if (href == null || !href.startsWith("http"))
+                href = mirror + "/" + a.attr("href").replaceFirst("^/+", "");
+            String lowerHref = href.toLowerCase(java.util.Locale.ROOT);
+            if (!lowerHref.contains("/details.php?id=") || lowerHref.contains("userdetails")
+                    || !seen.add(href)) continue;
+
             java.util.regex.Matcher idMatcher = idPattern.matcher(href);
             String torrentId = idMatcher.find() ? idMatcher.group(1) : "";
             if (!torrentId.isEmpty() && seenIds.contains(torrentId)) continue;
+
+            // Kinozal sometimes renders the feed as cards/divs instead of table rows.
+            // Prefer the classic row, otherwise walk up to the nearest useful container.
+            Element container = a.closest("tr");
+            if (container == null) {
+                Element candidate = a.parent();
+                while (candidate != null && !candidate.tagName().equals("body")) {
+                    if (candidate.select("a[href*=details.php?id=]").size() <= 3
+                            && (candidate.select("img").size() > 0
+                                || candidate.text().length() > a.text().length() + 8)) {
+                        container = candidate;
+                        break;
+                    }
+                    candidate = candidate.parent();
+                }
+            }
             Element img = a.selectFirst("img");
-            if (img == null) img = row.selectFirst("img");
+            if (img == null && container != null) img = container.selectFirst("img");
             if (img == null && a.parent() != null) img = a.parent().selectFirst("img");
+
             String title = a.attr("title").trim();
             if (title.isEmpty() && img != null) title = img.attr("alt").trim();
             if (title.isEmpty()) title = a.text().replaceAll("\\s+", " ").trim();
+            if (title.isEmpty() && img != null) title = img.attr("title").trim();
             if (title.isEmpty()) continue;
+
             String titleKey = normalizeFeedTitle(title);
             String imageKey = "";
             if (img != null) {
@@ -220,9 +253,11 @@ public final class HomeFeedRefreshWorker extends Worker {
             }
             if (!titleKey.isEmpty() && seenTitles.contains(titleKey)) continue;
             if (!imageKey.isEmpty() && seenImages.contains(imageKey)) continue;
+
             if (!torrentId.isEmpty()) seenIds.add(torrentId);
             if (!titleKey.isEmpty()) seenTitles.add(titleKey);
             if (!imageKey.isEmpty()) seenImages.add(imageKey);
+
             String image = "";
             if (img != null) {
                 String raw = img.hasAttr("data-src") ? img.attr("data-src")
@@ -233,7 +268,7 @@ public final class HomeFeedRefreshWorker extends Worker {
                 else if (!raw.isEmpty() && !raw.startsWith("http")) raw = mirror + "/" + raw;
                 if (raw.startsWith("http://") || raw.startsWith("https://")) image = raw;
             }
-            Elements cells = row.select("td");
+            Elements cells = container == null ? new Elements() : container.select("td");
             JSONObject item = new JSONObject();
             item.put("title", title);
             item.put("href", href);
