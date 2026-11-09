@@ -57,8 +57,14 @@ public final class HomeFeedScheduler {
         String marker = "v2|" + mirror;
         String key = "scheduled_" + group;
         android.content.SharedPreferences prefs = context.getSharedPreferences("kinozal_feed_schedule", Context.MODE_PRIVATE);
-        if (marker.equals(prefs.getString(key, ""))) return;
+        if (marker.equals(prefs.getString(key, ""))) {
+            FeedDiagnostics.log(context, group, "SCHEDULE_SKIP", "marker=" + marker
+                    + " already recorded; scheduleInitial did not enqueue a fresh chain");
+            return;
+        }
         long baseMinutes = "home".equals(group) ? 120L : 300L;
+        FeedDiagnostics.log(context, group, "SCHEDULE_INITIAL", "feeds=" + paths.length
+                + ", firstDelayMinutes=" + baseMinutes + ", marker=" + marker);
         for (int i = 0; i < paths.length; i++) {
             enqueue(context, group, i, paths[i], titles[i], baseMinutes + i * 5L,
                     ExistingWorkPolicy.REPLACE, false, paths.length);
@@ -97,6 +103,8 @@ public final class HomeFeedScheduler {
                 .putBoolean(KEY_BULK, bulk)
                 .putInt(KEY_TOTAL, total)
                 .build();
+        FeedDiagnostics.log(context, group, "WORK_ENQUEUE", "feed=" + (index + 1) + "/" + total
+                + ", path=" + path + ", delayMinutes=" + delayMinutes + ", bulk=" + bulk);
         OneTimeWorkRequest request = new OneTimeWorkRequest.Builder(HomeFeedRefreshWorker.class)
                 .setInputData(input)
                 .setInitialDelay(delayMinutes, TimeUnit.MINUTES)
