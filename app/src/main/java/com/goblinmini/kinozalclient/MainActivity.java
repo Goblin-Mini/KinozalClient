@@ -1266,7 +1266,7 @@ public class MainActivity extends Activity {
     private String buildHomeParallelExtractScript(String pathsJson, int currentIndex, String currentHtmlJson) {
         return "(function(){"
                 + "function extract(doc,base){try{"
-                + "var links=doc.querySelectorAll('table.t_peer td.nam > a[href*=\"details.php?id=\"]');"
+                + "var links=doc.querySelectorAll('a[href*=\"details.php?id=\"]');"
                 + "var out=[],seen=Object.create(null);"
                 + "function txt(e){return e?(e.innerText||e.textContent||'').replace(/\\\\s+/g,' ').trim():'';}"
                 + "function imgSrc(img){if(!img)return '';var a=['data-src','data-original','data-lazy-src','data-original-src','src'];"
@@ -1393,7 +1393,7 @@ public class MainActivity extends Activity {
                 return;
             }
             // Reuse the DOM extraction logic with the current live document.
-            String currentScript = "(function(){try{var links=document.querySelectorAll('table.t_peer td.nam > a[href*=\"details.php?id=\"]');var out=[],seen={};"
+            String currentScript = "(function(){try{var links=document.querySelectorAll('a[href*=\"details.php?id=\"]');var out=[],seen={};"
                     + "function t(e){return e?(e.innerText||e.textContent||'').replace(/\\\\s+/g,' ').trim():'';}"
                     + "function im(x){if(!x)return '';var z=['data-src','data-original','data-lazy-src','data-original-src','src'];"
                     + "for(var j=0;j<z.length;j++){var v=x.getAttribute(z[j])||'';if(v&&v.indexOf('data:image/')!==0)return v;}"
