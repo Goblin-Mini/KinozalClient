@@ -2528,7 +2528,8 @@ public class MainActivity extends Activity {
         horizontal.setHorizontalScrollBarEnabled(false);
         horizontal.setFillViewport(false);
         horizontal.setTag("home-row:" + section.path);
-        horizontal.setOnScrollChangeListener((View v, int x, int y, int oldX, int oldY) -> scheduleVisibleHomePosterLoad());
+        horizontal.setOnScrollChangeListener((View v, int x, int y, int oldX, int oldY) ->
+                loadVisibleHomePosters((android.widget.HorizontalScrollView) v));
         LinearLayout strip = new LinearLayout(this);
         strip.setOrientation(LinearLayout.HORIZONTAL);
         horizontal.addView(strip);
@@ -2551,7 +2552,7 @@ public class MainActivity extends Activity {
             list.addView(sectionHeader, titleParams);
             list.addView(horizontal, rowParams);
         }
-        horizontal.post(this::scheduleVisibleHomePosterLoad);
+        horizontal.post(() -> loadVisibleHomePosters(horizontal));
 
         if (immediate) {
             // Replace and build only this feed. Other rows and their pending work remain intact.
@@ -2579,7 +2580,7 @@ public class MainActivity extends Activity {
                         long duration = android.os.SystemClock.elapsedRealtime() - startedAt[0];
                         Log.i("KinozalPerf", "home row complete=" + duration
                                 + "ms, title=" + section.title + ", cards=" + cardCount);
-                        scheduleVisibleHomePosterLoad();
+                        horizontal.post(() -> loadVisibleHomePosters(horizontal));
                     }
                 });
             }
