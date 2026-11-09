@@ -167,30 +167,25 @@ public class MainActivity extends Activity {
             feedLoadDiagnostics.setLength(0);
             feedDiagnosticStartedAtMs = android.os.SystemClock.elapsedRealtime();
             feedDiagnosticGroup = group;
-            feedLoadDiagnostics.append("Kinozal feed diagnostics\\n")
-                    .append("Группа: ").append(group).append('\n')
-                    .append("Зеркало: ").append(client == null ? "?" : client.getMirror()).append('\n')
-                    .append("Время: ").append(new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.ROOT)
-                            .format(new java.util.Date())).append('\n')
-                    .append("Лент: ").append(paths.length).append('\n');
-            for (int i = 0; i < paths.length; i++)
-                feedLoadDiagnostics.append(String.format(java.util.Locale.ROOT, "%02d. %s | %s\\n", i + 1, paths[i], i));
         }
+        FeedDiagnostics.start(this, group, client == null ? "?" : client.getMirror(), paths, "WebView");
         appendFeedDiagnostic("START", "начата загрузка группы");
     }
     private void appendFeedDiagnostic(String stage, String details) {
         long elapsed = feedDiagnosticStartedAtMs == 0L ? 0L
                 : android.os.SystemClock.elapsedRealtime() - feedDiagnosticStartedAtMs;
-        String line = String.format(java.util.Locale.ROOT, "[+%d ms] %s %s\\n", elapsed, stage,
+        String line = String.format(java.util.Locale.ROOT, "[+%d ms] %s %s%n", elapsed, stage,
                 details == null ? "" : details);
         synchronized (feedDiagnosticsLock) {
             feedLoadDiagnostics.append(line);
             if (feedLoadDiagnostics.length() > 48000)
                 feedLoadDiagnostics.delete(0, feedLoadDiagnostics.length() - 48000);
         }
-        Log.i("KinozalFeedDiag", line.trim());
+        FeedDiagnostics.log(this, feedDiagnosticGroup, stage, details);
     }
     private String getFeedDiagnosticsText() {
+        String persistent = FeedDiagnostics.read(this);
+        if (!persistent.trim().isEmpty()) return persistent;
         synchronized (feedDiagnosticsLock) { return feedLoadDiagnostics.toString(); }
     }
 
@@ -657,8 +652,13 @@ public class MainActivity extends Activity {
         currentPath = "collections";
         currentTitle = "Подборки";
         heading.setText("Подборки");
+        FeedDiagnostics.start(this, "Подборки", client == null ? "?" : client.getMirror(),
+                COLLECTION_PATHS, "вход на экран подборок");
         if (!collectionsSectionsMemory.isEmpty()) {
             collectionsLoadedOnce = true;
+            appendFeedDiagnostic("CACHE_MEMORY", "экран показан из памяти Activity; секций="
+                    + collectionsSectionsMemory.size() + ", карточек=" + countHomeCards(collectionsSectionsMemory));
+            appendFeedDiagnostic("REFRESH_DECISION", "ранний выход: в памяти уже есть подборки; новый сетевой запрос этим входом не запускается");
             status.setText("Показано лент: " + collectionsSectionsMemory.size());
             return;
         }
@@ -666,12 +666,19 @@ public class MainActivity extends Activity {
         if (cached != null && !cached.isEmpty()) {
             collectionsSectionsMemory = new ArrayList<>(cached);
             collectionsLoadedOnce = true;
+            appendFeedDiagnostic("CACHE_DISK", "экран показан из файла kinozal_collections_model_v1.json; секций="
+                    + cached.size() + ", карточек=" + countHomeCards(cached));
             renderHome(cached);
             status.setText("Подборки из кэша");
+            appendFeedDiagnostic("REFRESH_SCHEDULE", "вызван scheduleInitial; фактический запуск зависит от маркера и задержки WorkManager");
             HomeFeedScheduler.scheduleInitial(getApplicationContext(), "collections");
             return;
         }
-        if (collectionsLoadedOnce) return;
+        appendFeedDiagnostic("CACHE_MISS", "валидный дисковый кеш не найден; запускается WebView-загрузка");
+        if (collectionsLoadedOnce) {
+            appendFeedDiagnostic("REFRESH_DECISION", "collectionsLoadedOnce=true; ранний выход без сетевого запроса");
+            return;
+        }
         browserFeedLoading = true;
         showPageLoading("Загрузка подборок через WebView…");
         if (sessionWebView == null) restoreBrowserSession("");
@@ -3580,7 +3587,7 @@ public class MainActivity extends Activity {
 
     private void saveFeedDiagnostics() {
         String log = getFeedDiagnosticsText();
-        if (log.trim().isEmpty()) log = "Диагностика загрузки ещё не запускалась.";
+        if (log.trim().isEmpty()) log = "Диагностика ещё не запускалась. Откройте экран «Подборки» и сразу после этого сохраните файл.";
         String stamp = new java.text.SimpleDateFormat("yyyyMMdd_HHmmss",
                 java.util.Locale.ROOT).format(new java.util.Date());
         String fileName = "kinozal_feed_diagnostics_" + stamp + ".txt";
