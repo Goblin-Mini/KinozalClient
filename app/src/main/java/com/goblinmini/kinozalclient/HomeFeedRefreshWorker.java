@@ -79,6 +79,15 @@ public final class HomeFeedRefreshWorker extends Worker {
                 client.importBrowserCookies(browserResult.cookies);
             }
             if (html == null || html.trim().isEmpty()) throw new java.io.IOException("Пустой ответ Kinozal");
+            Document diagnosticDoc = Jsoup.parse(html, client.getMirror() + "/");
+            FeedDiagnostics.log(context, group, "HTML_SHAPE", "path=" + path
+                    + ", pageTitle=" + diagnosticDoc.title()
+                    + ", detailsAnchors=" + diagnosticDoc.select("a[href*=details.php?id=]").size()
+                    + ", tableRows=" + diagnosticDoc.select("tr").size()
+                    + ", tableCells=" + diagnosticDoc.select("tr td").size()
+                    + ", bodyChars=" + (diagnosticDoc.body() == null ? 0 : diagnosticDoc.body().text().length())
+                    + ", finalUrl=" + browserResult.finalUrl
+                    + ", httpStatus=" + browserResult.httpStatus);
             JSONArray items = parseItems(html, client.getMirror());
             FeedDiagnostics.log(context, group, "PARSE", "path=" + path + ", parsedCards=" + items.length());
             for (int itemIndex = 0; itemIndex < items.length(); itemIndex++) {
@@ -87,7 +96,8 @@ public final class HomeFeedRefreshWorker extends Worker {
                         "feed=" + title + ", n=" + (itemIndex + 1) + ", title=" + item.optString("title")
                                 + ", href=" + item.optString("href"));
             }
-            if (items.length() == 0) throw new java.io.IOException("В ответе нет раздач: кэш оставлен без изменений");
+            if (items.length() == 0) throw new EmptyFeedException(
+                    "В ответе нет раздач: кэш оставлен без изменений");
 
             synchronized (MODEL_LOCK) {
                 if ("home".equals(group)) {
@@ -116,6 +126,13 @@ public final class HomeFeedRefreshWorker extends Worker {
             sendRefreshState(context, group, index, path, title, bulk, total, "success", null);
             HomeFeedScheduler.scheduleNext(context, group, index, path, title);
             return Result.success();
+        } catch (EmptyFeedException e) {
+            // Avoid retrying an identical empty/changed page response and spamming the UI.
+            Log.w(TAG, "Feed returned no parseable releases; stopping this refresh: " + path, e);
+            FeedDiagnostics.log(context, group, "WORKER_EMPTY_FEED", "path=" + path
+                    + ", reason=" + e.getMessage() + ", previousCachePreserved=true, retry=false");
+            notifyFailure(context, group, index, path, title, bulk, total, e.getMessage());
+            return Result.failure();
         } catch (SecurityException e) {
             Log.w(TAG, "Feed refresh requires a fresh Kinozal login: " + path, e);
             FeedDiagnostics.log(context, group, "WORKER_AUTH_ERROR", "path=" + path + ", reason=" + e.getMessage());
@@ -134,6 +151,10 @@ public final class HomeFeedRefreshWorker extends Worker {
         } finally {
             if (proxyStarted) bridge.stop();
         }
+    }
+
+    private static final class EmptyFeedException extends java.io.IOException {
+        EmptyFeedException(String message) { super(message); }
     }
 
     private static void notifyFailure(Context context, String group, int index, String path,
