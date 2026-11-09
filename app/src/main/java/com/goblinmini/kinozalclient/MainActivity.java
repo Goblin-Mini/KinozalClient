@@ -663,7 +663,8 @@ public class MainActivity extends Activity {
             collectionsLoadedOnce = true;
             appendFeedDiagnostic("CACHE_MEMORY", "экран показан из памяти Activity; секций="
                     + collectionsSectionsMemory.size() + ", карточек=" + countHomeCards(collectionsSectionsMemory));
-            appendFeedDiagnostic("REFRESH_DECISION", "ранний выход: в памяти уже есть подборки; новый сетевой запрос этим входом не запускается");
+            appendFeedDiagnostic("REFRESH_DECISION", "кэш памяти показан сразу; проверяем фоновое обновление по сроку давности");
+            HomeFeedScheduler.refreshCachedIfStale(getApplicationContext(), "collections");
             status.setText("Показано лент: " + collectionsSectionsMemory.size());
             return;
         }
@@ -679,8 +680,8 @@ public class MainActivity extends Activity {
                     + ", fileAgeMs=" + cacheAgeMs);
             renderHome(cached);
             status.setText("Подборки из кэша");
-            appendFeedDiagnostic("REFRESH_SCHEDULE", "вызван scheduleInitial; фактический запуск зависит от маркера и задержки WorkManager");
-            HomeFeedScheduler.scheduleInitial(getApplicationContext(), "collections");
+            appendFeedDiagnostic("REFRESH_SCHEDULE", "кэш показан сразу; запрашиваем фоновое обновление, если прошло 30 минут");
+            HomeFeedScheduler.refreshCachedIfStale(getApplicationContext(), "collections");
             return;
         }
         appendFeedDiagnostic("CACHE_MISS", "валидный дисковый кеш не найден; запускается WebView-загрузка");
