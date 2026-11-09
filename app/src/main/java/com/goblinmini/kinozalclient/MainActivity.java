@@ -135,6 +135,8 @@ public class MainActivity extends Activity {
     private int page = 0;
     private String searchSort = "date";
     private boolean searchSortDescending = true;
+    private String localSort = "recent";
+    private boolean localSortDescending = true;
     private LinearLayout searchSortBar;
     private Button sortDateButton, sortSizeButton, sortSeedsButton;
     private AlertDialog settingsDialog;
@@ -4636,6 +4638,19 @@ public class MainActivity extends Activity {
         renderTorrents(torrents);
     }
 
+    private void setLocalSort(String key) {
+        if (key.equals(localSort)) localSortDescending = !localSortDescending;
+        else {
+            localSort = key;
+            localSortDescending = true;
+        }
+        if ("local:favorites".equals(currentPath)) {
+            renderTorrents(new ArrayList<>(readFavorites().values()));
+        } else if ("local:recently-viewed".equals(currentPath)) {
+            renderTorrents(new ArrayList<>(readRecentlyViewed().values()));
+        }
+    }
+
     private double sizeValue(String value) {
         if (value == null) return 0;
         String normalized = value.replace(',', '.').replaceAll("[^0-9.]", "");
@@ -4704,6 +4719,37 @@ public class MainActivity extends Activity {
         boolean recentList = "local:recently-viewed".equals(currentPath);
         boolean favoritesList = "local:favorites".equals(currentPath);
         boolean localManageList = recentList || favoritesList;
+        if (localManageList) {
+            LinearLayout localSortBar = new LinearLayout(this);
+            localSortBar.setGravity(Gravity.CENTER_VERTICAL);
+            localSortBar.setPadding(dp(8), dp(4), dp(8), dp(8));
+            Button localDateButton = button("");
+            Button localSizeButton = button("");
+            Button localSeedsButton = button("");
+            Button[] localSortButtons = {localDateButton, localSizeButton, localSeedsButton};
+            String[] localSortKeys = {"date", "size", "seeds"};
+            String[] localSortTitles = {"Дата", "Размер", "Сиды"};
+            for (int i = 0; i < localSortButtons.length; i++) {
+                final String key = localSortKeys[i];
+                Button b = localSortButtons[i];
+                b.setText(localSortTitles[i] + (key.equals(localSort)
+                        ? (localSortDescending ? " ↓" : " ↑") : ""));
+                LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(0, dp(38), 1f);
+                p.rightMargin = dp(5);
+                localSortBar.addView(b, p);
+                b.setOnClickListener(v -> setLocalSort(key));
+            }
+            list.addView(localSortBar);
+            if (!"recent".equals(localSort)) {
+                java.util.Collections.sort(displayItems, (a, b) -> {
+                    int cmp;
+                    if ("size".equals(localSort)) cmp = Double.compare(sizeValue(a.size), sizeValue(b.size));
+                    else if ("seeds".equals(localSort)) cmp = Integer.compare(parseInt(a.seeds), parseInt(b.seeds));
+                    else cmp = dateValue(a.uploaded).compareTo(dateValue(b.uploaded));
+                    return localSortDescending ? -cmp : cmp;
+                });
+            }
+        }
         if (recentList) addHistoryClearButton();
         if (favoritesList) addFavoritesClearButton();
 
