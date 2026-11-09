@@ -1806,38 +1806,9 @@ public class MainActivity extends Activity {
                     return;
                 }
             }
-            runOnUiThread(() -> {
-                if (target.getParent() == null) return;
-                WebView web = sessionWebView;
-                if (web == null) { loadImageWithHttp(imageUrl, target, referer); return; }
-                String quotedUrl = org.json.JSONObject.quote(imageUrl);
-                String script = "(function(){return fetch(" + quotedUrl + ",{credentials:'include'})"
-                        + ".then(function(r){if(!r.ok)throw new Error('HTTP '+r.status);return r.blob();})"
-                        + ".then(function(b){return new Promise(function(resolve,reject){var f=new FileReader();"
-                        + "f.onloadend=function(){var v=String(f.result||'');resolve(v.substring(v.indexOf(',')+1));};"
-                        + "f.onerror=reject;f.readAsDataURL(b);});});})()";
-                web.evaluateJavascript(script, result -> {
-                    String encoded = null;
-                    try { encoded = new org.json.JSONArray("[" + result + "]").getString(0); }
-                    catch (Exception ignored) { }
-                    if (encoded == null || encoded.isEmpty() || "null".equals(encoded)) {
-                        loadImageWithHttp(imageUrl, target, referer); return;
-                    }
-                    final String base64 = encoded;
-                    executeSafely(imageIo, () -> {
-                        try {
-                            byte[] bytes = android.util.Base64.decode(base64, android.util.Base64.DEFAULT);
-                            diskCache.put("image|" + imageUrl, bytes);
-                            Bitmap bitmap = decodeImageForView(bytes, target);
-                            cacheImageBitmap(imageUrl, bitmap);
-                            if (bitmap != null) runOnUiThread(() -> {
-                                if (target.getParent() != null) target.setImageBitmap(bitmap);
-                            });
-                            else loadImageWithHttp(imageUrl, target, referer);
-                        } catch (Exception ignored) { loadImageWithHttp(imageUrl, target, referer); }
-                    });
-                });
-            });
+            // Poster traffic must not share the authenticated WebView's main-thread
+        // JavaScript queue with catalogue navigation. Fetch and decode on imageIo.
+        loadImageWithHttp(imageUrl, target, referer);
         });
     }
 
