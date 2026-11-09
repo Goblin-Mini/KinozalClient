@@ -3297,7 +3297,7 @@ public class MainActivity extends Activity {
                             else importUserBackup();
                         }).show());
         addSettingsAction(right, "Обновления", () -> new UpdateManager(this).check());
-        addSettingsAction(right, "Сохранить диагностику загрузки", () -> saveFeedDiagnostics());
+        addSettingsAction(right, "Диагностика", () -> showCrashDiagnostics());
 
         LinearLayout bottomRow = new LinearLayout(this);
         bottomRow.setOrientation(LinearLayout.HORIZONTAL);
@@ -3651,56 +3651,43 @@ public class MainActivity extends Activity {
         } catch (Exception e) { showMessage("Не удалось восстановить копию: " + safe(e.getMessage())); }
     }
 
-    private void saveFeedDiagnostics() {
-        String log = getFeedDiagnosticsText();
-        if (log.trim().isEmpty()) log = "Диагностика ещё не запускалась. Откройте экран «Подборки» и сразу после этого сохраните файл.";
-        String stamp = new java.text.SimpleDateFormat("yyyyMMdd_HHmmss",
-                java.util.Locale.ROOT).format(new java.util.Date());
-        String fileName = "kinozal_feed_diagnostics_" + stamp + ".txt";
-        java.io.OutputStream output = null;
-        android.net.Uri savedUri = null;
-        try {
-            if (android.os.Build.VERSION.SDK_INT >= 29) {
-                android.content.ContentValues values = new android.content.ContentValues();
-                values.put(android.provider.MediaStore.MediaColumns.DISPLAY_NAME, fileName);
-                values.put(android.provider.MediaStore.MediaColumns.MIME_TYPE, "text/plain");
-                values.put(android.provider.MediaStore.MediaColumns.RELATIVE_PATH,
-                        android.os.Environment.DIRECTORY_DOWNLOADS + "/KinozalClient");
-                values.put(android.provider.MediaStore.MediaColumns.IS_PENDING, 1);
-                savedUri = getContentResolver().insert(
-                        android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI, values);
-                if (savedUri == null) throw new java.io.IOException("Не удалось создать файл");
-                output = getContentResolver().openOutputStream(savedUri);
-                if (output == null) throw new java.io.IOException("Не удалось открыть файл");
-                output.write(log.getBytes(java.nio.charset.StandardCharsets.UTF_8));
-                output.flush();
-                output.close();
-                output = null;
-                android.content.ContentValues ready = new android.content.ContentValues();
-                ready.put(android.provider.MediaStore.MediaColumns.IS_PENDING, 0);
-                getContentResolver().update(savedUri, ready, null, null);
-                Toast.makeText(this, "Сохранено в Загрузки/KinozalClient/" + fileName,
-                        Toast.LENGTH_LONG).show();
-            } else {
-                java.io.File dir = getExternalFilesDir(android.os.Environment.DIRECTORY_DOWNLOADS);
-                if (dir == null) throw new java.io.IOException("Папка загрузок недоступна");
-                if (!dir.exists() && !dir.mkdirs()) throw new java.io.IOException("Не удалось создать папку");
-                java.io.File file = new java.io.File(dir, fileName);
-                output = new java.io.FileOutputStream(file);
-                output.write(log.getBytes(java.nio.charset.StandardCharsets.UTF_8));
-                output.flush();
-                output.close();
-                output = null;
-                Toast.makeText(this, "Диагностика сохранена: " + file.getAbsolutePath(),
-                        Toast.LENGTH_LONG).show();
-            }
-        } catch (Exception e) {
-            if (output != null) try { output.close(); } catch (Exception ignored) { }
-            if (savedUri != null) try { getContentResolver().delete(savedUri, null, null); }
-                catch (Exception ignored) { }
-            Log.e("KinozalFeedDiag", "Не удалось сохранить диагностику", e);
-            Toast.makeText(this, "Не удалось сохранить диагностику: " + e.getMessage(),
-                    Toast.LENGTH_LONG).show();
+    private void showCrashDiagnostics() {
+        String report = CrashDiagnostics.read(this);
+        LinearLayout panel = new LinearLayout(this);
+        panel.setOrientation(LinearLayout.VERTICAL);
+        panel.setPadding(dp(18), dp(14), dp(18), dp(10));
+        panel.setBackgroundColor(BG);
+        TextView info = text(report.isEmpty()
+                ? "Сбоев приложения не зафиксировано."
+                : "Последний сбой приложения сохранён. Отчёт не содержит пароли или cookies.",
+                14, Color.WHITE, false);
+        info.setLineSpacing(dp(4), 1f);
+        panel.addView(info);
+        AlertDialog dialog = new AlertDialog.Builder(this)
+                .setTitle("Диагностика")
+                .setView(panel)
+                .setPositiveButton("Закрыть", null)
+                .setNeutralButton("Отправить отчёт", null)
+                .create();
+        dialog.setOnShowListener(d -> {
+            Button send = dialog.getButton(AlertDialog.BUTTON_NEUTRAL);
+            send.setEnabled(!report.isEmpty());
+            send.setTextColor(GOLD);
+            send.setOnClickListener(v -> {
+                Intent share = new Intent(Intent.ACTION_SEND);
+                share.setType("text/plain");
+                share.putExtra(Intent.EXTRA_SUBJECT, "Kinozal ТВ — отчёт о сбое");
+                share.putExtra(Intent.EXTRA_TEXT, report);
+                startActivity(Intent.createChooser(share, "Отправить отчёт о сбое"));
+            });
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setTextColor(GOLD);
+        });
+        dialog.show();
+        if (dialog.getWindow() != null) {
+            dialog.getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(BG));
+            dialog.getWindow().setLayout(Math.min(dp(520),
+                    getResources().getDisplayMetrics().widthPixels - dp(48)),
+                    ViewGroup.LayoutParams.WRAP_CONTENT);
         }
     }
 
