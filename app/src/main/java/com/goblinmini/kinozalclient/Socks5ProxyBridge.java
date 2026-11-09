@@ -190,7 +190,7 @@ public final class Socks5ProxyBridge {
             upstream = openSocks(cfg, host, port);
             upstream.setSoTimeout(0);
             if (connect) {
-                out.write("HTTP/1.1 200 Connection Established\\r\\nProxy-Agent: KinozalClient\\r\\n\\r\\n".getBytes(StandardCharsets.ISO_8859_1));
+                out.write("HTTP/1.1 200 Connection Established\r\nProxy-Agent: KinozalClient\r\n\r\n".getBytes(StandardCharsets.ISO_8859_1));
                 out.flush();
             } else {
                 URI uri = URI.create(request[1]);
@@ -200,9 +200,9 @@ public final class Socks5ProxyBridge {
                 for (int i = 1; i < lines.length; i++) {
                     String line = lines[i];
                     if (line.isEmpty() || line.toLowerCase(java.util.Locale.ROOT).startsWith("proxy-connection:")) continue;
-                    rewritten.append(line).append("\\r\\n");
+                    rewritten.append(line).append("\r\n");
                 }
-                rewritten.append("\\r\\n");
+                rewritten.append("\r\n");
                 upstream.getOutputStream().write(rewritten.toString().getBytes(StandardCharsets.ISO_8859_1));
                 upstream.getOutputStream().flush();
             }
