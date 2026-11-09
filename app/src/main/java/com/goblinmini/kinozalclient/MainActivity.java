@@ -2425,10 +2425,13 @@ public class MainActivity extends Activity {
                 return;
             }
             task.run();
+            // Yield several display frames between card constructions. The
+            // handler runs on the UI thread; an 8 ms cadence starves DPAD and
+            // click handling on slower Android TV hardware while rows are built.
             if (!homeCardBuildQueue.isEmpty()) {
-                browserHandler.postDelayed(() -> scheduleNextHomeCardBuild(generation), 8);
+                browserHandler.postDelayed(() -> scheduleNextHomeCardBuild(generation), 32L);
             } else {
-                browserHandler.postDelayed(() -> scheduleNextHomeCardBuild(generation), 8);
+                browserHandler.postDelayed(() -> scheduleNextHomeCardBuild(generation), 32L);
             }
         });
     }
