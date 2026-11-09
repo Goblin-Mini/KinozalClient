@@ -6336,18 +6336,18 @@ public class MainActivity extends Activity {
 
         TextView externalRatings = text(
                 "IMDb  " + data.imdbRating + "     Кинопоиск  " + data.kinopoiskRating,
-                10, Color.LTGRAY, false);
+                12, Color.LTGRAY, false);
         externalRatings.setGravity(Gravity.CENTER);
         externalRatings.setSingleLine(true);
         externalRatings.setIncludeFontPadding(false);
         ratings.addView(externalRatings, new LinearLayout.LayoutParams(-1, -2));
 
-        TextView kinozalRating = text("Kinozal  " + data.kinozalRating, 12, TEAL, true);
+        TextView kinozalRating = text("Kinozal  " + data.kinozalRating, 14, TEAL, true);
         kinozalRating.setGravity(Gravity.CENTER);
         kinozalRating.setPadding(0, dp(3), 0, 0);
         ratings.addView(kinozalRating, new LinearLayout.LayoutParams(-1, -2));
 
-        TextView stars = text(data.kinozalStars, 13, GOLD, true);
+        TextView stars = text(data.kinozalStars, 15, GOLD, true);
         stars.setGravity(Gravity.CENTER);
         stars.setPadding(0, dp(3), 0, 0);
         ratings.addView(stars, new LinearLayout.LayoutParams(-1, -2));
@@ -6412,7 +6412,7 @@ public class MainActivity extends Activity {
                                 15, Color.LTGRAY, false));
                     }
                 } else if (!data.releaseText.isEmpty()) {
-                    TextView release = text(data.releaseText, 15, Color.WHITE, false);
+                    TextView release = text(data.releaseText, 16, Color.WHITE, false);
                     release.setLineSpacing(dp(3), 1f);
                     detailContent.addView(release, new LinearLayout.LayoutParams(-1, -2));
                 }
@@ -6622,8 +6622,8 @@ public class MainActivity extends Activity {
         LinearLayout block = new LinearLayout(this);
         block.setOrientation(LinearLayout.VERTICAL);
         block.setPadding(dp(8), dp(7), dp(10), dp(9));
-        TextView label = text(key, description ? 16 : 12, TEAL, true);
-        TextView valueView = text(value, description ? 16 : 14, Color.WHITE, false);
+        TextView label = text(key, 16, TEAL, true);
+        TextView valueView = text(value, 16, Color.WHITE, false);
         valueView.setLineSpacing(dp(1), 1f);
         block.addView(label);
         block.addView(valueView);
