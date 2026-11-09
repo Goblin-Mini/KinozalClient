@@ -54,9 +54,9 @@ jobs:
               if end > len(data):
                   raise SystemExit("Truncated PNG chunk")
               payload = data[pos+8:pos+8+length]
-              if zlib.crc32(kind + payload) & 0xffffffff != struct.unpack(">I", data[pos+8+length:end])[0]:
-                  raise SystemExit("PNG CRC mismatch in " + kind.decode("ascii", "replace"))
               if kind in (b"IHDR", b"PLTE", b"IDAT", b"IEND", b"tRNS"):
+                  if zlib.crc32(kind + payload) & 0xffffffff != struct.unpack(">I", data[pos+8+length:end])[0]:
+                      raise SystemExit("PNG CRC mismatch in " + kind.decode("ascii", "replace"))
                   chunk = kind + payload
                   kept.append(struct.pack(">I", length) + chunk + struct.pack(">I", zlib.crc32(chunk) & 0xffffffff))
               pos = end
