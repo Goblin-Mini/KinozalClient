@@ -25,9 +25,9 @@ public final class CrashDiagnostics {
                     .getPackageInfo(context.getPackageName(), 0);
             version = packageInfo.versionName == null ? version : packageInfo.versionName;
         } catch (Exception ignored) { }
-        report.append("Kinozal ТВ — отчёт о сбое\\n")
-                .append("Дата: ").append(new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.ROOT).format(new Date())).append('\\n')
-                .append("Версия: ").append(version).append('\\n')
+        report.append("Kinozal ТВ — отчёт о сбое\n")
+                .append("Дата: ").append(new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.ROOT).format(new Date())).append('\n')
+                .append("Версия: ").append(version).append('\n')
                 .append("Android: ").append(android.os.Build.VERSION.RELEASE)
                 .append(" (SDK ").append(android.os.Build.VERSION.SDK_INT).append(")\n")
                 .append("Устройство: ").append(android.os.Build.MANUFACTURER).append(' ')
