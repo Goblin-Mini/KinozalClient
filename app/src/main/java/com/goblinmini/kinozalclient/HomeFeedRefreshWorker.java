@@ -164,7 +164,7 @@ public final class HomeFeedRefreshWorker extends Worker {
                 || text.contains("подтвердите, что вы не робот")) {
             throw new java.io.IOException("Kinozal вернул проверку Cloudflare");
         }
-        Elements anchors = doc.select("table.t_peer td.nam > a[href*=details.php?id=]");
+        Elements anchors = doc.select("a[href*=details.php?id=]");
         JSONArray result = new JSONArray();
         Set<String> seen = new HashSet<>();
         Set<String> seenIds = new HashSet<>();
@@ -177,7 +177,7 @@ public final class HomeFeedRefreshWorker extends Worker {
             if (href == null || !href.startsWith("http")) href = mirror + "/" + a.attr("href").replaceFirst("^/+", "");
             if (!href.contains("/details.php?id=") || href.toLowerCase(java.util.Locale.ROOT).contains("userdetails") || !seen.add(href)) continue;
             Element row = a.closest("tr");
-            if (row == null || row.select("td").size() < 6 || a.parent() == null || !a.parent().hasClass("nam")) continue;
+            if (row == null || row.select("td").size() < 6) continue;
             java.util.regex.Matcher idMatcher = idPattern.matcher(href);
             String torrentId = idMatcher.find() ? idMatcher.group(1) : "";
             if (!torrentId.isEmpty() && seenIds.contains(torrentId)) continue;
