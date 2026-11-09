@@ -50,6 +50,36 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+      - name: Build signed update-test APK for installed ru.gm.ktv
+        if: github.ref_name == 'fix/home-feed-js-extractor-diagnostics' && github.event_name == 'push'
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KINOZAL_KEYSTORE_BASE64 }}
+          KINOZAL_STORE_PASSWORD: ${{ secrets.KINOZAL_STORE_PASSWORD }}
+          KINOZAL_KEY_ALIAS: ${{ secrets.KINOZAL_KEY_ALIAS }}
+          KINOZAL_KEY_PASSWORD: ${{ secrets.KINOZAL_KEY_PASSWORD }}
+        shell: bash
+        run: |
+          test -n "$KEYSTORE_BASE64" || { echo "Missing release keystore secret"; exit 1; }
+          test -n "$KINOZAL_STORE_PASSWORD"
+          test -n "$KINOZAL_KEY_ALIAS"
+          test -n "$KINOZAL_KEY_PASSWORD"
+          echo "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/kinozal-update-test.jks"
+          test -s "$RUNNER_TEMP/kinozal-update-test.jks"
+          export KINOZAL_KEYSTORE_FILE="$RUNNER_TEMP/kinozal-update-test.jks"
+          gradle --no-daemon assembleRelease
+          mkdir -p dist
+          cp app/build/outputs/apk/release/app-release.apk dist/KinozalClient-update-test-v2.apk
+          test -s dist/KinozalClient-update-test-v2.apk
+
+      - name: Upload signed update-test APK
+        if: github.ref_name == 'fix/home-feed-js-extractor-diagnostics' && github.event_name == 'push'
+        uses: actions/upload-artifact@v4
+        with:
+          name: KinozalClient-update-test-v2
+          path: dist/KinozalClient-update-test-v2.apk
+          if-no-files-found: error
+          retention-days: 14
+
       - name: Decode release keystore
         if: github.event_name != 'pull_request' && (github.ref_name != 'feature/magnet-playback' && github.ref_name != 'feature/performance' && github.ref_name != 'feature/screen-cache-background-refresh' && github.ref_name != 'feature/sidebar-login-status-stable-restore' && github.ref_name != 'fix/home-feed-js-extractor-diagnostics')
         env:
