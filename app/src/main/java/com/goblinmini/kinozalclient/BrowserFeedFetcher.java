@@ -28,7 +28,13 @@ final class BrowserFeedFetcher {
     static final class Result {
         final String html;
         final String cookies;
-        Result(String html, String cookies) { this.html = html; this.cookies = cookies; }
+        final int httpStatus;
+        final String finalUrl;
+        final long durationMs;
+        Result(String html, String cookies, int httpStatus, String finalUrl, long durationMs) {
+            this.html = html; this.cookies = cookies; this.httpStatus = httpStatus;
+            this.finalUrl = finalUrl; this.durationMs = durationMs;
+        }
     }
 
     private BrowserFeedFetcher() { }
@@ -38,6 +44,8 @@ final class BrowserFeedFetcher {
         final CountDownLatch done = new CountDownLatch(1);
         final AtomicReference<Result> result = new AtomicReference<>();
         final AtomicReference<Throwable> failure = new AtomicReference<>();
+        final java.util.concurrent.atomic.AtomicInteger httpStatus = new java.util.concurrent.atomic.AtomicInteger(-1);
+        final AtomicReference<String> finalUrl = new AtomicReference<>(url);
         Handler main = new Handler(Looper.getMainLooper());
 
         Runnable start = () -> {
@@ -82,7 +90,8 @@ final class BrowserFeedFetcher {
                             if (!html.isEmpty() && !challenge) {
                                 finished[0] = true;
                                 cookies.flush();
-                                result.set(new Result(html, cookies.getCookie(url)));
+                                result.set(new Result(html, cookies.getCookie(url), httpStatus.get(),
+                                        finalUrl.get(), android.os.SystemClock.elapsedRealtime() - started));
                                 cleanup.run();
                                 done.countDown();
                             } else if (android.os.SystemClock.elapsedRealtime() - started > 60000L) {
@@ -107,7 +116,17 @@ final class BrowserFeedFetcher {
                 web.setWebViewClient(new WebViewClient() {
                     @Override public void onPageFinished(WebView view, String pageUrl) {
                         super.onPageFinished(view, pageUrl);
+                        finalUrl.set(pageUrl == null ? url : pageUrl);
                         if (!finished[0]) main.postDelayed(poll[0], 1200L);
+                    }
+                    @Override public void onReceivedHttpError(WebView view,
+                            android.webkit.WebResourceRequest request,
+                            android.webkit.WebResourceResponse response) {
+                        super.onReceivedHttpError(view, request, response);
+                        if (request.isForMainFrame() && response != null) {
+                            httpStatus.set(response.getStatusCode());
+                            finalUrl.set(request.getUrl() == null ? url : request.getUrl().toString());
+                        }
                     }
                     @Override public void onReceivedError(WebView view,
                             android.webkit.WebResourceRequest request,
