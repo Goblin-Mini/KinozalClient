@@ -2653,7 +2653,7 @@ public class MainActivity extends Activity {
                     cardIndex[0]++;
                     if (cardIndex[0] == cardCount) {
                         appendFeedDiagnostic("FEED_UI_APPLY_DONE",
-                                "path=" + section.path + ", action=" + (replaced ? "replace-row" : "append-row")
+                                "path=" + section.path + ", action=" + (rowWasReplaced ? "replace-row" : "append-row")
                                 + ", mode=initial-incremental, renderedCards=" + strip.getChildCount()
                                 + ", incomingCards=" + cardCount);
                         long duration = android.os.SystemClock.elapsedRealtime() - startedAt[0];
