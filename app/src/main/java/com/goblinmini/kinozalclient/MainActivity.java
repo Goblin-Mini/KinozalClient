@@ -2559,7 +2559,7 @@ public class MainActivity extends Activity {
             for (HomePoster item : section.items) {
                 strip.addView(createHomePosterCard(item, section));
             }
-            horizontal.post(this::scheduleVisibleHomePosterLoad);
+            horizontal.post(() -> loadVisibleHomePosters(horizontal));
         } else {
             final long[] startedAt = {0L};
             final int[] cardIndex = {0};
