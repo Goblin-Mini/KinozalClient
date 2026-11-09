@@ -851,6 +851,9 @@ public class MainActivity extends Activity {
                 }
                 if (!section.items.isEmpty()) result.add(section);
             }
+            int beforeDedup = countHomeCards(result);
+            removeHomeDuplicates(result);
+            if (countHomeCards(result) != beforeDedup) saveHomeModel(result);
             return result;
         } catch (Exception ignored) { return null; }
     }
@@ -3138,6 +3141,9 @@ public class MainActivity extends Activity {
                 }
                 if (!section.items.isEmpty()) result.add(section);
             }
+            int beforeDedup = countHomeCards(result);
+            removeHomeDuplicates(result);
+            if (countHomeCards(result) != beforeDedup) saveCollectionsModel(result);
             return result;
         } catch (Exception ignored) { return null; }
     }
