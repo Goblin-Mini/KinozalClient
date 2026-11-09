@@ -66,7 +66,10 @@ jobs:
           echo "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/kinozal-update-test.jks"
           test -s "$RUNNER_TEMP/kinozal-update-test.jks"
           export KINOZAL_KEYSTORE_FILE="$RUNNER_TEMP/kinozal-update-test.jks"
-          gradle --no-daemon assembleRelease
+          gradle --no-daemon assembleRelease || {
+            echo "Release resource compilation failed; retrying once with a fresh Gradle process"
+            gradle --no-daemon --rerun-tasks assembleRelease
+          }
           mkdir -p dist
           cp app/build/outputs/apk/release/app-release.apk dist/KinozalClient-update-test-v2.apk
           test -s dist/KinozalClient-update-test-v2.apk
