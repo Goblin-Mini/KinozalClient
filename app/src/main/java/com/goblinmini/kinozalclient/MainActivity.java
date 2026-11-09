@@ -1229,8 +1229,10 @@ public class MainActivity extends Activity {
                         }
                         String resultPath = paths[resultIndex];
                         String resultHtml = result.optString("html", "");
+                        org.json.JSONArray extractedItems = result.optJSONArray("items");
+                        appendHomeExtractorDiagnostics(extractedItems, resultPath);
                         HomeSection section = new HomeSection(titles[resultIndex], resultPath);
-                        section.items.addAll(parseHomePostersFromJsonArray(result.optJSONArray("items")));
+                        section.items.addAll(parseHomePostersFromJsonArray(extractedItems));
                         if (!section.items.isEmpty()) {
                             loaded.add(section);
                             diskCache.put("home|" + client.getMirror() + "|" + resultPath,
@@ -1267,7 +1269,7 @@ public class MainActivity extends Activity {
         return "(function(){"
                 + "function extract(doc,base){try{"
                 + "var links=doc.querySelectorAll('a[href*=\"details.php?id=\"]');"
-                + "var out=[],seen=Object.create(null);"
+                + "var out=[],seen=Object.create(null),stats={anchors:links.length,noRow:0,shortRow:0,noTitle:0,accepted:0};"
                 + "function txt(e){return e?(e.innerText||e.textContent||'').replace(/\\\\s+/g,' ').trim():'';}"
                 + "function imgSrc(img){if(!img)return '';var a=['data-src','data-original','data-lazy-src','data-original-src','src'];"
                 + "for(var i=0;i<a.length;i++){var v=(img.getAttribute(a[i])||'').trim();"
@@ -1277,14 +1279,14 @@ public class MainActivity extends Activity {
                 + "for(var i=0;i<links.length;i++){var a=links[i],raw=a.getAttribute('href')||'';"
                 + "if(raw.indexOf('details.php?id=')<0||/userdetails/i.test(raw))continue;"
                 + "var href='';try{href=new URL(raw,base).href;}catch(e){continue;}if(seen[href])continue;"
-                + "var row=a.closest('tr');if(!row||row.querySelectorAll('td').length<6)continue;seen[href]=1;"
+                + "var row=a.closest('tr');if(!row)stats.noRow++;else if(row.querySelectorAll('td').length<6)stats.shortRow++;seen[href]=1;"
                 + "var img=a.querySelector('img');if(!img&&row)img=row.querySelector('img');"
                 + "if(!img&&a.parentElement)img=a.parentElement.querySelector('img');"
                 + "var p=a;for(var d=0;d<4&&!img&&p;d++){p=p.parentElement;if(p)img=p.querySelector('img');}"
                 + "var title=(a.getAttribute('title')||'').trim()||(img?(img.getAttribute('alt')||'').trim():'')||txt(a);"
-                + "if(!title)continue;var image=imgSrc(img);try{if(image)image=new URL(image,base).href;}catch(e){}"
+                + "if(!title){stats.noTitle++;continue;}var image=imgSrc(img);try{if(image)image=new URL(image,base).href;}catch(e){}"
                 + "var cells=row?row.querySelectorAll('td'):[];function cell(n){return cells.length>n?txt(cells[n]):'—';}"
-                + "out.push({title:title,href:href,image:image,size:cell(3),seeds:cell(4),leeches:cell(5),uploaded:cell(6)});}"
+                + "out.push({title:title,href:href,image:image,size:cell(3),seeds:cell(4),leeches:cell(5),uploaded:cell(6)});stats.accepted++;}out.push({_diag:stats});"
                 + "return out;}catch(e){return [];}}"
                 + "var requests=" + pathsJson + ";"
                 + "var currentHtml=" + currentHtmlJson + ",currentIndex=" + currentIndex + ";"
@@ -1332,6 +1334,16 @@ public class MainActivity extends Activity {
             };
             browserHandler.postDelayed(poll[0], 100);
         });
+    }
+
+    private void appendHomeExtractorDiagnostics(org.json.JSONArray array, String path) {
+        if (array == null || array.length() == 0) return;
+        org.json.JSONObject last = array.optJSONObject(array.length() - 1);
+        org.json.JSONObject stats = last == null ? null : last.optJSONObject("_diag");
+        if (stats == null) return;
+        appendFeedDiagnostic("JS_EXTRACT_STATS", path + " anchors=" + stats.optInt("anchors")
+                + ", noRow=" + stats.optInt("noRow") + ", shortRow=" + stats.optInt("shortRow")
+                + ", noTitle=" + stats.optInt("noTitle") + ", accepted=" + stats.optInt("accepted"));
     }
 
     private List<HomePoster> parseHomePostersFromJsonArray(org.json.JSONArray array) {
@@ -1399,7 +1411,7 @@ public class MainActivity extends Activity {
                     + "for(var j=0;j<z.length;j++){var v=x.getAttribute(z[j])||'';if(v&&v.indexOf('data:image/')!==0)return v;}"
                     + "return '';}for(var i=0;i<links.length;i++){var a=links[i],h=a.getAttribute('href')||'';"
                     + "if(h.indexOf('details.php?id=')<0||/userdetails/i.test(h))continue;var u=a.href||h;if(seen[u])continue;"
-                    + "var r=a.closest('tr');if(!r||r.querySelectorAll('td').length<6)continue;seen[u]=1;var x=a.querySelector('img');if(!x&&r)x=r.querySelector('img');"
+                    + "var r=a.closest('tr');seen[u]=1;var x=a.querySelector('img');if(!x&&r)x=r.querySelector('img');"
                     + "if(!x&&a.parentElement)x=a.parentElement.querySelector('img');var p=a;"
                     + "for(var d=0;d<4&&!x&&p;d++){p=p.parentElement;if(p)x=p.querySelector('img');}"
                     + "var n=(a.getAttribute('title')||'').trim()||(x?(x.getAttribute('alt')||'').trim():'')||t(a);if(!n)continue;"
@@ -1534,7 +1546,8 @@ public class MainActivity extends Activity {
             String href = mirrorUrl(a.absUrl("href"), a.attr("href"));
             if (href.isEmpty() || !seenLinks.add(href)) continue;
             Element row = a.closest("tr");
-            if (row == null || row.select("td").size() < 6) continue;
+            // Keep release links even when a mirror no longer uses the legacy six-cell table.
+            // Row statistics are optional; poster/title extraction does not depend on them.
 
             // Resolve the table row once and reuse it for poster and statistics lookup.
             Element img = a.selectFirst("img");
@@ -3227,6 +3240,8 @@ public class MainActivity extends Activity {
 
     private static final int REQUEST_BACKUP_EXPORT = 7510;
     private static final int REQUEST_BACKUP_IMPORT = 7511;
+    private static final int REQUEST_FEED_DIAGNOSTICS_EXPORT = 7512;
+    private String pendingFeedDiagnosticsExport;
     private EditText torrServeAddressField;
 
     private int getAccentColor(String key) {
@@ -3785,6 +3800,33 @@ public class MainActivity extends Activity {
         }
     }
 
+    private void exportFeedDiagnostics() {
+        try {
+            pendingFeedDiagnosticsExport = FeedDiagnostics.read(this);
+            Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
+            intent.addCategory(Intent.CATEGORY_OPENABLE);
+            intent.setType("text/plain");
+            intent.putExtra(Intent.EXTRA_TITLE, "kinozal_feed_diagnostics.txt");
+            startActivityForResult(intent, REQUEST_FEED_DIAGNOSTICS_EXPORT);
+        } catch (Exception e) {
+            showMessage("Не удалось сохранить диагностику: " + safe(e.getMessage()));
+        }
+    }
+
+    private void writeFeedDiagnosticsToUri(Uri uri) {
+        try (java.io.OutputStream out = getContentResolver().openOutputStream(uri)) {
+            if (out == null) throw new java.io.IOException("Не удалось открыть файл");
+            out.write((pendingFeedDiagnosticsExport == null ? "" : pendingFeedDiagnosticsExport)
+                    .getBytes(StandardCharsets.UTF_8));
+            out.flush();
+            showMessage("Диагностика сохранена в файл");
+        } catch (Exception e) {
+            showMessage("Не удалось сохранить диагностику: " + safe(e.getMessage()));
+        } finally {
+            pendingFeedDiagnosticsExport = null;
+        }
+    }
+
     private void showFeedDiagnostics() {
         String report = FeedDiagnostics.read(this);
         ScrollView scroll = new ScrollView(this);
@@ -3800,19 +3842,13 @@ public class MainActivity extends Activity {
                 .setTitle("Диагностика лент")
                 .setView(scroll)
                 .setPositiveButton("Закрыть", null)
-                .setNeutralButton("Отправить отчёт", null)
+                .setNeutralButton("Сохранить в файл", null)
                 .create();
         dialog.setOnShowListener(d -> {
-            Button send = dialog.getButton(AlertDialog.BUTTON_NEUTRAL);
-            send.setEnabled(!report.isEmpty());
-            send.setTextColor(GOLD);
-            send.setOnClickListener(v -> {
-                Intent share = new Intent(Intent.ACTION_SEND);
-                share.setType("text/plain");
-                share.putExtra(Intent.EXTRA_SUBJECT, "Kinozal ТВ — диагностика лент");
-                share.putExtra(Intent.EXTRA_TEXT, report);
-                startActivity(Intent.createChooser(share, "Отправить диагностику лент"));
-            });
+            Button save = dialog.getButton(AlertDialog.BUTTON_NEUTRAL);
+            save.setEnabled(!report.isEmpty());
+            save.setTextColor(GOLD);
+            save.setOnClickListener(v -> exportFeedDiagnostics());
             dialog.getButton(AlertDialog.BUTTON_POSITIVE).setTextColor(GOLD);
         });
         dialog.show();
@@ -5028,6 +5064,10 @@ public class MainActivity extends Activity {
         if (resultCode != RESULT_OK || data == null || data.getData() == null) return;
         if (requestCode == REQUEST_BACKUP_EXPORT) {
             writeBackupToUri(data.getData());
+            return;
+        }
+        if (requestCode == REQUEST_FEED_DIAGNOSTICS_EXPORT) {
+            writeFeedDiagnosticsToUri(data.getData());
             return;
         }
         if (requestCode == REQUEST_BACKUP_IMPORT) {
