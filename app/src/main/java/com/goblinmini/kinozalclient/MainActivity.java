@@ -4054,7 +4054,28 @@ public class MainActivity extends Activity {
             field.setBackground(shape(PANEL, TEAL));
             if (i == 3) field.setInputType(android.text.InputType.TYPE_CLASS_TEXT
                     | android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD);
-            panel.addView(field, new LinearLayout.LayoutParams(-1, dp(44)));
+            if (i == 2) {
+                LinearLayout customRow = new LinearLayout(this);
+                customRow.setOrientation(LinearLayout.HORIZONTAL);
+                customRow.setGravity(Gravity.CENTER_VERTICAL);
+                customRow.addView(field, new LinearLayout.LayoutParams(0, dp(44), 1f));
+                Button check = settingsPillButton("Проверить");
+                LinearLayout.LayoutParams checkParams =
+                        new LinearLayout.LayoutParams(dp(112), dp(44));
+                checkParams.leftMargin = dp(8);
+                customRow.addView(check, checkParams);
+                TextView result = text("—", 23, Color.LTGRAY, true);
+                result.setGravity(Gravity.CENTER);
+                LinearLayout.LayoutParams resultParams =
+                        new LinearLayout.LayoutParams(dp(34), dp(44));
+                resultParams.leftMargin = dp(5);
+                customRow.addView(result, resultParams);
+                check.setOnClickListener(v -> checkJackettCustomServer(
+                        field, key, check, result));
+                panel.addView(customRow, new LinearLayout.LayoutParams(-1, dp(46)));
+            } else {
+                panel.addView(field, new LinearLayout.LayoutParams(-1, dp(44)));
+            }
         }
         TextView note = text("Используется Torznab API. Для указанных публичных серверов API Key не требуется. Для своего сервера ключ можно оставить пустым или указать при необходимости.",
                 12, Color.LTGRAY, false);
@@ -4089,10 +4110,65 @@ public class MainActivity extends Activity {
         dialog.show();
         if (dialog.getWindow() != null) {
             dialog.getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(BG));
-            dialog.getWindow().setLayout(Math.min(dp(560),
+            dialog.getWindow().setLayout(Math.min(dp(760),
                     getResources().getDisplayMetrics().widthPixels - dp(48)),
                     ViewGroup.LayoutParams.WRAP_CONTENT);
         }
+    }
+
+    private void checkJackettCustomServer(EditText addressField, EditText keyField,
+                                           Button checkButton, TextView resultView) {
+        String base = addressField.getText().toString().trim().replaceAll("/+$", "");
+        if (!validJackettBase(base)) {
+            resultView.setText("✕");
+            resultView.setTextColor(Color.RED);
+            showMessage("Укажите корректный адрес своего сервера");
+            return;
+        }
+        checkButton.setEnabled(false);
+        resultView.setText("…");
+        resultView.setTextColor(TEAL);
+        String apiKey = keyField.getText().toString().trim();
+        executeSafely(io, () -> {
+            HttpURLConnection connection = null;
+            boolean success = false;
+            String error = "";
+            try {
+                String endpoint = base + "/api/v2.0/indexers/all/results/torznab/api?t=caps"
+                        + (apiKey.isEmpty() ? "" : "&apikey=" + URLEncoder.encode(apiKey, "UTF-8"));
+                connection = (HttpURLConnection) new URL(endpoint).openConnection();
+                connection.setConnectTimeout(8000);
+                connection.setReadTimeout(10000);
+                connection.setRequestMethod("GET");
+                int code = connection.getResponseCode();
+                if (code >= 200 && code < 300) {
+                    try (java.io.InputStream input = connection.getInputStream();
+                         java.io.ByteArrayOutputStream output = new java.io.ByteArrayOutputStream()) {
+                        byte[] buffer = new byte[2048];
+                        int read;
+                        while ((read = input.read(buffer)) != -1) output.write(buffer, 0, read);
+                        String body = output.toString("UTF-8");
+                        success = body.contains("<caps") || body.contains(":caps");
+                        if (!success) error = "Ответ не похож на Torznab API";
+                    }
+                } else {
+                    error = "HTTP " + code;
+                }
+            } catch (Exception e) {
+                error = safe(e.getMessage());
+            } finally {
+                if (connection != null) connection.disconnect();
+            }
+            final boolean passed = success;
+            final String failure = error;
+            runOnUiThread(() -> {
+                checkButton.setEnabled(true);
+                resultView.setText(passed ? "✓" : "✕");
+                resultView.setTextColor(passed ? Color.GREEN : Color.RED);
+                if (!passed) showMessage("Проверка Jackett не пройдена: " + failure);
+                else showMessage("Свой сервер Jackett доступен");
+            });
+        });
     }
 
     private boolean validJackettBase(String value) {
