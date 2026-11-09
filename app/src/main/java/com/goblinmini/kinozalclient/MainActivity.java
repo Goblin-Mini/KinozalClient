@@ -671,8 +671,12 @@ public class MainActivity extends Activity {
         if (cached != null && !cached.isEmpty()) {
             collectionsSectionsMemory = new ArrayList<>(cached);
             collectionsLoadedOnce = true;
+            java.io.File cacheFile = collectionsModelFile();
+            long cacheAgeMs = cacheFile.isFile() ? Math.max(0L, System.currentTimeMillis() - cacheFile.lastModified()) : -1L;
             appendFeedDiagnostic("CACHE_DISK", "экран показан из файла kinozal_collections_model_v1.json; секций="
-                    + cached.size() + ", карточек=" + countHomeCards(cached));
+                    + cached.size() + ", карточек=" + countHomeCards(cached)
+                    + ", fileBytes=" + (cacheFile.isFile() ? cacheFile.length() : 0L)
+                    + ", fileAgeMs=" + cacheAgeMs);
             renderHome(cached);
             status.setText("Подборки из кэша");
             appendFeedDiagnostic("REFRESH_SCHEDULE", "вызван scheduleInitial; фактический запуск зависит от маркера и задержки WorkManager");
@@ -985,6 +989,15 @@ public class MainActivity extends Activity {
                         return;
                     }
                     removeHomeDuplicates(loaded);
+                    for (HomeSection section : loaded) {
+                        if (section == null || section.items == null) continue;
+                        for (HomePoster poster : section.items) {
+                            if (poster == null || poster.torrent == null) continue;
+                            appendFeedDiagnostic("CARD", "section=" + safe(section.title)
+                                    + ", title=" + safe(poster.torrent.title)
+                                    + ", href=" + safe(poster.torrent.href));
+                        }
+                    }
                     appendFeedDiagnostic("PARSE_DONE", "mode=webview-js, секций=" + loaded.size()
                             + ", карточек=" + countHomeCards(loaded)
                             + ", processingMs=" + (android.os.SystemClock.elapsedRealtime() - parseStarted));
