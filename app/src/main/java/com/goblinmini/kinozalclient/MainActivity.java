@@ -5852,6 +5852,11 @@ public class MainActivity extends Activity {
         final java.util.List<String> comments = new java.util.ArrayList<>();
         String screenshotRequestId = "";
         String screenshotPagesd = "";
+        String releaseRequestId = "";
+        String releasePagesd = "";
+        String releaseText = "";
+        boolean releaseLoaded = false;
+        boolean releaseLoading = false;
         boolean screenshotsLoaded = false;
         boolean screenshotsLoading = false;
     }
@@ -6021,6 +6026,16 @@ public class MainActivity extends Activity {
         Element technical = doc.selectFirst("#tabs");
         if (technical != null) extractBoldFields(technical, data.fields);
 
+        // The "Релиз" tab is loaded by the same AJAX endpoint as screenshots,
+        // with pagesd=0. Capture its parameters without loading it eagerly.
+        java.util.regex.Matcher releaseTab = java.util.regex.Pattern.compile(
+                "id=\\\"tbch0\\\"[\\s\\S]*?showtab\\(([0-9]+),([0-9]+)\\)")
+                .matcher(doc.html());
+        if (releaseTab.find()) {
+            data.releaseRequestId = releaseTab.group(1);
+            data.releasePagesd = releaseTab.group(2);
+        }
+
         // Kinozal comments are embedded in the release page as div.tx blocks.
         // Read-only extraction: no input field, reply or submit action.
         java.util.LinkedHashSet<String> uniqueComments = new java.util.LinkedHashSet<>();
@@ -6075,6 +6090,51 @@ public class MainActivity extends Activity {
      * selected by the id/pagesd values in the Screenshot tab's showtab(...).
      * Only img[src] URLs are retained; original-image href links are ignored.
      */
+    private void loadReleaseText(TorrentDetails details,
+            java.util.function.Consumer<TorrentDetails> callback) {
+        if (details == null || details.releaseRequestId.isEmpty()
+                || details.releasePagesd.isEmpty()) {
+            callback.accept(details);
+            return;
+        }
+        final String endpoint = Uri.parse(details.sourcePage).buildUpon()
+                .path("/get_srv_details.php")
+                .clearQuery()
+                .appendQueryParameter("id", details.releaseRequestId)
+                .appendQueryParameter("pagesd", details.releasePagesd)
+                .build().toString();
+        java.util.function.Consumer<String> onHtml = html -> {
+            String release = "";
+            if (html != null && !html.trim().isEmpty()) {
+                try {
+                    Document fragment = Jsoup.parse(html, endpoint);
+                    Element content = fragment.selectFirst("#tabs, .justify, body");
+                    if (content != null) release = content.wholeText().trim();
+                    if (release.isEmpty() && content != null) release = content.text().trim();
+                } catch (Exception e) {
+                    Log.w("KinozalRelease", "Cannot parse release tab", e);
+                }
+            }
+            details.releaseText = release;
+            if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) {
+                callback.accept(details);
+            } else {
+                runOnUiThread(() -> callback.accept(details));
+            }
+        };
+        if (sessionWebView != null) {
+            fetchBrowserPage(endpoint, null, onHtml);
+        } else {
+            executeSafely(io, () -> {
+                try { onHtml.accept(client.fetch(endpoint)); }
+                catch (Exception e) {
+                    Log.w("KinozalRelease", "Cannot load release tab", e);
+                    runOnUiThread(() -> callback.accept(details));
+                }
+            });
+        }
+    }
+
     private void loadScreenshotThumbnails(TorrentDetails details,
             java.util.function.Consumer<TorrentDetails> callback) {
         if (details == null || details.screenshotRequestId.isEmpty()
@@ -6303,10 +6363,11 @@ public class MainActivity extends Activity {
         tabs.setOrientation(LinearLayout.HORIZONTAL);
         Button descriptionTab = button("Описание");
         Button technicalTab = button("Техданные");
+        Button releaseTab = button("Релиз");
         Button screenshotsTab = button("Скриншоты");
         Button commentsTab = button("Комментарии");
         Button jackettTab = button("Другие");
-        Button[] tabButtons = {descriptionTab, technicalTab, screenshotsTab, commentsTab, jackettTab};
+        Button[] tabButtons = {descriptionTab, technicalTab, releaseTab, screenshotsTab, commentsTab, jackettTab};
         for (int tabIndex = 0; tabIndex < tabButtons.length; tabIndex++) {
             LinearLayout.LayoutParams tabParams = new LinearLayout.LayoutParams(0, dp(44), 1);
             if (tabIndex > 0) tabParams.leftMargin = dp(10);
@@ -6333,6 +6394,35 @@ public class MainActivity extends Activity {
         render[0] = () -> {
             detailContent.removeAllViews();
             if (active[0] == 2) {
+                if (!data.releaseLoaded && data.releaseText.isEmpty()) {
+                    detailContent.addView(text(data.releaseLoading ? "Загружаем сведения о релизе…"
+                            : "Загружаем сведения о релизе…", 15, Color.LTGRAY, false));
+                    if (!data.releaseLoading && !data.releaseRequestId.isEmpty()
+                            && !data.releasePagesd.isEmpty()) {
+                        data.releaseLoading = true;
+                        loadReleaseText(data, ready -> {
+                            data.releaseLoading = false;
+                            data.releaseLoaded = true;
+                            if (active[0] == 2) render[0].run();
+                        });
+                    } else if (data.releaseRequestId.isEmpty() || data.releasePagesd.isEmpty()) {
+                        data.releaseLoaded = true;
+                        detailContent.removeAllViews();
+                        detailContent.addView(text("Вкладка «Релиз» на странице не найдена.",
+                                15, Color.LTGRAY, false));
+                    }
+                } else if (!data.releaseText.isEmpty()) {
+                    TextView release = text(data.releaseText, 15, Color.WHITE, false);
+                    release.setLineSpacing(dp(3), 1f);
+                    detailContent.addView(release, new LinearLayout.LayoutParams(-1, -2));
+                }
+                descriptionTab.setBackground(shape(descriptionTab.hasFocus() ? Color.rgb(65, 72, 73) : PANEL, descriptionTab.hasFocus() ? GOLD : 0));
+                technicalTab.setBackground(shape(technicalTab.hasFocus() ? Color.rgb(65, 72, 73) : PANEL, technicalTab.hasFocus() ? GOLD : 0));
+                releaseTab.setBackground(shape(releaseTab.hasFocus() ? Color.rgb(65, 72, 73) : PANEL, releaseTab.hasFocus() ? GOLD : 0));
+                detailsScroll.scrollTo(0, 0);
+                return;
+            }
+            if (active[0] == 3) {
                 if (data.screenshotThumbs.isEmpty()) {
                     String message = data.screenshotsLoading ? "Загружаем скриншоты…"
                             : data.screenshotsLoaded || data.screenshotRequestId.isEmpty()
@@ -6383,7 +6473,7 @@ public class MainActivity extends Activity {
                 detailsScroll.scrollTo(0, 0);
                 return;
             }
-            if (active[0] == 3) {
+            if (active[0] == 4) {
                 if (data.comments.isEmpty()) {
                     detailContent.addView(text("Комментарии к этой раздаче не найдены.",
                             15, Color.LTGRAY, false));
@@ -6413,7 +6503,7 @@ public class MainActivity extends Activity {
                 detailsScroll.scrollTo(0, 0);
                 return;
             }
-            String[] keys = groups[active[0]];
+            String[] keys = groups[active[0] == 0 ? 0 : 1];
             boolean any = false;
             int index = 0;
             while (index < keys.length) {
@@ -6461,6 +6551,8 @@ public class MainActivity extends Activity {
                 v.setBackground(shape(focused ? Color.rgb(65, 72, 73) : PANEL, focused ? GOLD : 0)));
         technicalTab.setOnFocusChangeListener((v, focused) ->
                 v.setBackground(shape(focused ? Color.rgb(65, 72, 73) : PANEL, focused ? GOLD : 0)));
+        releaseTab.setOnFocusChangeListener((v, focused) ->
+                v.setBackground(shape(focused ? Color.rgb(65, 72, 73) : PANEL, focused ? GOLD : 0)));
         screenshotsTab.setOnFocusChangeListener((v, focused) ->
                 v.setBackground(shape(focused ? Color.rgb(65, 72, 73) : PANEL, focused ? GOLD : 0)));
         commentsTab.setOnFocusChangeListener((v, focused) ->
@@ -6469,8 +6561,9 @@ public class MainActivity extends Activity {
                 v.setBackground(shape(focused ? Color.rgb(65, 72, 73) : PANEL, focused ? GOLD : 0)));
         descriptionTab.setOnClickListener(v -> { active[0] = 0; render[0].run(); });
         technicalTab.setOnClickListener(v -> { active[0] = 1; render[0].run(); });
-        screenshotsTab.setOnClickListener(v -> { active[0] = 2; render[0].run(); });
-        commentsTab.setOnClickListener(v -> { active[0] = 3; render[0].run(); });
+        releaseTab.setOnClickListener(v -> { active[0] = 2; render[0].run(); });
+        screenshotsTab.setOnClickListener(v -> { active[0] = 3; render[0].run(); });
+        commentsTab.setOnClickListener(v -> { active[0] = 4; render[0].run(); });
         jackettTab.setOnClickListener(v -> searchJackett(torrent.title, data.poster));
         render[0].run();
 
