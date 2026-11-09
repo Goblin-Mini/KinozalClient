@@ -100,6 +100,7 @@ public class MainActivity extends Activity {
     private TextView sidebarCategoryInfo;
     private TextView sidebarCountryInfo;
     private TextView sidebarVersionInfo;
+    private TextView sidebarLoginInfo;
     private int lastLoadedTorrentCount = 0;
     private String lastKinozalConnectionStatus = "не проверено";
     private String activeTorrentDetailsHref = "";
@@ -1695,6 +1696,12 @@ public class MainActivity extends Activity {
         }
     }
 
+    private void updateSidebarLoginStatus(boolean loggedIn) {
+        if (sidebarLoginInfo == null) return;
+        sidebarLoginInfo.setText(loggedIn ? "Вход: выполнен" : "Вход: не выполнен");
+        sidebarLoginInfo.setTextColor(loggedIn ? Color.rgb(115, 190, 135) : Color.rgb(230, 105, 90));
+    }
+
     private String getAppVersionName() {
         try {
             android.content.pm.PackageInfo info = getPackageManager().getPackageInfo(getPackageName(), 0);
@@ -2873,8 +2880,9 @@ public class MainActivity extends Activity {
         sidebarConnectionInfo = null;
         sidebarCategoryInfo = null;
         sidebarCountryInfo = text("Страна подключения: определяется…", 10, TEAL, false);
+        sidebarLoginInfo = text("Вход: не проверен", 11, TEAL, true);
         sidebarVersionInfo = text("Версия: " + getAppVersionName(), 10, GOLD, false);
-        TextView[] diagnosticLines = {sidebarCountryInfo, sidebarVersionInfo};
+        TextView[] diagnosticLines = {sidebarCountryInfo, sidebarLoginInfo, sidebarVersionInfo};
         for (TextView line : diagnosticLines) {
             line.setGravity(Gravity.CENTER);
             line.setMaxLines(2);
@@ -4376,6 +4384,7 @@ public class MainActivity extends Activity {
                                     || loadedUrl.contains("login.php")
                                     || loadedUrl.contains("takelogin.php");
                             runOnUiThread(() -> {
+                                updateSidebarLoginStatus(!redirectedToLogin);
                                 if (redirectedToLogin) {
                                     lastBrowserError = "Сайт перенаправил на авторизацию. URL: " + view.getUrl();
                                     cb.onPage(null, lastBrowserError);
