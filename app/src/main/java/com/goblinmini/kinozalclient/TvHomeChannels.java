@@ -277,6 +277,24 @@ final class TvHomeChannels {
         }
     }
 
+    private static String normalizeChannelTitle(String title) {
+        String value = title == null ? "" : title.toLowerCase(java.util.Locale.ROOT).trim();
+        int slash = value.indexOf(" / ");
+        if (slash > 0) value = value.substring(0, slash);
+        value = value.replaceAll("\\b(2160p|1080p|720p|480p|4k|uhd|hdr10?|web[- .]?dl|webrip|blu[- .]?ray|bdrip|brrip|dvdrip|hdtv|h265|h264|x265|x264|hevc|avc|aac|dts|ac3|proper|repack|remux|extended|directors cut|theatrical|dubbed|subbed)\\b", " ");
+        return value.replaceAll("[^\\p{L}\\p{N}]+", " ").replaceAll("\\s+", " ").trim();
+    }
+
+    private static String normalizeChannelImage(String image) {
+        try {
+            Uri uri = Uri.parse(image);
+            String path = uri.getPath();
+            return path == null ? "" : path.replaceAll("/+$", "").toLowerCase(java.util.Locale.ROOT);
+        } catch (Exception ignored) {
+            return image == null ? "" : image.trim().toLowerCase(java.util.Locale.ROOT);
+        }
+    }
+
     private static PreviewChannel findChannel(PreviewChannelHelper helper, String internalId) {
         for (PreviewChannel channel : helper.getAllChannels()) {
             if (internalId.equals(channel.getInternalProviderId())) return channel;
@@ -314,6 +332,8 @@ final class TvHomeChannels {
         }
 
         int limit = Math.min(items.length(), 20);
+        java.util.Set<String> seenTitles = new java.util.HashSet<>();
+        java.util.Set<String> seenImages = new java.util.HashSet<>();
         for (int i = 0; i < limit; i++) {
             JSONObject item = items.optJSONObject(i);
             if (item == null) continue;
@@ -321,6 +341,16 @@ final class TvHomeChannels {
             String href = item.optString("href").trim();
             String image = item.optString("image", "").trim();
             if (title.isEmpty() || href.isEmpty()) continue;
+            // Do not publish broken placeholder tiles to the Android TV launcher.
+            if (!(image.startsWith("https://") || image.startsWith("http://"))) continue;
+            if (!"continue".equals(channelKey)) {
+                String titleKey = normalizeChannelTitle(title);
+                String imageKey = normalizeChannelImage(image);
+                if (!titleKey.isEmpty() && seenTitles.contains(titleKey)) continue;
+                if (!imageKey.isEmpty() && seenImages.contains(imageKey)) continue;
+                if (!titleKey.isEmpty()) seenTitles.add(titleKey);
+                if (!imageKey.isEmpty()) seenImages.add(imageKey);
+            }
 
             Intent openIntent = new Intent(activity, MainActivity.class);
             openIntent.setAction(Intent.ACTION_VIEW);
