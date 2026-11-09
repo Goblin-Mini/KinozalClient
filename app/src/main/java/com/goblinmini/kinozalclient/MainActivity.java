@@ -3249,6 +3249,7 @@ public class MainActivity extends Activity {
         getSharedPreferences(PREFS, MODE_PRIVATE).edit()
                 .putInt(FONT_SIZE_OFFSET_KEY, fontOffsetSp).apply();
         applyFontDelta(getWindow() == null ? null : getWindow().getDecorView(), appliedDelta);
+        if (valueLabel != null) applyFontDelta(valueLabel.getRootView(), appliedDelta);
         if (settingsDialog != null && settingsDialog.isShowing()
                 && settingsDialog.getWindow() != null)
             applyFontDelta(settingsDialog.getWindow().getDecorView(), appliedDelta);
@@ -3302,7 +3303,6 @@ public class MainActivity extends Activity {
             dialog.getWindow().setLayout(Math.min(dp(440),
                     getResources().getDisplayMetrics().widthPixels - dp(48)),
                     ViewGroup.LayoutParams.WRAP_CONTENT);
-            applyFontDelta(dialog.getWindow().getDecorView(), fontOffsetSp);
         }
     }
 
