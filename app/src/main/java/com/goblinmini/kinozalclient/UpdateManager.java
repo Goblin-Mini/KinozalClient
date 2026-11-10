@@ -127,8 +127,8 @@ final class UpdateManager {
             if (activity.isFinishing() || activity.isDestroyed()) return;
             new AlertDialog.Builder(activity)
                     .setTitle("Доступно обновление")
-                    .setMessage("Найдена новая версия Kinozal ТВ: " + version
-                            + "\\nХотите загрузить и установить её?")
+                    .setMessage("Найдена новая версия Кинозал ТВ: " + version
+                            + "\nХотите загрузить и установить её?")
                     .setPositiveButton("Загрузить", (dialog, which) -> download(apkUrl))
                     .setNegativeButton("Отмена", null)
                     .show();
