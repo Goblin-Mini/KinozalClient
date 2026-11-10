@@ -93,6 +93,8 @@ public class MainActivity extends Activity {
     private boolean automaticUpdateCheckScheduled = false;
     private boolean homeCacheDisplayed = false;
     private String homeCacheDiagnostic = "Кэш главной ещё не проверялся";
+    private volatile String exitCountryStatus = "Страна выхода: проверка…";
+    private TextView exitCountryView;
 
     private volatile String lastBrowserError = "Причина пока не определена";
     private interface BrowserPageCallback { void onPage(String html, String error); }
@@ -152,6 +154,7 @@ public class MainActivity extends Activity {
     }
 
     private void continueStartup(String savedBrowserCookies) {
+        loadExternalIpInfo(null);
         if (savedBrowserCookies != null) restoreBrowserSession(savedBrowserCookies);
         else markStartupCatalogReady();
     }
@@ -453,9 +456,7 @@ public class MainActivity extends Activity {
                 addEmpty("Не удалось получить постеры Kinozal. Проверьте авторизацию и выбранное зеркало.");
             } else {
                 setCatalogStatus("Постеров", total);
-                status.setText("Главная · Лент показано: " + sections.size() + "/" + paths.length
-                        + "\nЗапросов обработано: " + paths.length + "/" + paths.length
-                        + (homeCacheDisplayed ? "\nКэш обновлён" : ""));
+                status.setText("Главная · Лент показано: " + sections.size() + "/" + paths.length);
             }
             return;
         }
@@ -718,6 +719,10 @@ public class MainActivity extends Activity {
     private void setCatalogStatus(String itemType, int count) {
         status.setText(currentTitle + " · Загружено: " + count + " " + itemType
                 + "\nВерсия: " + getAppVersionName());
+    }
+
+    private void updateSidebarExitCountry() {
+        if (exitCountryView != null) exitCountryView.setText(exitCountryStatus);
     }
 
     private String getAppVersionName() {
@@ -1027,8 +1032,17 @@ public class MainActivity extends Activity {
         LinearLayout main = new LinearLayout(this); main.setOrientation(LinearLayout.VERTICAL);
         main.setPadding(dp(16), dp(8), dp(8), dp(8));
         root.addView(main, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1));
-        LinearLayout brand = new LinearLayout(this); brand.setGravity(Gravity.CENTER);
-        TextView logo = text("KINOZAL", 23, GOLD, true); brand.addView(logo);
+        LinearLayout brand = new LinearLayout(this);
+        brand.setGravity(Gravity.CENTER);
+        brand.setOrientation(LinearLayout.HORIZONTAL);
+        ImageView brandIcon = new ImageView(this);
+        brandIcon.setImageResource(R.drawable.kinozal_logo);
+        brandIcon.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        brand.addView(brandIcon, new LinearLayout.LayoutParams(dp(44), dp(44)));
+        TextView logo = text("KINOZAL", 23, GOLD, true);
+        LinearLayout.LayoutParams brandTextParams = new LinearLayout.LayoutParams(-2, -2);
+        brandTextParams.leftMargin = dp(7);
+        brand.addView(logo, brandTextParams);
         sidebar.addView(brand, new LinearLayout.LayoutParams(-1, dp(58)));
         ScrollView menuScroll = new ScrollView(this);
         menuScroll.setFillViewport(false);
@@ -1081,12 +1095,28 @@ public class MainActivity extends Activity {
         addMenu("★", "Избранное", () -> showFavorites());
         addMenu("◷", "Недавно смотрели", () -> showRecentlyViewed());
         addMenu("⚙", "Настройки", () -> showSettings());
-        status = text("Подключение…", 11, TEAL, false);
+        status = text("Подключение…", 10, TEAL, false);
         status.setGravity(Gravity.CENTER);
-        status.setLineSpacing(dp(2), 1f);
-        LinearLayout.LayoutParams statusParams = new LinearLayout.LayoutParams(-1, dp(44));
-        statusParams.topMargin = dp(6);
+        status.setIncludeFontPadding(false);
+        status.setPadding(0, 0, 0, 0);
+        status.setLineSpacing(0, 1f);
+        LinearLayout.LayoutParams statusParams = new LinearLayout.LayoutParams(-1, dp(22));
+        statusParams.topMargin = 0;
         sidebar.addView(status, statusParams);
+        exitCountryView = text(exitCountryStatus, 10, TEAL, false);
+        exitCountryView.setGravity(Gravity.CENTER);
+        exitCountryView.setMaxLines(2);
+        exitCountryView.setIncludeFontPadding(false);
+        exitCountryView.setPadding(0, 0, 0, 0);
+        LinearLayout.LayoutParams countryParams = new LinearLayout.LayoutParams(-1, dp(22));
+        countryParams.topMargin = 0;
+        sidebar.addView(exitCountryView, countryParams);
+        TextView appVersionView = text("Версия 0.5.14", 9, TEAL, false);
+        appVersionView.setGravity(Gravity.CENTER);
+        appVersionView.setSingleLine(true);
+        appVersionView.setIncludeFontPadding(false);
+        appVersionView.setPadding(0, 0, 0, 0);
+        sidebar.addView(appVersionView, new LinearLayout.LayoutParams(-1, dp(18)));
 
         heading = text("Главная", 25, GOLD, true);
         LinearLayout.LayoutParams headingParams = new LinearLayout.LayoutParams(-1, dp(42));
@@ -1211,9 +1241,32 @@ public class MainActivity extends Activity {
         Button diagnostics = button("▤   Диагностика / кэш");
         Button socks5 = button("◉   SOCKS5 прокси");
         Button jackett = button("⌕   Поиск Jackett");
+        Button backup = button("⇧   Создать резервную копию");
+        Button restore = button("⇩   Восстановить из копии");
         Button about = button("ⓘ   О приложении");
         Button close = button("Закрыть");
-        for (Button action : new Button[]{login, mirrorButton, updates, diagnostics, socks5, jackett, about, close}) {
+        for (Button action : new Button[]{login, mirrorButton, updates, diagnostics, socks5, jackett}) {
+            action.setTextSize(15);
+            action.setGravity(Gravity.CENTER);
+            LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-1, dp(48));
+            params.bottomMargin = dp(8);
+            panel.addView(action, params);
+        }
+        LinearLayout backupRow = new LinearLayout(this);
+        backupRow.setOrientation(LinearLayout.HORIZONTAL);
+        LinearLayout.LayoutParams backupRowParams = new LinearLayout.LayoutParams(-1, dp(52));
+        backupRowParams.bottomMargin = dp(8);
+        backup.setTextSize(13);
+        restore.setTextSize(13);
+        backup.setGravity(Gravity.CENTER);
+        restore.setGravity(Gravity.CENTER);
+        backupRow.addView(backup, new LinearLayout.LayoutParams(0, -1, 1f));
+        LinearLayout.LayoutParams restoreParams = new LinearLayout.LayoutParams(0, -1, 1f);
+        restoreParams.leftMargin = dp(8);
+        backupRow.addView(restore, restoreParams);
+        // Keep backup actions immediately below the Jackett search, in the same two-column row.
+        panel.addView(backupRow);
+        for (Button action : new Button[]{about, close}) {
             action.setTextSize(15);
             action.setGravity(Gravity.CENTER);
             LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-1, dp(48));
@@ -1226,9 +1279,14 @@ public class MainActivity extends Activity {
         diagnostics.setOnClickListener(v -> { settingsDialog.dismiss(); showDiagnostics(); });
         socks5.setOnClickListener(v -> { settingsDialog.dismiss(); showSocks5Settings(); });
         jackett.setOnClickListener(v -> showJackettSettings());
+        backup.setOnClickListener(v -> createBackupFile());
+        restore.setOnClickListener(v -> chooseBackupFile());
         about.setOnClickListener(v -> showAbout());
         close.setOnClickListener(v -> settingsDialog.dismiss());
-        settingsDialog = new AlertDialog.Builder(this).setView(panel).create();
+        ScrollView settingsScroll = new ScrollView(this);
+        settingsScroll.setFillViewport(false);
+        settingsScroll.addView(panel);
+        settingsDialog = new AlertDialog.Builder(this).setView(settingsScroll).create();
         settingsDialog.show();
         if (settingsDialog.getWindow() != null) {
             settingsDialog.getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(BG));
@@ -1239,11 +1297,8 @@ public class MainActivity extends Activity {
     }
 
     private void showDiagnostics() {
-        long used = diskCache.getSizeBytes();
         long limit = diskCache.getMaxBytes();
-        double usedMb = used / (1024d * 1024d);
         double limitMb = limit / (1024d * 1024d);
-        double percent = limit > 0 ? used * 100d / limit : 0d;
 
         LinearLayout panel = new LinearLayout(this);
         panel.setOrientation(LinearLayout.VERTICAL);
@@ -1253,39 +1308,59 @@ public class MainActivity extends Activity {
         TextView networkInfo = text("Внешний IP и страна: проверка…", 14, GOLD, false);
         networkInfo.setLineSpacing(dp(4), 1f);
         panel.addView(networkInfo);
-        TextView cacheInfo = text(
-                "Дисковый кэш Kinozal\\n"
-                + String.format(java.util.Locale.ROOT, "Занято: %.2f МБ из %.0f МБ (%.1f%%)\\n",
-                        usedMb, limitMb, percent)
-                + String.format(java.util.Locale.ROOT, "Файлов в кэше: %d\\n", diskCache.getEntryCount())
-                + "Расположение: cache/kinozal_cache\\n"
-                + homeCacheDiagnostic,
-                15, Color.WHITE, false);
+        TextView cacheInfo = text("", 15, Color.WHITE, false);
         cacheInfo.setLineSpacing(dp(5), 1f);
         LinearLayout.LayoutParams cacheParams = new LinearLayout.LayoutParams(-1, -2);
         cacheParams.topMargin = dp(12);
         panel.addView(cacheInfo, cacheParams);
+
+        Runnable updateCacheInfo = () -> {
+            long current = diskCache.getSizeBytes();
+            cacheInfo.setText("Дисковый кэш Kinozal\n"
+                    + String.format(java.util.Locale.ROOT, "Занято: %.2f МБ из %.0f МБ (%.1f%%)\n",
+                            current / (1024d * 1024d), limitMb,
+                            limit > 0 ? current * 100d / limit : 0d)
+                    + String.format(java.util.Locale.ROOT, "Файлов в кэше: %d\n", diskCache.getEntryCount())
+                    + "Расположение: cache/kinozal_cache\n"
+                    + homeCacheDiagnostic);
+        };
+        updateCacheInfo.run();
 
         Button refresh = button("Обновить данные");
         refresh.setGravity(Gravity.CENTER);
         LinearLayout.LayoutParams refreshParams = new LinearLayout.LayoutParams(-1, dp(44));
         refreshParams.topMargin = dp(14);
         panel.addView(refresh, refreshParams);
+
+        Button clearCache = button("Очистить кэш");
+        clearCache.setGravity(Gravity.CENTER);
+        LinearLayout.LayoutParams clearParams = new LinearLayout.LayoutParams(-1, dp(44));
+        clearParams.topMargin = dp(8);
+        panel.addView(clearCache, clearParams);
+
         AlertDialog dialog = new AlertDialog.Builder(this)
                 .setTitle("Диагностика")
                 .setView(panel)
                 .setPositiveButton("Закрыть", null)
                 .create();
         refresh.setOnClickListener(v -> {
-            long current = diskCache.getSizeBytes();
-            cacheInfo.setText("Дисковый кэш Kinozal\\n"
-                    + String.format(java.util.Locale.ROOT, "Занято: %.2f МБ из %.0f МБ (%.1f%%)\\n",
-                            current / (1024d * 1024d), limitMb, limit > 0 ? current * 100d / limit : 0d)
-                    + String.format(java.util.Locale.ROOT, "Файлов в кэше: %d\\n", diskCache.getEntryCount())
-                    + "Расположение: cache/kinozal_cache\\n"
-                    + homeCacheDiagnostic);
+            updateCacheInfo.run();
             loadExternalIpInfo(networkInfo);
-        });;
+        });
+        clearCache.setOnClickListener(v -> new AlertDialog.Builder(this)
+                .setTitle("Очистить кэш?")
+                .setMessage("Будут удалены сохранённые страницы и постеры Kinozal. Авторизация, cookies и настройки SOCKS5 останутся без изменений.")
+                .setNegativeButton("Отмена", null)
+                .setPositiveButton("Очистить", (confirm, which) -> {
+                    int deleted = diskCache.clear();
+                    pageCache.clear();
+                    if (sessionWebView != null) sessionWebView.clearCache(true);
+                    homeCacheDisplayed = false;
+                    homeCacheDiagnostic = "Главная: кэш очищен";
+                    updateCacheInfo.run();
+                    showMessage("Кэш очищен. Удалено файлов: " + deleted);
+                })
+                .show());
         dialog.show();
         if (dialog.getWindow() != null) {
             dialog.getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(BG));
@@ -1299,7 +1374,7 @@ public class MainActivity extends Activity {
     }
 
     private void loadExternalIpInfo(TextView target) {
-        target.setText("Внешний IP и страна: проверка…");
+        if (target != null) target.setText("Внешний IP и страна: проверка…");
         io.execute(() -> {
             HttpURLConnection connection = null;
             try {
@@ -1331,15 +1406,25 @@ public class MainActivity extends Activity {
                 String codeCountry = json.optString("country_code", "");
                 org.json.JSONObject connectionInfo = json.optJSONObject("connection");
                 String isp = connectionInfo == null ? "" : connectionInfo.optString("isp", "");
+                String countryLine = "Страна выхода: " + country
+                        + (codeCountry.isEmpty() ? "" : " (" + codeCountry + ")");
                 String result = "Маршрут: " + (cfg.enabled ? "SOCKS5" : "напрямую")
-                        + (cfg.enabled ? "\\nSOCKS5: подключение активно (" + cfg.host + ":" + cfg.port + ")" : "")
-                        + "\\nВнешний IP: " + ip
-                        + "\\nСтрана выхода: " + country + (codeCountry.isEmpty() ? "" : " (" + codeCountry + ")")
-                        + (isp.isEmpty() ? "" : "\\nПровайдер: " + isp);
-                runOnUiThread(() -> target.setText(result));
+                        + (cfg.enabled ? "\nSOCKS5: подключение активно (" + cfg.host + ":" + cfg.port + ")" : "")
+                        + "\nВнешний IP: " + ip
+                        + "\n" + countryLine
+                        + (isp.isEmpty() ? "" : "\nПровайдер: " + isp);
+                runOnUiThread(() -> {
+                    exitCountryStatus = countryLine;
+                    if (target != null) target.setText(result);
+                    updateSidebarExitCountry();
+                });
             } catch (Exception e) {
                 String message = "Не удалось определить внешний IP/страну: " + safe(e.getMessage());
-                runOnUiThread(() -> target.setText(message));
+                runOnUiThread(() -> {
+                    exitCountryStatus = "Страна выхода: не определена";
+                    if (target != null) target.setText(message);
+                    updateSidebarExitCountry();
+                });
             } finally {
                 if (connection != null) connection.disconnect();
             }
@@ -2167,7 +2252,167 @@ public class MainActivity extends Activity {
                 .show();
     }
 
+    private void createBackupFile() {
+        try {
+            org.json.JSONObject root = new org.json.JSONObject();
+            root.put("format", BACKUP_FORMAT);
+            root.put("version", BACKUP_VERSION);
+            root.put("createdAt", System.currentTimeMillis());
+            root.put("kinozal_settings", exportPreferences("kinozal_settings", null));
+            root.put("jackett_settings", exportPreferences("jackett_settings", new String[]{"apikey"}));
+            root.put("kinozal_socks5", exportPreferences("kinozal_socks5", new String[]{"password_enc"}));
+            android.content.Intent intent = new android.content.Intent(android.content.Intent.ACTION_CREATE_DOCUMENT);
+            intent.addCategory(android.content.Intent.CATEGORY_OPENABLE);
+            intent.setType("application/json");
+            intent.putExtra(android.content.Intent.EXTRA_TITLE,
+                    "KinozalClient-backup-" + new java.text.SimpleDateFormat("yyyyMMdd-HHmm", java.util.Locale.ROOT)
+                            .format(new java.util.Date()) + ".json");
+            startActivityForResult(intent, REQUEST_CREATE_BACKUP);
+        } catch (Exception e) {
+            showMessage("Не удалось подготовить резервную копию: " + safe(e.getMessage()));
+        }
+    }
+
+    private org.json.JSONObject exportPreferences(String name, String[] excluded) throws Exception {
+        org.json.JSONObject result = new org.json.JSONObject();
+        java.util.Map<String, ?> values = getSharedPreferences(name, MODE_PRIVATE).getAll();
+        for (java.util.Map.Entry<String, ?> entry : values.entrySet()) {
+            boolean skip = false;
+            if (excluded != null) for (String key : excluded) if (key.equals(entry.getKey())) skip = true;
+            if (skip) continue;
+            Object value = entry.getValue();
+            if (value instanceof java.util.Set) {
+                org.json.JSONArray array = new org.json.JSONArray();
+                for (Object item : (java.util.Set<?>) value) array.put(String.valueOf(item));
+                result.put(entry.getKey(), array);
+                result.put("__set__" + entry.getKey(), true);
+            } else {
+                result.put(entry.getKey(), value);
+            }
+        }
+        return result;
+    }
+
+    private void writeBackupFile(Uri uri) {
+        io.execute(() -> {
+            try {
+                org.json.JSONObject root = new org.json.JSONObject();
+                root.put("format", BACKUP_FORMAT);
+                root.put("version", BACKUP_VERSION);
+                root.put("createdAt", System.currentTimeMillis());
+                root.put("kinozal_settings", exportPreferences("kinozal_settings", null));
+                root.put("jackett_settings", exportPreferences("jackett_settings", new String[]{"apikey"}));
+                root.put("kinozal_socks5", exportPreferences("kinozal_socks5", new String[]{"password_enc"}));
+                try (java.io.OutputStream out = getContentResolver().openOutputStream(uri, "wt")) {
+                    if (out == null) throw new java.io.IOException("Не удалось открыть файл для записи");
+                    out.write(root.toString(2).getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                    out.flush();
+                }
+                runOnUiThread(() -> showMessage("Резервная копия сохранена"));
+            } catch (Exception e) {
+                runOnUiThread(() -> showMessage("Ошибка сохранения копии: " + safe(e.getMessage())));
+            }
+        });
+    }
+
+    private void chooseBackupFile() {
+        android.content.Intent intent = new android.content.Intent(android.content.Intent.ACTION_OPEN_DOCUMENT);
+        intent.addCategory(android.content.Intent.CATEGORY_OPENABLE);
+        intent.setType("*/*");
+        startActivityForResult(intent, REQUEST_RESTORE_BACKUP);
+    }
+
+    private void readBackupFile(Uri uri) {
+        io.execute(() -> {
+            try {
+                byte[] bytes;
+                try (java.io.InputStream in = getContentResolver().openInputStream(uri);
+                     java.io.ByteArrayOutputStream buffer = new java.io.ByteArrayOutputStream()) {
+                    if (in == null) throw new java.io.IOException("Не удалось открыть файл");
+                    byte[] chunk = new byte[8192];
+                    int count;
+                    while ((count = in.read(chunk)) != -1) {
+                        if (buffer.size() + count > 5 * 1024 * 1024)
+                            throw new java.io.IOException("Файл резервной копии слишком большой");
+                        buffer.write(chunk, 0, count);
+                    }
+                    bytes = buffer.toByteArray();
+                }
+                org.json.JSONObject backup = new org.json.JSONObject(
+                        new String(bytes, java.nio.charset.StandardCharsets.UTF_8));
+                if (!BACKUP_FORMAT.equals(backup.optString("format"))
+                        || backup.optInt("version", -1) != BACKUP_VERSION)
+                    throw new java.io.IOException("Неподдерживаемый формат резервной копии");
+                runOnUiThread(() -> new AlertDialog.Builder(this)
+                        .setTitle("Восстановить данные?")
+                        .setMessage("Текущие история просмотров, избранное, история поиска и настройки будут заменены данными из выбранной копии. Продолжить?")
+                        .setNegativeButton("Отмена", null)
+                        .setPositiveButton("Восстановить", (d, which) -> {
+                            try {
+                                importPreferences("kinozal_settings", backup.getJSONObject("kinozal_settings"), null, true);
+                                importPreferences("jackett_settings", backup.optJSONObject("jackett_settings"),
+                                        new String[]{"apikey"}, true);
+                                importPreferences("kinozal_socks5", backup.optJSONObject("kinozal_socks5"),
+                                        new String[]{"password_enc"}, true);
+                                mirror = getSharedPreferences(PREFS, MODE_PRIVATE).getString("mirror", MIRRORS[0]);
+                                client.setMirror(mirror);
+                                showMessage("Данные восстановлены. Проверьте пароль SOCKS5 и API Key Jackett.");
+                            } catch (Exception e) {
+                                showMessage("Не удалось восстановить копию: " + safe(e.getMessage()));
+                            }
+                        }).show());
+            } catch (Exception e) {
+                runOnUiThread(() -> showMessage("Файл резервной копии не прочитан: " + safe(e.getMessage())));
+            }
+        });
+    }
+
+    private void importPreferences(String name, org.json.JSONObject values,
+                                   String[] excluded, boolean replace) throws Exception {
+        if (values == null) return;
+        android.content.SharedPreferences prefs = getSharedPreferences(name, MODE_PRIVATE);
+        android.content.SharedPreferences.Editor editor = prefs.edit();
+        java.util.Map<String, ?> old = prefs.getAll();
+        java.util.HashMap<String, Object> preserved = new java.util.HashMap<>();
+        if (excluded != null) for (String key : excluded) if (old.containsKey(key)) preserved.put(key, old.get(key));
+        if (replace) editor.clear();
+        java.util.Iterator<String> keys = values.keys();
+        while (keys.hasNext()) {
+            String key = keys.next();
+            if (key.startsWith("__set__")) continue;
+            if (excluded != null && java.util.Arrays.asList(excluded).contains(key)) continue;
+            Object value = values.get(key);
+            if (values.optBoolean("__set__" + key, false) && value instanceof org.json.JSONArray) {
+                java.util.HashSet<String> set = new java.util.HashSet<>();
+                org.json.JSONArray array = (org.json.JSONArray) value;
+                for (int i = 0; i < array.length(); i++) set.add(array.optString(i));
+                editor.putStringSet(key, set);
+            } else if (value instanceof Boolean) editor.putBoolean(key, (Boolean) value);
+            else if (value instanceof Integer) editor.putInt(key, (Integer) value);
+            else if (value instanceof Long) editor.putLong(key, (Long) value);
+            else if (value instanceof Double) editor.putFloat(key, ((Double) value).floatValue());
+            else if (value instanceof String) editor.putString(key, (String) value);
+            else if (value instanceof org.json.JSONArray) {
+                org.json.JSONArray array = (org.json.JSONArray) value;
+                java.util.ArrayList<String> items = new java.util.ArrayList<>();
+                for (int i = 0; i < array.length(); i++) items.add(array.optString(i));
+                editor.putString(key, new org.json.JSONArray(items).toString());
+            }
+        }
+        for (java.util.Map.Entry<String, Object> entry : preserved.entrySet()) {
+            Object value = entry.getValue();
+            if (value instanceof String) editor.putString(entry.getKey(), (String) value);
+            else if (value instanceof Boolean) editor.putBoolean(entry.getKey(), (Boolean) value);
+            else if (value instanceof Integer) editor.putInt(entry.getKey(), (Integer) value);
+        }
+        if (!editor.commit()) throw new java.io.IOException("Не удалось записать настройки " + name);
+    }
+
     private static final int REQUEST_VOICE_SEARCH = 7401;
+    private static final int REQUEST_CREATE_BACKUP = 7402;
+    private static final int REQUEST_RESTORE_BACKUP = 7403;
+    private static final String BACKUP_FORMAT = "kinozal-client-backup";
+    private static final int BACKUP_VERSION = 1;
 
     private void startVoiceSearch() {
         android.content.Intent intent = new android.content.Intent(
@@ -2189,6 +2434,17 @@ public class MainActivity extends Activity {
 
     @Override protected void onActivityResult(int requestCode, int resultCode, android.content.Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
+        if (resultCode != RESULT_OK || data == null) {
+            if (requestCode == REQUEST_CREATE_BACKUP || requestCode == REQUEST_RESTORE_BACKUP) return;
+        }
+        if (requestCode == REQUEST_CREATE_BACKUP && data != null && data.getData() != null) {
+            writeBackupFile(data.getData());
+            return;
+        }
+        if (requestCode == REQUEST_RESTORE_BACKUP && data != null && data.getData() != null) {
+            readBackupFile(data.getData());
+            return;
+        }
         if (requestCode != REQUEST_VOICE_SEARCH || resultCode != RESULT_OK || data == null) return;
         java.util.ArrayList<String> results = data.getStringArrayListExtra(
                 android.speech.RecognizerIntent.EXTRA_RESULTS);
