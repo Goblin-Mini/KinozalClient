@@ -3425,9 +3425,11 @@ public class MainActivity extends Activity {
     }
 
     private static final int REQUEST_BACKUP_EXPORT = 7510;
+    private static final int REQUEST_TORRENT_SAVE = 7513;
     private static final int REQUEST_BACKUP_IMPORT = 7511;
     private static final int REQUEST_FEED_DIAGNOSTICS_EXPORT = 7512;
     private String pendingFeedDiagnosticsExport;
+    private byte[] pendingTorrentSaveBytes;
     private EditText torrServeAddressField;
 
     private int getAccentColor(String key) {
@@ -5485,6 +5487,10 @@ public class MainActivity extends Activity {
         }
         if (requestCode == REQUEST_FEED_DIAGNOSTICS_EXPORT) {
             writeFeedDiagnosticsToUri(data.getData());
+            return;
+        }
+        if (requestCode == REQUEST_TORRENT_SAVE) {
+            writeTorrentToUri(data.getData());
             return;
         }
         if (requestCode == REQUEST_BACKUP_IMPORT) {
@@ -7634,23 +7640,36 @@ public class MainActivity extends Activity {
             if (bytes == null || bytes.length < 20 || bytes[0] != 'd') {
                 throw new java.io.IOException("Сайт вернул не .torrent-файл. Возможно, сессия истекла или зеркало отклонило запрос.");
             }
-            java.io.File target = new java.io.File(getCacheDir(), "kinozal-transfer.torrent");
-            try (java.io.FileOutputStream out = new java.io.FileOutputStream(target)) { out.write(bytes); }
-            Uri fileUri = Uri.parse("content://" + getPackageName() + ".torrentprovider/torrent");
-            Intent send = new Intent(Intent.ACTION_SEND);
-            send.setPackage("ru.yourok.torrserve");
-            send.setType("application/x-bittorrent");
-            send.putExtra(Intent.EXTRA_STREAM, fileUri);
-            send.putExtra("poster", data.poster == null ? "" : data.poster);
-            send.putExtra("title", data.title == null ? "" : data.title);
-            send.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-            send.setClipData(android.content.ClipData.newUri(getContentResolver(), "torrent", fileUri));
-            runOnUiThread(() -> {
-                try { startActivity(send); }
-                catch (Exception e) { showMessage("TorrServe MatriX не установлен или не принимает файл."); }
-            });
+            String safeTitle = data.title == null ? "kinozal-torrent" : data.title.trim();
+            safeTitle = safeTitle.replaceAll("[\\\\/:*?\\"<>|]", "_")
+                    .replaceAll("\\s+", " ").trim();
+            if (safeTitle.isEmpty()) safeTitle = "kinozal-torrent";
+            pendingTorrentSaveBytes = bytes;
+            Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
+            intent.addCategory(Intent.CATEGORY_OPENABLE);
+            intent.setType("application/x-bittorrent");
+            intent.putExtra(Intent.EXTRA_TITLE, safeTitle + ".torrent");
+            startActivityForResult(intent, REQUEST_TORRENT_SAVE);
         } catch (Exception e) {
-            runOnUiThread(() -> showMessage("Не удалось подготовить торрент: " + safe(e.getMessage())));
+            pendingTorrentSaveBytes = null;
+            showMessage("Не удалось подготовить торрент для сохранения: " + safe(e.getMessage()));
+        }
+    }
+
+    private void writeTorrentToUri(Uri uri) {
+        byte[] bytes = pendingTorrentSaveBytes;
+        pendingTorrentSaveBytes = null;
+        if (bytes == null || bytes.length < 20 || bytes[0] != 'd') {
+            showMessage("Данные торрент-файла потеряны. Повторите скачивание.");
+            return;
+        }
+        try (java.io.OutputStream out = getContentResolver().openOutputStream(uri)) {
+            if (out == null) throw new java.io.IOException("Не удалось открыть выбранное место");
+            out.write(bytes);
+            out.flush();
+            showMessage("Торрент-файл сохранён");
+        } catch (Exception e) {
+            showMessage("Не удалось сохранить торрент: " + safe(e.getMessage()));
         }
     }
 
