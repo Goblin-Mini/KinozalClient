@@ -2979,7 +2979,6 @@ public class MainActivity extends Activity {
         addMenu("⌂", "Главная", () -> loadInitialCatalog());
         addMenu("▤", "Подборки", () -> loadCollections());
         addMenu("⇩", "Все раздачи", () -> load("browse.php", "Все раздачи"));
-        addMenu("⚙", "Фильтр раздач", () -> showTorrentFilter());
 
         Button categoriesButton = button("▦   Категории  ▾");
         categoriesButton.setText(menuIconText("▦   Категории  ▾"));
@@ -3155,6 +3154,17 @@ public class MainActivity extends Activity {
             @Override public void afterTextChanged(android.text.Editable s) { }
         });
         searchBar.addView(searchField, searchParams);
+        Button filterButton = button("+");
+        filterButton.setTextSize(fontSize(24));
+        filterButton.setContentDescription("Фильтр раздач");
+        filterButton.setMinWidth(0);
+        filterButton.setMinimumWidth(0);
+        filterButton.setGravity(Gravity.CENTER);
+        filterButton.setPadding(0, 0, 0, 0);
+        LinearLayout.LayoutParams filterButtonParams = new LinearLayout.LayoutParams(dp(48), dp(48));
+        filterButtonParams.rightMargin = dp(7);
+        searchBar.addView(filterButton, filterButtonParams);
+        filterButton.setOnClickListener(v -> showTorrentFilter());
         Button history = button("История");
         history.setTextSize(fontSize(12));
         history.setMinWidth(0);
