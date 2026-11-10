@@ -7506,20 +7506,41 @@ public class MainActivity extends Activity {
             return;
         }
         if (data.torrentLink.startsWith("magnet:")) {
-            showMessage("На странице пока доступна только magnet-ссылка. Обработку magnet продолжим отдельно.");
+            showMessage("На странице доступна magnet-ссылка, а не торрент-файл.");
             return;
         }
 
+        // Fast path: use the authenticated native HTTP client directly.
+        // This avoids reloading the details page and converting the torrent
+        // through WebView -> Blob -> Base64 on every download.
         WebView web = sessionWebView;
+        executeSafely(io, () -> {
+            try {
+                String browserCookies = CookieManager.getInstance().getCookie(client.getMirror());
+                if (browserCookies != null && !browserCookies.isEmpty()) {
+                    client.importBrowserCookies(browserCookies);
+                }
+                byte[] bytes = client.fetchBytes(data.torrentLink,
+                        "application/x-bittorrent,application/octet-stream,*/*",
+                        data.sourcePage == null || data.sourcePage.isEmpty()
+                                ? client.getMirror() + "/" : data.sourcePage);
+                if (bytes == null || bytes.length < 20 || bytes[0] != 'd') {
+                    throw new java.io.IOException("Сайт вернул не .torrent-файл");
+                }
+                runOnUiThread(() -> deliverTorrentBytes(data, bytes));
+            } catch (Exception nativeError) {
+                Log.w("KinozalDownload", "Native torrent fetch failed; trying browser session",
+                        nativeError);
+                runOnUiThread(() -> downloadTorrentViaBrowser(data, web));
+            }
+        });
+    }
+
+    private void downloadTorrentViaBrowser(TorrentDetails data, WebView web) {
         if (web == null) {
-            downloadTorrentNative(data);
+            showMessage("Не удалось скачать торрент: проверьте соединение и авторизацию.");
             return;
         }
-
-        // The hidden WebView may still be on the home/catalogue page on the
-        // first visit to a details card. Load the actual details page first:
-        // this establishes the correct same-origin context and Referer before
-        // requesting download.php. fetchBrowserPage waits for onPageFinished.
         String detailsPage = data.sourcePage;
         if (detailsPage == null || detailsPage.trim().isEmpty()) {
             detailsPage = data.torrentLink;
