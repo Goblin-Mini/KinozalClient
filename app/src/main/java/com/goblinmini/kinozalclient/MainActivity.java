@@ -2978,6 +2978,7 @@ public class MainActivity extends Activity {
         addMenu("⌂", "Главная", () -> loadInitialCatalog());
         addMenu("▤", "Подборки", () -> loadCollections());
         addMenu("⇩", "Все раздачи", () -> load("browse.php", "Все раздачи"));
+        addMenu("⚙", "Фильтр раздач", () -> showTorrentFilter());
 
         Button categoriesButton = button("▦   Категории  ▾");
         categoriesButton.setText(menuIconText("▦   Категории  ▾"));
@@ -5593,6 +5594,211 @@ public class MainActivity extends Activity {
                 submitSearch();
             }
         }
+    }
+
+    private static class FilterOption {
+        final String label;
+        final String value;
+        FilterOption(String label, String value) { this.label = label; this.value = value; }
+        @Override public String toString() { return label; }
+    }
+
+    private android.widget.Spinner addFilterSpinner(LinearLayout parent, String label,
+            FilterOption[] options, int selectedIndex) {
+        TextView caption = text(label, 13, GOLD, true);
+        LinearLayout.LayoutParams captionParams = new LinearLayout.LayoutParams(-1, -2);
+        captionParams.topMargin = dp(9);
+        captionParams.bottomMargin = dp(3);
+        parent.addView(caption, captionParams);
+        android.widget.Spinner spinner = new android.widget.Spinner(this);
+        ArrayAdapter<FilterOption> adapter = new ArrayAdapter<>(this,
+                android.R.layout.simple_spinner_item, options);
+        adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+        spinner.setAdapter(adapter);
+        spinner.setSelection(Math.max(0, Math.min(selectedIndex, options.length - 1)));
+        spinner.setFocusable(true);
+        spinner.setFocusableInTouchMode(false);
+        parent.addView(spinner, new LinearLayout.LayoutParams(-1, dp(43)));
+        return spinner;
+    }
+
+    private void showTorrentFilter() {
+        final FilterOption[] categories = {
+            new FilterOption("Поиск по разделам", "0"),
+            new FilterOption("Все сериалы", "1001"),
+            new FilterOption("Сериал - Русский", "45"),
+            new FilterOption("Сериал - Буржуйский", "46"),
+            new FilterOption("Все фильмы", "1002"),
+            new FilterOption("Кино - Комедия", "8"),
+            new FilterOption("Кино - Боевик / Военный", "6"),
+            new FilterOption("Кино - Триллер / Детектив", "15"),
+            new FilterOption("Кино - Драма", "17"),
+            new FilterOption("Кино - Мелодрама", "35"),
+            new FilterOption("Кино - Индийское", "39"),
+            new FilterOption("Кино - Фантастика", "13"),
+            new FilterOption("Кино - Фэнтези", "14"),
+            new FilterOption("Кино - Ужас / Мистика", "24"),
+            new FilterOption("Кино - Приключения", "11"),
+            new FilterOption("Кино - Наше Кино", "10"),
+            new FilterOption("Кино - Исторический", "9"),
+            new FilterOption("Кино - Азиатский", "47"),
+            new FilterOption("Кино - Документальный", "18"),
+            new FilterOption("Кино - Спорт", "37"),
+            new FilterOption("Кино - Детский / Семейный", "12"),
+            new FilterOption("Кино - Классика", "7"),
+            new FilterOption("Кино - Концерт", "48"),
+            new FilterOption("Кино - Передачи / ТВ-шоу", "49"),
+            new FilterOption("Кино - ТВ-шоу Мир", "50"),
+            new FilterOption("Кино - Театр, Опера, Балет", "38"),
+            new FilterOption("Кино - Эротика", "16"),
+            new FilterOption("Все мульты", "1003"),
+            new FilterOption("Мульт - Буржуйский", "21"),
+            new FilterOption("Мульт - Русский", "22"),
+            new FilterOption("Мульт - Аниме", "20"),
+            new FilterOption("Вся музыка", "1004"),
+            new FilterOption("Музыка - Буржуйская", "3"),
+            new FilterOption("Музыка - Русская", "4"),
+            new FilterOption("Музыка - Сборники", "5"),
+            new FilterOption("Музыка - Классическая", "42"),
+            new FilterOption("Шоу, концерты, спорт", "1006"),
+            new FilterOption("Другое - АудиоКниги", "2"),
+            new FilterOption("Другое - Видеоклипы", "1"),
+            new FilterOption("Другое - Игры", "23"),
+            new FilterOption("Другое - Программы", "32"),
+            new FilterOption("Другое - Дизайн / Графика", "40"),
+            new FilterOption("Другое - Библиотека", "41")
+        };
+        final FilterOption[] formats = {
+            new FilterOption("Все форматы", "0"),
+            new FilterOption("Рипы HD (1080/720)", "3"),
+            new FilterOption("1080", "3001"),
+            new FilterOption("720", "3002"),
+            new FilterOption("Рипы DVD и BD (HD)", "1"),
+            new FilterOption("HD Blu-Ray и Remux", "4"),
+            new FilterOption("DVD-5 и DVD-9", "2"),
+            new FilterOption("Рипы TV", "5"),
+            new FilterOption("3D", "6"),
+            new FilterOption("4K", "7"),
+            new FilterOption("Lossless", "51"),
+            new FilterOption("MP3 и AAC", "52"),
+            new FilterOption("Компьютер", "61"),
+            new FilterOption("Приставка", "62"),
+            new FilterOption("Мобильные устройства", "63"),
+            new FilterOption("Навигация", "64")
+        };
+        final FilterOption[] periods = {
+            new FilterOption("Не выбран", "0"),
+            new FilterOption("Сегодня", "1"),
+            new FilterOption("Вчера", "2"),
+            new FilterOption("За 3 дня", "3"),
+            new FilterOption("За неделю", "4"),
+            new FilterOption("За месяц", "5"),
+            new FilterOption("Менее 3 ГБ", "6"),
+            new FilterOption("3–10 ГБ", "7"),
+            new FilterOption("10–50 ГБ", "8"),
+            new FilterOption("50–250 ГБ", "9"),
+            new FilterOption("250 ГБ и выше", "10"),
+            new FilterOption("Золотая раздача", "11"),
+            new FilterOption("Серебряная раздача", "12")
+        };
+        final FilterOption[] searchIn = {
+            new FilterOption("В названии", "0"),
+            new FilterOption("Персона", "1"),
+            new FilterOption("Жанры", "2"),
+            new FilterOption("Формула", "3")
+        };
+        final FilterOption[] sortBy = {
+            new FilterOption("Залит", "0"), new FilterOption("Сидам", "1"),
+            new FilterOption("Пирам", "2"), new FilterOption("Размер", "3"),
+            new FilterOption("Комментарии", "4"), new FilterOption("Скачали", "5"),
+            new FilterOption("Последний комментарий", "6")
+        };
+        final FilterOption[] direction = {
+            new FilterOption("По убыванию", "0"), new FilterOption("По возрастанию", "1")
+        };
+        FilterOption[] years = new FilterOption[128];
+        years[0] = new FilterOption("Все года", "0");
+        for (int i = 1; i < years.length; i++) {
+            int year = 2026 - (i - 1);
+            years[i] = new FilterOption(String.valueOf(year), String.valueOf(year));
+        }
+
+        ScrollView scroll = new ScrollView(this);
+        scroll.setFillViewport(false);
+        scroll.setVerticalScrollBarEnabled(true);
+        LinearLayout panel = new LinearLayout(this);
+        panel.setOrientation(LinearLayout.VERTICAL);
+        panel.setPadding(dp(18), dp(8), dp(18), dp(12));
+        panel.setBackgroundColor(BG);
+        scroll.addView(panel);
+        TextView searchLabel = text("Поисковый запрос", 13, GOLD, true);
+        panel.addView(searchLabel);
+        EditText query = new EditText(this);
+        query.setSingleLine(true);
+        query.setTextColor(Color.WHITE);
+        query.setHintTextColor(TEAL);
+        query.setHint("Название раздачи");
+        query.setText(search == null ? "" : search.getText().toString());
+        query.setTextSize(fontSize(16));
+        query.setSelectAllOnFocus(false);
+        query.setImeOptions(EditorInfo.IME_ACTION_DONE);
+        query.setBackground(shape(PANEL, TEAL));
+        query.setPadding(dp(10), 0, dp(10), 0);
+        LinearLayout.LayoutParams queryParams = new LinearLayout.LayoutParams(-1, dp(46));
+        queryParams.bottomMargin = dp(5);
+        panel.addView(query, queryParams);
+
+        android.widget.Spinner where = addFilterSpinner(panel, "Где искать", searchIn, 0);
+        android.widget.Spinner category = addFilterSpinner(panel, "Раздел", categories, 0);
+        android.widget.Spinner format = addFilterSpinner(panel, "Формат", formats, 0);
+        android.widget.Spinner year = addFilterSpinner(panel, "Год выхода", years, 0);
+        android.widget.Spinner period = addFilterSpinner(panel, "Фильтр поиска", periods, 0);
+        android.widget.Spinner sort = addFilterSpinner(panel, "Сортировка результата", sortBy, 0);
+        android.widget.Spinner order = addFilterSpinner(panel, "Направление сортировки", direction, 0);
+
+        AlertDialog dialog = new AlertDialog.Builder(this)
+                .setTitle("Фильтр раздач")
+                .setView(scroll)
+                .setNegativeButton("Отмена", null)
+                .setNeutralButton("Сбросить", null)
+                .setPositiveButton("Найти", null)
+                .create();
+        dialog.setOnShowListener(ignored -> {
+            Button apply = dialog.getButton(AlertDialog.BUTTON_POSITIVE);
+            apply.setOnClickListener(v -> {
+                String q = query.getText().toString().trim();
+                try {
+                    StringBuilder path = new StringBuilder("browse.php?");
+                    appendFilterParam(path, "s", q);
+                    appendFilterParam(path, "g", ((FilterOption) where.getSelectedItem()).value);
+                    appendFilterParam(path, "c", ((FilterOption) category.getSelectedItem()).value);
+                    appendFilterParam(path, "v", ((FilterOption) format.getSelectedItem()).value);
+                    appendFilterParam(path, "d", ((FilterOption) year.getSelectedItem()).value);
+                    appendFilterParam(path, "w", ((FilterOption) period.getSelectedItem()).value);
+                    appendFilterParam(path, "t", ((FilterOption) sort.getSelectedItem()).value);
+                    appendFilterParam(path, "f", ((FilterOption) order.getSelectedItem()).value);
+                    if (search != null) search.setText(q);
+                    page = 0;
+                    String title = q.isEmpty() ? "Фильтр раздач" : "Поиск: " + q;
+                    load(path.toString(), title);
+                    dialog.dismiss();
+                } catch (Exception e) {
+                    showMessage("Не удалось сформировать параметры поиска: " + safe(e.getMessage()));
+                }
+            });
+            dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener(v -> {
+                query.setText("");
+                where.setSelection(0); category.setSelection(0); format.setSelection(0);
+                year.setSelection(0); period.setSelection(0); sort.setSelection(0); order.setSelection(0);
+            });
+        });
+        dialog.show();
+    }
+
+    private void appendFilterParam(StringBuilder path, String key, String value) throws Exception {
+        if (path.length() > "browse.php?".length()) path.append('&');
+        path.append(URLEncoder.encode(key, "UTF-8")).append('=')
+                .append(URLEncoder.encode(value == null ? "" : value, "UTF-8"));
     }
 
     private void submitSearch() {
