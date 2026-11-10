@@ -6927,16 +6927,6 @@ public class MainActivity extends Activity {
         }
         ratings.addView(starRow, new LinearLayout.LayoutParams(-1, -2));
 
-        LinearLayout numberRow = new LinearLayout(this);
-        numberRow.setGravity(Gravity.CENTER);
-        for (int i = 1; i <= 10; i++) {
-            TextView number = text(String.valueOf(i), 9,
-                    i <= filledStars ? GOLD : Color.LTGRAY, false);
-            number.setGravity(Gravity.CENTER);
-            numberRow.addView(number, new LinearLayout.LayoutParams(0, -2, 1f));
-        }
-        ratings.addView(numberRow, new LinearLayout.LayoutParams(-1, -2));
-
         posterColumn.addView(ratings, new LinearLayout.LayoutParams(-1, -2));
         LinearLayout.LayoutParams posterParams = new LinearLayout.LayoutParams(dp(190), -1);
         posterParams.rightMargin = dp(12);
