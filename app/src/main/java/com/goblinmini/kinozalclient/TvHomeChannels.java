@@ -105,7 +105,22 @@ final class TvHomeChannels {
                 diag(activity, "MODEL_READ", "feeds=" + feeds.length() + ", mirror=" + savedMirror);
 
                 PreviewChannelHelper helper = new PreviewChannelHelper(activity);
-                boolean hadChannels = !helper.getAllChannels().isEmpty();
+                List<PreviewChannel> allChannelsBeforeSync = helper.getAllChannels();
+                List<PreviewChannel> kinozalChannelsBeforeSync = new ArrayList<>();
+                int kinozalBrowsableBeforeSync = 0;
+                for (PreviewChannel existing : allChannelsBeforeSync) {
+                    String internalId = existing.getInternalProviderId();
+                    if (internalId != null && internalId.startsWith("kinozal:")) {
+                        kinozalChannelsBeforeSync.add(existing);
+                        if (existing.isBrowsable()) kinozalBrowsableBeforeSync++;
+                    }
+                }
+                // Other apps' preview channels must not suppress publication of
+                // Kinozal's first channel: getAllChannels() returns channels system-wide.
+                boolean hadKinozalChannels = !kinozalChannelsBeforeSync.isEmpty();
+                diag(activity, "CHANNELS_BEFORE", "all=" + allChannelsBeforeSync.size()
+                        + ", kinozal=" + kinozalChannelsBeforeSync.size()
+                        + ", kinozalBrowsable=" + kinozalBrowsableBeforeSync);
                 String[] obsoleteIds = {"new_movies", "new_series", "top_series", "top_all"};
                 for (String key : obsoleteIds) {
                     PreviewChannel old = findChannel(helper, "kinozal:" + key);
@@ -165,23 +180,59 @@ final class TvHomeChannels {
                     replacePrograms(activity, helper, channelIds[i], CHANNEL_KEYS[i], programs);
                 }
 
-                diag(activity, "SYNC_DONE", "channels=" + helper.getAllChannels().size());
-                // Ask Android TV to pin only the first collection (Новинки кино).
-                // Other collections are published silently and must not trigger
-                // a chain of system confirmation dialogs.
-                final long firstChannel = !hadChannels ? firstValidChannel(channelIds) : -1L;
+                List<PreviewChannel> allChannelsAfterSync = helper.getAllChannels();
+                int kinozalCount = 0;
+                int kinozalBrowsable = 0;
+                StringBuilder channelState = new StringBuilder();
+                for (PreviewChannel current : allChannelsAfterSync) {
+                    String internalId = current.getInternalProviderId();
+                    if (internalId == null || !internalId.startsWith("kinozal:")) continue;
+                    kinozalCount++;
+                    if (current.isBrowsable()) kinozalBrowsable++;
+                    if (channelState.length() > 0) channelState.append(';');
+                    channelState.append(internalId).append('#').append(current.getId())
+                            .append(":browsable=").append(current.isBrowsable());
+                }
+                diag(activity, "SYNC_DONE", "all=" + allChannelsAfterSync.size()
+                        + ", kinozal=" + kinozalCount + ", kinozalBrowsable=" + kinozalBrowsable
+                        + ", states=" + channelState);
+
+                // Only Kinozal channels count here. If this app has never published
+                // a channel, request visibility for Новинки even when other apps
+                // already have their own preview channels.
+                final long firstChannel = !hadKinozalChannels ? firstValidChannel(channelIds) : -1L;
+                // If old Kinozal channels exist but none is visible, ask the user
+                // to restore visibility (with a 24-hour cooldown to avoid repeated dialogs).
+                final long hiddenChannel = hadKinozalChannels && kinozalBrowsableBeforeSync == 0
+                        ? firstValidChannel(channelIds) : -1L;
                 activity.runOnUiThread(() -> {
                     if (activity.isFinishing()) return;
                     try {
                         if (firstChannel > 0) {
                             TvContractCompat.requestChannelBrowsable(activity, firstChannel);
-                            Log.i(TAG, "Requested home-screen visibility only for Новинки кино id=" + firstChannel);
+                            Log.i(TAG, "Requested first Kinozal channel visibility id=" + firstChannel);
+                        } else if (hiddenChannel > 0) {
+                            android.content.SharedPreferences prefs =
+                                    activity.getSharedPreferences(PREFS, Activity.MODE_PRIVATE);
+                            long lastPrompt = prefs.getLong("tv_channels_browsable_prompt_at", 0L);
+                            long now = System.currentTimeMillis();
+                            if (now - lastPrompt >= 24L * 60L * 60L * 1000L) {
+                                Intent request = new Intent(TvContractCompat.ACTION_REQUEST_CHANNEL_BROWSABLE);
+                                request.putExtra(TvContractCompat.EXTRA_CHANNEL_ID, hiddenChannel);
+                                activity.startActivityForResult(request, REQUEST_BROWSABLE);
+                                prefs.edit().putLong("tv_channels_browsable_prompt_at", now).apply();
+                                Log.i(TAG, "Requested user approval to restore Kinozal channel visibility id=" + hiddenChannel);
+                            }
+                        } else if (kinozalBrowsableBeforeSync > 0) {
+                            activity.getSharedPreferences(PREFS, Activity.MODE_PRIVATE)
+                                    .edit().remove("tv_channels_browsable_prompt_at").apply();
                         }
                         synchronized (PENDING_BROWSABLE) {
                             PENDING_BROWSABLE.clear();
                         }
                     } catch (Exception e) {
-                        Log.e(TAG, "Could not request Новинки кино channel visibility", e);
+                        diag(activity, "BROWSABLE_ERROR", e.getClass().getSimpleName() + ": " + e.getMessage());
+                        Log.e(TAG, "Could not request Kinozal channel visibility", e);
                     }
                 });
             } catch (SecurityException e) {
