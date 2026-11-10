@@ -296,9 +296,10 @@ public class MainActivity extends Activity {
 
     private int releaseTypeColor(String value) {
         String type = normalizeReleaseType(value);
-        if ("r1".equals(type)) return Color.rgb(234, 191, 53); // #EABF35
-        if ("r2".equals(type)) return TEAL; // #73A4AA
-        return Color.WHITE;
+        // Muted catalogue accents: distinguish release types without neon-bright titles.
+        if ("r1".equals(type)) return Color.rgb(197, 168, 90); // muted gold
+        if ("r2".equals(type)) return Color.rgb(120, 153, 157); // muted teal
+        return Color.rgb(211, 215, 218); // soft white
     }
 
     private static class Torrent {
@@ -7186,11 +7187,13 @@ public class MainActivity extends Activity {
         int releaseButtonColor = releaseTypeColor(releaseType);
         Button downloadTorrent = button("↓  Скачать торрент");
         downloadTorrent.setTextSize(fontSize(14));
-        downloadTorrent.setTextColor(Color.rgb(24, 27, 30));
-        downloadTorrent.setBackground(shape(releaseButtonColor, 0));
+        // Keep the original dark button appearance; use the release type only
+        // for its label and thin outline instead of filling the whole button.
+        downloadTorrent.setTextColor(releaseButtonColor);
+        downloadTorrent.setBackground(shape(PANEL, releaseButtonColor));
         downloadTorrent.setOnFocusChangeListener((v, focused) ->
-                v.setBackground(shape(focused ? Color.rgb(65, 72, 73) : releaseButtonColor,
-                        focused ? releaseButtonColor : 0)));
+                v.setBackground(shape(focused ? Color.rgb(65, 72, 73) : PANEL,
+                        releaseButtonColor)));
         LinearLayout.LayoutParams downloadParams = new LinearLayout.LayoutParams(-1, dp(42));
         downloadParams.topMargin = dp(8);
         downloadParams.bottomMargin = dp(10);
