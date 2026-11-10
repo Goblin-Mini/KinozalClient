@@ -2937,11 +2937,12 @@ public class MainActivity extends Activity {
         sidebar.setPadding(dp(8), dp(8), dp(8), dp(8)); sidebar.setBackground(shape(PANEL, 0));
         root.addView(sidebar, new LinearLayout.LayoutParams(dp(220), ViewGroup.LayoutParams.MATCH_PARENT));
         LinearLayout main = new LinearLayout(this); main.setOrientation(LinearLayout.VERTICAL);
-        // Allow focused poster cards to draw outside their row bounds.
-        main.setClipChildren(false);
-        main.setClipToPadding(false);
-        root.setClipChildren(false);
-        root.setClipToPadding(false);
+        // Keep feed drawing inside the content pane: focused cards may grow
+        // within their row, but must never cover the sidebar or fixed header.
+        main.setClipChildren(true);
+        main.setClipToPadding(true);
+        root.setClipChildren(true);
+        root.setClipToPadding(true);
         main.setPadding(dp(16), dp(8), dp(8), dp(8));
         root.addView(main, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1));
         LinearLayout brand = new LinearLayout(this);
@@ -3173,8 +3174,10 @@ public class MainActivity extends Activity {
         progressParams.bottomMargin = dp(5);
         main.addView(progress, progressParams);
         homeScrollView = new ScrollView(this); homeScrollView.setFillViewport(true);
-        homeScrollView.setClipChildren(false);
-        homeScrollView.setClipToPadding(false);
+        // Clip scaled poster cards to the scrolling viewport so they cannot
+        // paint over the search/header controls above the feed.
+        homeScrollView.setClipChildren(true);
+        homeScrollView.setClipToPadding(true);
         homeScrollView.setVerticalScrollBarEnabled(false);
         list = new LinearLayout(this); list.setOrientation(LinearLayout.VERTICAL);
         list.setClipChildren(false);
