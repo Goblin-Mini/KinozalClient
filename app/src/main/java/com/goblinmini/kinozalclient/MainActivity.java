@@ -5800,13 +5800,9 @@ public class MainActivity extends Activity {
         passParams.leftMargin = dp(6);
         credentials.addView(passwordField, passParams);
 
-        Button cursorToggle = button("Курсор");
         Button insert = button("Вставить");
         Button signIn = button("Вход");
         Button done = button("Готово");
-        LinearLayout.LayoutParams cursorButtonParams = new LinearLayout.LayoutParams(dp(112), dp(44));
-        cursorButtonParams.leftMargin = dp(6);
-        credentials.addView(cursorToggle, cursorButtonParams);
         LinearLayout.LayoutParams smallAction = new LinearLayout.LayoutParams(dp(112), dp(44));
         smallAction.leftMargin = dp(6);
         credentials.addView(insert, smallAction);
@@ -5821,13 +5817,13 @@ public class MainActivity extends Activity {
         LinearLayout actions = new LinearLayout(this);
         actions.setGravity(Gravity.CENTER_VERTICAL);
         actions.setPadding(0, dp(6), 0, dp(6));
+        Button cursorToggle = button("Курсор");
         Button refresh = button("Обновить");
-        Button close = button("Закрыть");
         LinearLayout.LayoutParams actionParams = new LinearLayout.LayoutParams(0, dp(46), 1f);
-        actions.addView(refresh, actionParams);
-        LinearLayout.LayoutParams closeParams = new LinearLayout.LayoutParams(0, dp(46), 1f);
-        closeParams.leftMargin = dp(6);
-        actions.addView(close, closeParams);
+        actions.addView(cursorToggle, actionParams);
+        LinearLayout.LayoutParams refreshParams = new LinearLayout.LayoutParams(0, dp(46), 1f);
+        refreshParams.leftMargin = dp(6);
+        actions.addView(refresh, refreshParams);
         panel.addView(actions, new LinearLayout.LayoutParams(-1, -2));
 
         FrameLayout webContainer = new FrameLayout(this);
@@ -5862,11 +5858,13 @@ public class MainActivity extends Activity {
             web.setVisibility(View.INVISIBLE);
             if (web.getParent() == null) root.addView(web, new LinearLayout.LayoutParams(1, 1));
         };
-        close.setOnClickListener(v -> { detachWeb.run(); dialog.dismiss(); });
         refresh.setOnClickListener(v -> {
+            status.setText("Обновляем страницу Kinozal…");
             web.stopLoading();
-            web.reload();
-            status.setText("Обновление проверки Kinozal…");
+            web.post(() -> {
+                web.loadUrl(base + "/login.php?m=5");
+                showMessage("Страница Kinozal обновляется.");
+            });
         });
         insert.setOnClickListener(v -> {
             String username = loginField.getText().toString();
