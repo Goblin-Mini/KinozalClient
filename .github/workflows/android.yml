@@ -72,6 +72,7 @@ jobs:
           }
           mkdir -p dist
           cp app/build/outputs/apk/release/app-release.apk dist/KinozalClient-update-test-v2.apk
+          cp app/build/outputs/apk/release/app-release.apk dist/KinozalClient.apk
           test -s dist/KinozalClient-update-test-v2.apk
           "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --print-certs dist/KinozalClient-update-test-v2.apk
           "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging dist/KinozalClient-update-test-v2.apk | head -n 1
@@ -84,6 +85,18 @@ jobs:
           path: dist/KinozalClient-update-test-v2.apk
           if-no-files-found: error
           retention-days: 14
+
+      - name: Publish temporary update-test release
+        if: github.ref_name == 'fix/home-feed-js-extractor-diagnostics' && github.event_name == 'push'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: test-update-1.0.2
+          name: KinozalClient v1.0.2 (тест обновления)
+          target_commitish: fix/home-feed-js-extractor-diagnostics
+          files: dist/KinozalClient.apk
+          overwrite_files: true
+          prerelease: false
+          make_latest: true
 
       - name: Decode release keystore
         if: github.event_name != 'pull_request' && (github.ref_name != 'feature/magnet-playback' && github.ref_name != 'feature/performance' && github.ref_name != 'feature/screen-cache-background-refresh' && github.ref_name != 'feature/sidebar-login-status-stable-restore' && github.ref_name != 'fix/home-feed-js-extractor-diagnostics')
