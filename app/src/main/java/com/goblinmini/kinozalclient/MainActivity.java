@@ -3676,13 +3676,20 @@ public class MainActivity extends Activity {
 
         LinearLayout actions = new LinearLayout(this);
         actions.setOrientation(LinearLayout.HORIZONTAL);
+        LinearLayout.LayoutParams actionsParams = new LinearLayout.LayoutParams(-1, -2);
+        actionsParams.topMargin = dp(10);
         Button save = settingsPillButton("Сохранить");
         Button test = settingsPillButton("Проверить соединение");
+        Button clear = settingsPillButton("Очистить");
         actions.addView(save, new LinearLayout.LayoutParams(0, dp(46), 1f));
-        LinearLayout.LayoutParams testParams = new LinearLayout.LayoutParams(0, dp(46), 1f);
+        LinearLayout.LayoutParams testParams = new LinearLayout.LayoutParams(0, dp(46), 1.35f);
         testParams.leftMargin = dp(8);
         actions.addView(test, testParams);
-        panel.addView(actions);
+        LinearLayout.LayoutParams clearParams = new LinearLayout.LayoutParams(0, dp(46), 0.85f);
+        clearParams.leftMargin = dp(8);
+        actions.addView(clear, clearParams);
+        panel.addView(actions, actionsParams);
+        clear.setOnClickListener(v -> torrServeAddressField.setText(""));
 
         AlertDialog dialog = new AlertDialog.Builder(this).setTitle("TorrServe")
                 .setView(panel).create();
