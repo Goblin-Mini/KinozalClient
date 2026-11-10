@@ -2745,7 +2745,7 @@ public class MainActivity extends Activity {
             v.setElevation(focused ? dp(10) : dp(1));
             if (focused) {
                 loadHomePosterForCard(card);
-                ViewParent parent = card.getParent();
+                android.view.ViewParent parent = card.getParent();
                 if (parent instanceof View) {
                     View row = (View) parent;
                     View horizontalParent = row.getParent() instanceof View
