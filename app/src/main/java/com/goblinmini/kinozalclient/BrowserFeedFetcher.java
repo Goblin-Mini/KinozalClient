@@ -176,11 +176,8 @@ final class BrowserFeedFetcher {
             });
             done.await(2, TimeUnit.SECONDS);
         }
-        if (localProxyPort != null && WebViewFeature.isFeatureSupported(WebViewFeature.PROXY_OVERRIDE)) {
-            CountDownLatch clear = new CountDownLatch(1);
-            main.post(() -> ProxyController.getInstance().clearProxyOverride(main::post, clear::countDown));
-            clear.await(5, TimeUnit.SECONDS);
-        }
+        // ProxyController is process-wide. Keep the shared app proxy override;
+        // clearing it here would silently disable proxy for the visible session.
         if (failure.get() != null) throw new Exception(failure.get());
         if (result.get() == null) throw new java.io.IOException("Фоновый WebView не вернул страницу");
         return result.get();
