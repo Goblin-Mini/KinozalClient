@@ -2,6 +2,7 @@ package com.goblinmini.kinozalclient;
 
 import android.app.Activity;
 import android.content.Intent;
+import android.content.Context;
 import android.database.Cursor;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
@@ -30,11 +31,11 @@ import java.util.concurrent.Executors;
 final class TvHomeChannels {
     private static final String TAG = "KinozalTvChannels";
     private static final String DIAG_FILE = "kinozal_tv_channels_diagnostics.txt";
-    private static void diag(Activity a, String event, String details) {
-        if (a == null) return;
+    private static void diag(Context context, String event, String details) {
+        if (context == null) return;
         String line = new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.ROOT).format(new java.util.Date()) + " " + event + " " + details + "\n";
         synchronized (TvHomeChannels.class) {
-            try (java.io.FileOutputStream out = new java.io.FileOutputStream(new File(a.getFilesDir(), DIAG_FILE), true)) { out.write(line.getBytes(StandardCharsets.UTF_8)); out.getFD().sync(); }
+            try (java.io.FileOutputStream out = new java.io.FileOutputStream(new File(context.getFilesDir(), DIAG_FILE), true)) { out.write(line.getBytes(StandardCharsets.UTF_8)); out.getFD().sync(); }
             catch (Exception e) { Log.w(TAG, "Diagnostic write failed", e); }
         }
     }
@@ -84,128 +85,128 @@ final class TvHomeChannels {
     private TvHomeChannels() { }
 
     static void sync(Activity activity, File modelFile) {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O || activity == null || modelFile == null) return;
-        if (!activity.getSharedPreferences(PREFS, Activity.MODE_PRIVATE)
+        if (activity == null) return;
+        Context appContext = activity.getApplicationContext();
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O || modelFile == null) return;
+        if (!appContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
                 .getBoolean("tv_channels_enabled", true)) return;
-        diag(activity, "SYNC_START", "modelExists=" + modelFile.isFile());
-        EXECUTOR.execute(() -> {
-            try {
-                if (!modelFile.isFile() || modelFile.length() <= 0 || modelFile.length() > 8L * 1024L * 1024L) return;
-                JSONObject root = new JSONObject(new String(Files.readAllBytes(modelFile.toPath()), StandardCharsets.UTF_8));
-                if (root.optInt("version") != 1) return;
-                String savedMirror = root.optString("mirror", "");
-                if (savedMirror.isEmpty()) return;
-                JSONArray feeds = root.optJSONArray("feeds");
-                if (feeds == null) { diag(activity, "SYNC_ERROR", "feeds array missing"); return; }
-                diag(activity, "MODEL_READ", "feeds=" + feeds.length() + ", mirror=" + savedMirror);
+        diag(appContext, "SYNC_START", "modelExists=" + modelFile.isFile());
+        EXECUTOR.execute(() -> syncInternal(appContext, modelFile, activity));
+    }
 
-                PreviewChannelHelper helper = new PreviewChannelHelper(activity);
-                List<PreviewChannel> allChannelsBeforeSync = helper.getAllChannels();
-                List<PreviewChannel> kinozalChannelsBeforeSync = new ArrayList<>();
-                int kinozalBrowsableBeforeSync = 0;
-                for (PreviewChannel existing : allChannelsBeforeSync) {
-                    String internalId = existing.getInternalProviderId();
-                    if (internalId != null && internalId.startsWith("kinozal:")) {
-                        kinozalChannelsBeforeSync.add(existing);
-                        if (existing.isBrowsable()) kinozalBrowsableBeforeSync++;
-                    }
+    /** Called by WorkManager: update launcher rows without requiring a running Activity. */
+    static void syncFromWorker(Context context, File modelFile) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O || context == null || modelFile == null) return;
+        Context appContext = context.getApplicationContext();
+        if (!appContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                .getBoolean("tv_channels_enabled", true)) return;
+        syncInternal(appContext, modelFile, null);
+    }
+
+    private static void syncInternal(Context context, File modelFile, Activity activityForBrowsable) {
+        try {
+            if (!modelFile.isFile() || modelFile.length() <= 0 || modelFile.length() > 8L * 1024L * 1024L) return;
+            JSONObject root = new JSONObject(new String(Files.readAllBytes(modelFile.toPath()), StandardCharsets.UTF_8));
+            if (root.optInt("version") != 1) return;
+            String savedMirror = root.optString("mirror", "");
+            if (savedMirror.isEmpty()) return;
+            JSONArray feeds = root.optJSONArray("feeds");
+            if (feeds == null) { diag(context, "SYNC_ERROR", "feeds array missing"); return; }
+            diag(context, "MODEL_READ", "feeds=" + feeds.length() + ", mirror=" + savedMirror);
+
+            PreviewChannelHelper helper = new PreviewChannelHelper(context);
+            List<PreviewChannel> allChannelsBeforeSync = helper.getAllChannels();
+            List<PreviewChannel> kinozalChannelsBeforeSync = new ArrayList<>();
+            int kinozalBrowsableBeforeSync = 0;
+            for (PreviewChannel existing : allChannelsBeforeSync) {
+                String internalId = existing.getInternalProviderId();
+                if (internalId != null && internalId.startsWith("kinozal:")) {
+                    kinozalChannelsBeforeSync.add(existing);
+                    if (existing.isBrowsable()) kinozalBrowsableBeforeSync++;
                 }
-                // Other apps' preview channels must not suppress publication of
-                // Kinozal's first channel: getAllChannels() returns channels system-wide.
-                boolean hadKinozalChannels = !kinozalChannelsBeforeSync.isEmpty();
-                diag(activity, "CHANNELS_BEFORE", "all=" + allChannelsBeforeSync.size()
-                        + ", kinozal=" + kinozalChannelsBeforeSync.size()
-                        + ", kinozalBrowsable=" + kinozalBrowsableBeforeSync);
-                // Remove channels from older versions that are no longer part
-                // of the six-channel Android TV lineup. Keep all other apps' channels.
-                for (PreviewChannel existing : new ArrayList<>(helper.getAllChannels())) {
-                    String internalId = existing.getInternalProviderId();
-                    if (internalId != null && internalId.startsWith("kinozal:")
-                            && !isRetainedChannel(internalId)) {
-                        helper.deletePreviewChannel(existing.getId());
-                        Log.i(TAG, "Deleted retired Kinozal channel " + internalId);
-                    }
+            }
+            boolean hadKinozalChannels = !kinozalChannelsBeforeSync.isEmpty();
+            diag(context, "CHANNELS_BEFORE", "all=" + allChannelsBeforeSync.size()
+                    + ", kinozal=" + kinozalChannelsBeforeSync.size()
+                    + ", kinozalBrowsable=" + kinozalBrowsableBeforeSync);
+            for (PreviewChannel existing : new ArrayList<>(helper.getAllChannels())) {
+                String internalId = existing.getInternalProviderId();
+                if (internalId != null && internalId.startsWith("kinozal:")
+                        && !isRetainedChannel(internalId)) {
+                    helper.deletePreviewChannel(existing.getId());
+                    Log.i(TAG, "Deleted retired Kinozal channel " + internalId);
                 }
+            }
 
-
-                long[] channelIds = new long[CHANNEL_KEYS.length];
-                boolean[] created = new boolean[CHANNEL_KEYS.length];
-                Bitmap logo = loadAppLogo(activity);
-
-                for (int i = 0; i < CHANNEL_KEYS.length; i++) {
-                    PreviewChannel channel = findChannel(helper, "kinozal:" + CHANNEL_KEYS[i]);
-                    if (channel == null) {
-                        Intent appIntent = new Intent(activity, MainActivity.class);
-                        appIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
-                        PreviewChannel.Builder builder = new PreviewChannel.Builder()
-                                .setDisplayName(CHANNEL_NAMES[i])
-                                .setDescription("Подборка раздач с " + savedMirror)
-                                .setInternalProviderId("kinozal:" + CHANNEL_KEYS[i])
-                                .setAppLinkIntent(appIntent);
-                        if (logo != null) builder.setLogo(logo);
-                        long id = helper.publishChannel(builder.build());
-                        if (id < 0) {
-                            Log.e(TAG, "TvProvider rejected channel creation: " + CHANNEL_NAMES[i]);
-                            continue;
-                        }
-                        channelIds[i] = id;
-                        created[i] = true;
-                        Log.i(TAG, "Created channel " + CHANNEL_NAMES[i] + " id=" + id);
-                    } else {
-                        channelIds[i] = channel.getId();
-                        // Re-apply the canonical Russian display name on every sync.
-                        // This also repairs channel names left by older app versions.
-                        PreviewChannel.Builder renamedBuilder = new PreviewChannel.Builder()
-                                .setDisplayName(CHANNEL_NAMES[i])
-                                .setDescription("Подборка раздач с " + savedMirror)
-                                .setInternalProviderId("kinozal:" + CHANNEL_KEYS[i])
-                                .setAppLinkIntent(channel.getAppLinkIntent());
-                        if (logo != null) renamedBuilder.setLogo(logo);
-                        helper.updatePreviewChannel(channel.getId(), renamedBuilder.build());
-                        if (!CHANNEL_NAMES[i].equals(channel.getDisplayName())) {
-                            Log.i(TAG, "Renamed legacy channel '" + channel.getDisplayName()
-                                    + "' to '" + CHANNEL_NAMES[i] + "'");
-                        }
+            long[] channelIds = new long[CHANNEL_KEYS.length];
+            Bitmap logo = loadAppLogo(context);
+            for (int i = 0; i < CHANNEL_KEYS.length; i++) {
+                PreviewChannel channel = findChannel(helper, "kinozal:" + CHANNEL_KEYS[i]);
+                if (channel == null) {
+                    Intent appIntent = new Intent(context, MainActivity.class);
+                    appIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+                    PreviewChannel.Builder builder = new PreviewChannel.Builder()
+                            .setDisplayName(CHANNEL_NAMES[i])
+                            .setDescription("Подборка раздач с " + savedMirror)
+                            .setInternalProviderId("kinozal:" + CHANNEL_KEYS[i])
+                            .setAppLinkIntent(appIntent);
+                    if (logo != null) builder.setLogo(logo);
+                    long id = helper.publishChannel(builder.build());
+                    if (id < 0) {
+                        Log.e(TAG, "TvProvider rejected channel creation: " + CHANNEL_NAMES[i]);
+                        continue;
                     }
-
-                    JSONArray programs;
-                    if ("favorites".equals(CHANNEL_KEYS[i])) {
-                        programs = readFavoritePrograms(activity);
-                    } else if ("continue".equals(CHANNEL_KEYS[i])) {
-                        programs = readRecentPrograms(activity);
-                    } else {
-                        programs = findFeedItems(feeds, FEED_PATHS[i]);
-                    }
-                    replacePrograms(activity, helper, channelIds[i], CHANNEL_KEYS[i], programs);
+                    channelIds[i] = id;
+                    Log.i(TAG, "Created channel " + CHANNEL_NAMES[i] + " id=" + id);
+                } else {
+                    channelIds[i] = channel.getId();
+                    PreviewChannel.Builder renamedBuilder = new PreviewChannel.Builder()
+                            .setDisplayName(CHANNEL_NAMES[i])
+                            .setDescription("Подборка раздач с " + savedMirror)
+                            .setInternalProviderId("kinozal:" + CHANNEL_KEYS[i])
+                            .setAppLinkIntent(channel.getAppLinkIntent());
+                    if (logo != null) renamedBuilder.setLogo(logo);
+                    helper.updatePreviewChannel(channel.getId(), renamedBuilder.build());
                 }
 
-                List<PreviewChannel> allChannelsAfterSync = helper.getAllChannels();
-                int kinozalCount = 0;
-                int kinozalBrowsable = 0;
-                StringBuilder channelState = new StringBuilder();
-                for (PreviewChannel current : allChannelsAfterSync) {
-                    String internalId = current.getInternalProviderId();
-                    if (internalId == null || !internalId.startsWith("kinozal:")) continue;
-                    kinozalCount++;
-                    if (current.isBrowsable()) kinozalBrowsable++;
-                    if (channelState.length() > 0) channelState.append(';');
-                    channelState.append(internalId).append('#').append(current.getId())
-                            .append(":browsable=").append(current.isBrowsable());
+                JSONArray programs;
+                if ("favorites".equals(CHANNEL_KEYS[i])) {
+                    programs = readFavoritePrograms(context);
+                } else if ("continue".equals(CHANNEL_KEYS[i])) {
+                    programs = readRecentPrograms(context);
+                } else {
+                    // A partial first-time cache must not erase programs already shown
+                    // in another channel while the remaining feeds are still downloading.
+                    if (!hasFeed(feeds, FEED_PATHS[i])) continue;
+                    programs = findFeedItems(feeds, FEED_PATHS[i]);
                 }
-                diag(activity, "SYNC_DONE", "all=" + allChannelsAfterSync.size()
-                        + ", kinozal=" + kinozalCount + ", kinozalBrowsable=" + kinozalBrowsable
-                        + ", states=" + channelState);
+                replacePrograms(context, helper, channelIds[i], CHANNEL_KEYS[i], programs);
+            }
 
-                // Only Kinozal channels count here. If this app has never published
-                // a channel, request visibility for Новинки even when other apps
-                // already have their own preview channels.
-                final long firstChannel = !hadKinozalChannels ? firstValidChannel(channelIds) : -1L;
-                final boolean hadBrowsableKinozalChannel = kinozalBrowsableBeforeSync > 0;
-                // If old Kinozal channels exist but none is visible, ask the user
-                // to restore visibility (with a 24-hour cooldown to avoid repeated dialogs).
-                final long hiddenChannel = hadKinozalChannels && !hadBrowsableKinozalChannel
-                        ? firstValidChannel(channelIds) : -1L;
-                activity.runOnUiThread(() -> {
+            List<PreviewChannel> allChannelsAfterSync = helper.getAllChannels();
+            int kinozalCount = 0;
+            int kinozalBrowsable = 0;
+            StringBuilder channelState = new StringBuilder();
+            for (PreviewChannel current : allChannelsAfterSync) {
+                String internalId = current.getInternalProviderId();
+                if (internalId == null || !internalId.startsWith("kinozal:")) continue;
+                kinozalCount++;
+                if (current.isBrowsable()) kinozalBrowsable++;
+                if (channelState.length() > 0) channelState.append(';');
+                channelState.append(internalId).append('#').append(current.getId())
+                        .append(":browsable=").append(current.isBrowsable());
+            }
+            diag(context, "SYNC_DONE", "all=" + allChannelsAfterSync.size()
+                    + ", kinozal=" + kinozalCount + ", kinozalBrowsable=" + kinozalBrowsable
+                    + ", states=" + channelState);
+
+            final long firstChannel = !hadKinozalChannels ? firstValidChannel(channelIds) : -1L;
+            final boolean hadBrowsableKinozalChannel = kinozalBrowsableBeforeSync > 0;
+            final long hiddenChannel = hadKinozalChannels && !hadBrowsableKinozalChannel
+                    ? firstValidChannel(channelIds) : -1L;
+            if (activityForBrowsable != null) {
+                activityForBrowsable.runOnUiThread(() -> {
+                    Activity activity = activityForBrowsable;
                     if (activity.isFinishing()) return;
                     try {
                         if (firstChannel > 0) {
@@ -221,28 +222,25 @@ final class TvHomeChannels {
                                 request.putExtra(TvContractCompat.EXTRA_CHANNEL_ID, hiddenChannel);
                                 activity.startActivityForResult(request, REQUEST_BROWSABLE);
                                 prefs.edit().putLong("tv_channels_browsable_prompt_at", now).apply();
-                                Log.i(TAG, "Requested user approval to restore Kinozal channel visibility id=" + hiddenChannel);
                             }
                         } else if (hadBrowsableKinozalChannel) {
                             activity.getSharedPreferences(PREFS, Activity.MODE_PRIVATE)
                                     .edit().remove("tv_channels_browsable_prompt_at").apply();
                         }
-                        synchronized (PENDING_BROWSABLE) {
-                            PENDING_BROWSABLE.clear();
-                        }
+                        synchronized (PENDING_BROWSABLE) { PENDING_BROWSABLE.clear(); }
                     } catch (Exception e) {
-                        diag(activity, "BROWSABLE_ERROR", e.getClass().getSimpleName() + ": " + e.getMessage());
+                        diag(context, "BROWSABLE_ERROR", e.getClass().getSimpleName() + ": " + e.getMessage());
                         Log.e(TAG, "Could not request Kinozal channel visibility", e);
                     }
                 });
-            } catch (SecurityException e) {
-                diag(activity, "SYNC_ERROR", "SecurityException: " + e.getMessage());
-                Log.w(TAG, "TV provider permission is unavailable on this device", e);
-            } catch (Exception e) {
-                diag(activity, "SYNC_ERROR", e.getClass().getSimpleName() + ": " + e.getMessage());
-                Log.w(TAG, "Channel synchronization failed", e);
             }
-        });
+        } catch (SecurityException e) {
+            diag(context, "SYNC_ERROR", "SecurityException: " + e.getMessage());
+            Log.w(TAG, "TV provider permission is unavailable on this device", e);
+        } catch (Exception e) {
+            diag(context, "SYNC_ERROR", e.getClass().getSimpleName() + ": " + e.getMessage());
+            Log.w(TAG, "Channel synchronization failed", e);
+        }
     }
 
     static void removeAll(Activity activity) {
@@ -325,6 +323,14 @@ final class TvHomeChannels {
         return combined;
     }
 
+    private static boolean hasFeed(JSONArray feeds, String path) {
+        for (int i = 0; i < feeds.length(); i++) {
+            JSONObject feed = feeds.optJSONObject(i);
+            if (feed != null && path.equals(feed.optString("path"))) return true;
+        }
+        return false;
+    }
+
     private static JSONArray findFeedItems(JSONArray feeds, String path) {
         for (int i = 0; i < feeds.length(); i++) {
             JSONObject feed = feeds.optJSONObject(i);
@@ -336,7 +342,7 @@ final class TvHomeChannels {
         return new JSONArray();
     }
 
-    private static JSONArray readRecentPrograms(Activity activity) {
+    private static JSONArray readRecentPrograms(Context activity) {
         String raw = activity.getSharedPreferences(PREFS, Activity.MODE_PRIVATE).getString(RECENT_KEY, "[]");
         try {
             JSONArray source = new JSONArray(raw);
@@ -383,7 +389,7 @@ final class TvHomeChannels {
         return false;
     }
 
-    private static JSONArray readFavoritePrograms(Activity activity) {
+    private static JSONArray readFavoritePrograms(Context activity) {
         String raw = activity.getSharedPreferences(PREFS, Activity.MODE_PRIVATE)
                 .getString("local_favorites", "[]");
         try {
@@ -413,7 +419,7 @@ final class TvHomeChannels {
         return null;
     }
 
-    private static Bitmap loadAppLogo(Activity activity) {
+    private static Bitmap loadAppLogo(Context activity) {
         try {
             Drawable drawable = activity.getPackageManager().getApplicationIcon(activity.getPackageName());
             int size = 160;
@@ -427,7 +433,7 @@ final class TvHomeChannels {
         }
     }
 
-    private static void replacePrograms(Activity activity, PreviewChannelHelper helper,
+    private static void replacePrograms(Context activity, PreviewChannelHelper helper,
             long channelId, String channelKey, JSONArray items) {
         if (channelId <= 0 || items == null) return;
         String[] projection = {BaseColumns._ID};
