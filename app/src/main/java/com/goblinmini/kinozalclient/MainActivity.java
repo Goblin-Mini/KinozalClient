@@ -6255,6 +6255,8 @@ public class MainActivity extends Activity {
     }
 
     private void showFavorites() {
+        // Local lists must use the browse host, never the Home/Collections feed trees.
+        activateBrowseScreen();
         currentPath = "local:favorites";
         currentTitle = "Избранное";
         heading.setText(currentTitle);
@@ -6402,6 +6404,8 @@ public class MainActivity extends Activity {
     }
 
     private void showRecentlyViewed() {
+        // Keep history isolated from the persistent Collections view hierarchy.
+        activateBrowseScreen();
         currentPath = "local:recently-viewed";
         currentTitle = "Недавно смотрели";
         heading.setText(currentTitle);
