@@ -6880,7 +6880,7 @@ public class MainActivity extends Activity {
         poster.setBackground(shape(PANEL, 0));
         // Show the Kinozal brand artwork instead of an empty dark rectangle when
         // a release has no poster or its remote image cannot be loaded.
-        poster.setImageResource(R.drawable.kinozal_sidebar_logo);
+        poster.setImageResource(R.drawable.kinozal_poster_placeholder);
         posterColumn.addView(poster, new LinearLayout.LayoutParams(-1, dp(260)));
         LinearLayout ratings = new LinearLayout(this);
         ratings.setOrientation(LinearLayout.VERTICAL);
