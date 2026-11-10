@@ -2647,10 +2647,10 @@ public class MainActivity extends Activity {
         strip.setGravity(Gravity.CENTER_VERTICAL);
         strip.setClipChildren(false);
         strip.setClipToPadding(false);
-        strip.setPadding(dp(4), dp(10), dp(12), dp(10));
+        // Leave enough headroom for the focus zoom and upward translation.
+        strip.setPadding(dp(4), dp(20), dp(12), dp(20));
         horizontal.addView(strip);
-        // Extra vertical room prevents the focused card's scale animation from being clipped.
-        LinearLayout.LayoutParams rowParams = new LinearLayout.LayoutParams(-1, dp(282));
+        LinearLayout.LayoutParams rowParams = new LinearLayout.LayoutParams(-1, dp(302));
 
         // Replace only this feed's existing views, preserving other rows and DPAD focus.
         String titleTag = "home-title:" + section.path;
@@ -2927,6 +2927,11 @@ public class MainActivity extends Activity {
         sidebar.setPadding(dp(8), dp(8), dp(8), dp(8)); sidebar.setBackground(shape(PANEL, 0));
         root.addView(sidebar, new LinearLayout.LayoutParams(dp(220), ViewGroup.LayoutParams.MATCH_PARENT));
         LinearLayout main = new LinearLayout(this); main.setOrientation(LinearLayout.VERTICAL);
+        // Allow focused poster cards to draw outside their row bounds.
+        main.setClipChildren(false);
+        main.setClipToPadding(false);
+        root.setClipChildren(false);
+        root.setClipToPadding(false);
         main.setPadding(dp(16), dp(8), dp(8), dp(8));
         root.addView(main, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1));
         LinearLayout brand = new LinearLayout(this);
@@ -3158,8 +3163,12 @@ public class MainActivity extends Activity {
         progressParams.bottomMargin = dp(5);
         main.addView(progress, progressParams);
         homeScrollView = new ScrollView(this); homeScrollView.setFillViewport(true);
+        homeScrollView.setClipChildren(false);
+        homeScrollView.setClipToPadding(false);
         homeScrollView.setVerticalScrollBarEnabled(false);
         list = new LinearLayout(this); list.setOrientation(LinearLayout.VERTICAL);
+        list.setClipChildren(false);
+        list.setClipToPadding(false);
         homeList = list;
         homeScrollView.addView(homeList);
         main.addView(homeScrollView, new LinearLayout.LayoutParams(-1, 0, 1));
@@ -3207,8 +3216,12 @@ public class MainActivity extends Activity {
         if (collections && collectionsScrollView == null) {
             collectionsList = new LinearLayout(this);
             collectionsList.setOrientation(LinearLayout.VERTICAL);
+            collectionsList.setClipChildren(false);
+            collectionsList.setClipToPadding(false);
             collectionsScrollView = new ScrollView(this);
             collectionsScrollView.setFillViewport(true);
+            collectionsScrollView.setClipChildren(false);
+            collectionsScrollView.setClipToPadding(false);
             collectionsScrollView.setVerticalScrollBarEnabled(false);
             collectionsScrollView.addView(collectionsList);
             collectionsScrollView.setOnScrollChangeListener((View v, int x, int y, int oldX, int oldY) -> {
