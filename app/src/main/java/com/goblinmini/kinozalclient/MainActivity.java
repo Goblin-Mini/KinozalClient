@@ -295,7 +295,7 @@ public class MainActivity extends Activity {
 
     private int releaseTypeColor(String value) {
         String type = normalizeReleaseType(value);
-        if ("r1".equals(type)) return Color.rgb(224, 175, 127); // #E0AF7F
+        if ("r1".equals(type)) return Color.rgb(234, 191, 53); // #EABF35
         if ("r2".equals(type)) return TEAL; // #73A4AA
         return Color.WHITE;
     }
@@ -6983,6 +6983,22 @@ public class MainActivity extends Activity {
         // a release has no poster or its remote image cannot be loaded.
         poster.setImageResource(R.drawable.kinozal_poster_placeholder);
         posterColumn.addView(poster, new LinearLayout.LayoutParams(-1, dp(260)));
+
+        // Release type is shown directly below the poster, before the ratings.
+        String releaseType = normalizeReleaseType(torrent == null ? "r0" : torrent.releaseType);
+        String releaseTypeLabel = "r1".equals(releaseType) ? "ЗОЛОТАЯ РАЗДАЧА"
+                : "r2".equals(releaseType) ? "СЕРЕБРЯНАЯ РАЗДАЧА" : "ОБЫЧНАЯ РАЗДАЧА";
+        int releaseTypeTint = releaseTypeColor(releaseType);
+        TextView releaseTypeBadge = text(releaseTypeLabel, 12, releaseTypeTint, true);
+        releaseTypeBadge.setGravity(Gravity.CENTER);
+        releaseTypeBadge.setMaxLines(1);
+        releaseTypeBadge.setSingleLine(true);
+        releaseTypeBadge.setPadding(dp(6), dp(7), dp(6), dp(7));
+        releaseTypeBadge.setBackground(shape(PANEL, releaseTypeTint));
+        LinearLayout.LayoutParams releaseTypeParams = new LinearLayout.LayoutParams(-1, dp(34));
+        releaseTypeParams.topMargin = dp(7);
+        posterColumn.addView(releaseTypeBadge, releaseTypeParams);
+
         LinearLayout ratings = new LinearLayout(this);
         ratings.setOrientation(LinearLayout.VERTICAL);
         ratings.setGravity(Gravity.CENTER_HORIZONTAL);
