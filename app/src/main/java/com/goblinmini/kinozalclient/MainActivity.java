@@ -2676,13 +2676,12 @@ public class MainActivity extends Activity {
             list.addView(sectionHeader, titleParams);
             list.addView(horizontal, rowParams);
         }
+        final boolean rowWasReplaced = replaced;
         horizontal.post(() -> {
             // Do not inherit a non-zero horizontal offset on the first display.
-            if (!replaced) horizontal.scrollTo(0, 0);
+            if (!rowWasReplaced) horizontal.scrollTo(0, 0);
             scheduleVisibleHomePosterLoad();
         });
-
-        final boolean rowWasReplaced = replaced;
         if (immediate) {
             // Replace and build only this feed. Other rows and their pending work remain intact.
             for (HomePoster item : section.items) {
