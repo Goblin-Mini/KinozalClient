@@ -4265,7 +4265,7 @@ public class MainActivity extends Activity {
         panel.setBackgroundColor(BG);
 
         TextView description = text(
-                "Kinozal Client — приложение для удобного просмотра каталога Kinozal на Android и Android TV.",
+                "Кинозал ТВ — приложение для удобного просмотра каталога Кинозал на Android и Android TV.",
                 15, Color.WHITE, false);
         description.setLineSpacing(dp(3), 1f);
         panel.addView(description);
