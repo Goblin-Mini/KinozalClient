@@ -6959,7 +6959,7 @@ public class MainActivity extends Activity {
         Button technicalTab = button("Техданные");
         Button releaseTab = button("Релиз");
         Button screenshotsTab = button("Скриншоты");
-        Button commentsTab = button("Комментарии");
+        Button commentsTab = button("Комменты");
         Button jackettTab = button("Другие");
         Button[] tabButtons = {descriptionTab, technicalTab, releaseTab, screenshotsTab, commentsTab, jackettTab};
         for (int tabIndex = 0; tabIndex < tabButtons.length; tabIndex++) {
