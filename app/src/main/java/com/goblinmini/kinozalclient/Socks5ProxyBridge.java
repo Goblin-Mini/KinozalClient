@@ -31,6 +31,17 @@ import javax.crypto.spec.GCMParameterSpec;
  * authenticated upstream SOCKS5 connection. It never binds outside loopback.
  */
 public final class Socks5ProxyBridge {
+    // One process-wide loopback bridge: WebView's ProxyController override is global.
+    private static volatile Socks5ProxyBridge sharedInstance;
+
+    public static Socks5ProxyBridge getInstance(Context context) {
+        Socks5ProxyBridge current = sharedInstance;
+        if (current != null) return current;
+        synchronized (Socks5ProxyBridge.class) {
+            if (sharedInstance == null) sharedInstance = new Socks5ProxyBridge(context);
+            return sharedInstance;
+        }
+    }
     private static final String PREFS = "kinozal_socks5";
     private static final String KEY_ALIAS = "kinozal_socks5_aes";
     private final Context context;
@@ -112,6 +123,11 @@ public final class Socks5ProxyBridge {
         } finally {
             close(socket);
         }
+    }
+
+    public synchronized Proxy ensureStarted() throws Exception {
+        if (running && localPort != 0) return localHttpProxy();
+        return start();
     }
 
     public synchronized Proxy start() throws Exception {
