@@ -3999,7 +3999,7 @@ public class MainActivity extends Activity {
                 .setTitle("Диагностика")
                 .setView(panel)
                 .setPositiveButton("Закрыть", null)
-                .setNeutralButton("Отправить отчёт", null)
+                .setNeutralButton("Сохранить", null)
                 .create();
         dialog.setOnShowListener(d -> {
             channelsDiagButton.setOnClickListener(v -> {
@@ -4010,16 +4010,11 @@ public class MainActivity extends Activity {
                 dialog.dismiss();
                 showFeedDiagnostics();
             });
-            Button send = dialog.getButton(AlertDialog.BUTTON_NEUTRAL);
-            send.setEnabled(!report.isEmpty());
-            send.setTextColor(GOLD);
-            send.setOnClickListener(v -> {
-                Intent share = new Intent(Intent.ACTION_SEND);
-                share.setType("text/plain");
-                share.putExtra(Intent.EXTRA_SUBJECT, "Kinozal ТВ — отчёт о сбое");
-                share.putExtra(Intent.EXTRA_TEXT, report);
-                startActivity(Intent.createChooser(share, "Отправить отчёт о сбое"));
-            });
+            Button save = dialog.getButton(AlertDialog.BUTTON_NEUTRAL);
+            save.setEnabled(!report.isEmpty());
+            save.setTextColor(GOLD);
+            save.setOnClickListener(v -> saveDiagnosticFile(
+                    "kinozal_crash_diagnostics.txt", report));
             dialog.getButton(AlertDialog.BUTTON_POSITIVE).setTextColor(GOLD);
         });
         dialog.show();
@@ -4061,14 +4056,37 @@ public class MainActivity extends Activity {
                 .show();
     }
 
+    private void saveDiagnosticFile(String fileName, String content) {
+        try {
+            android.content.ContentValues values = new android.content.ContentValues();
+            values.put(android.provider.MediaStore.MediaColumns.DISPLAY_NAME, fileName);
+            values.put(android.provider.MediaStore.MediaColumns.MIME_TYPE, "text/plain");
+            values.put(android.provider.MediaStore.MediaColumns.RELATIVE_PATH,
+                    android.os.Environment.DIRECTORY_DOWNLOADS + "/KTV");
+            values.put(android.provider.MediaStore.MediaColumns.IS_PENDING, 1);
+            Uri uri = getContentResolver().insert(
+                    android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI, values);
+            if (uri == null) throw new java.io.IOException("Не удалось создать файл");
+            try (java.io.OutputStream out = getContentResolver().openOutputStream(uri)) {
+                if (out == null) throw new java.io.IOException("Не удалось открыть файл");
+                out.write(content.getBytes(StandardCharsets.UTF_8));
+                out.flush();
+            }
+            android.content.ContentValues ready = new android.content.ContentValues();
+            ready.put(android.provider.MediaStore.MediaColumns.IS_PENDING, 0);
+            getContentResolver().update(uri, ready, null, null);
+            showMessage("Сохранено: Загрузки/KTV/" + fileName);
+        } catch (Exception e) {
+            showMessage("Не удалось сохранить диагностику: " + safe(e.getMessage()));
+        }
+    }
+
     private void exportFeedDiagnostics() {
         try {
             pendingFeedDiagnosticsExport = FeedDiagnostics.read(this);
-            Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
-            intent.addCategory(Intent.CATEGORY_OPENABLE);
-            intent.setType("text/plain");
-            intent.putExtra(Intent.EXTRA_TITLE, "kinozal_feed_diagnostics.txt");
-            startActivityForResult(intent, REQUEST_FEED_DIAGNOSTICS_EXPORT);
+            saveDiagnosticFile("kinozal_feed_diagnostics.txt",
+                    pendingFeedDiagnosticsExport == null ? "" : pendingFeedDiagnosticsExport);
+            pendingFeedDiagnosticsExport = null;
         } catch (Exception e) {
             showMessage("Не удалось сохранить диагностику: " + safe(e.getMessage()));
         }
@@ -4102,19 +4120,14 @@ public class MainActivity extends Activity {
                 .setTitle("Диагностика каналов Android TV")
                 .setView(scroll)
                 .setPositiveButton("Закрыть", null)
-                .setNeutralButton("Отправить", null)
+                .setNeutralButton("Сохранить", null)
                 .create();
         dialog.setOnShowListener(d -> {
-            Button send = dialog.getButton(AlertDialog.BUTTON_NEUTRAL);
-            send.setTextColor(GOLD);
-            send.setEnabled(!report.isEmpty());
-            send.setOnClickListener(v -> {
-                Intent share = new Intent(Intent.ACTION_SEND);
-                share.setType("text/plain");
-                share.putExtra(Intent.EXTRA_SUBJECT, "Кинозал ТВ — диагностика каналов Android TV");
-                share.putExtra(Intent.EXTRA_TEXT, report);
-                startActivity(Intent.createChooser(share, "Отправить диагностику каналов"));
-            });
+            Button save = dialog.getButton(AlertDialog.BUTTON_NEUTRAL);
+            save.setTextColor(GOLD);
+            save.setEnabled(!report.isEmpty());
+            save.setOnClickListener(v -> saveDiagnosticFile(
+                    "kinozal_tv_channels_diagnostics.txt", report));
             dialog.getButton(AlertDialog.BUTTON_POSITIVE).setTextColor(GOLD);
         });
         dialog.show();
