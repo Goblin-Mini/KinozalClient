@@ -24,7 +24,7 @@ final class UpdateManager {
     private static final String RELEASE_API =
             "https://api.github.com/repos/Goblin-Mini/KinozalClient/releases/latest";
     private static final String UPDATE_PREFS = "kinozal_update_prefs";
-    private static final String LAST_CHECK = "last_successful_check";
+    private static final String LAST_AUTO_CHECK = "last_automatic_check";
     private static final String AUTO_CHECK = "automatic_check_enabled";
     private static final long CHECK_INTERVAL_MS = 24L * 60L * 60L * 1000L;
     private final Activity activity;
@@ -48,7 +48,7 @@ final class UpdateManager {
     void checkAutomatically() {
         if (!isAutomaticCheckEnabled(activity)) return;
         long last = activity.getSharedPreferences(UPDATE_PREFS, Activity.MODE_PRIVATE)
-                .getLong(LAST_CHECK, 0L);
+                .getLong(LAST_AUTO_CHECK, 0L);
         if (System.currentTimeMillis() - last < CHECK_INTERVAL_MS) return;
         check(true);
     }
@@ -70,8 +70,11 @@ final class UpdateManager {
                     return;
                 }
                 JSONObject release = new JSONObject(new String(readAll(c.getInputStream()), "UTF-8"));
-                activity.getSharedPreferences(UPDATE_PREFS, Activity.MODE_PRIVATE).edit()
-                        .putLong(LAST_CHECK, System.currentTimeMillis()).apply();
+                // Manual checks must not postpone the next automatic startup check.
+                if (automatic) {
+                    activity.getSharedPreferences(UPDATE_PREFS, Activity.MODE_PRIVATE).edit()
+                            .putLong(LAST_AUTO_CHECK, System.currentTimeMillis()).apply();
+                }
                 JSONArray assets = release.optJSONArray("assets");
                 String apkUrl = null;
                 if (assets != null) for (int i = 0; i < assets.length(); i++) {
