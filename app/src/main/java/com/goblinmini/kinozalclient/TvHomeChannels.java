@@ -200,9 +200,10 @@ final class TvHomeChannels {
                 // a channel, request visibility for Новинки even when other apps
                 // already have their own preview channels.
                 final long firstChannel = !hadKinozalChannels ? firstValidChannel(channelIds) : -1L;
+                final boolean hadBrowsableKinozalChannel = kinozalBrowsableBeforeSync > 0;
                 // If old Kinozal channels exist but none is visible, ask the user
                 // to restore visibility (with a 24-hour cooldown to avoid repeated dialogs).
-                final long hiddenChannel = hadKinozalChannels && kinozalBrowsableBeforeSync == 0
+                final long hiddenChannel = hadKinozalChannels && !hadBrowsableKinozalChannel
                         ? firstValidChannel(channelIds) : -1L;
                 activity.runOnUiThread(() -> {
                     if (activity.isFinishing()) return;
@@ -222,7 +223,7 @@ final class TvHomeChannels {
                                 prefs.edit().putLong("tv_channels_browsable_prompt_at", now).apply();
                                 Log.i(TAG, "Requested user approval to restore Kinozal channel visibility id=" + hiddenChannel);
                             }
-                        } else if (kinozalBrowsableBeforeSync > 0) {
+                        } else if (hadBrowsableKinozalChannel) {
                             activity.getSharedPreferences(PREFS, Activity.MODE_PRIVATE)
                                     .edit().remove("tv_channels_browsable_prompt_at").apply();
                         }
