@@ -6965,12 +6965,15 @@ public class MainActivity extends Activity {
         actionRow.addView(favorite, new LinearLayout.LayoutParams(dp(48), dp(48)));
         posterColumn.addView(actionRow);
 
+        String releaseType = normalizeReleaseType(torrent == null ? "r0" : torrent.releaseType);
+        int releaseButtonColor = releaseTypeColor(releaseType);
         Button downloadTorrent = button("↓  Скачать торрент");
         downloadTorrent.setTextSize(fontSize(14));
-        downloadTorrent.setTextColor(GOLD);
-        downloadTorrent.setBackground(shape(PANEL, 0));
+        downloadTorrent.setTextColor(Color.rgb(24, 27, 30));
+        downloadTorrent.setBackground(shape(releaseButtonColor, 0));
         downloadTorrent.setOnFocusChangeListener((v, focused) ->
-                v.setBackground(shape(focused ? Color.rgb(65, 72, 73) : PANEL, focused ? GOLD : 0)));
+                v.setBackground(shape(focused ? Color.rgb(65, 72, 73) : releaseButtonColor,
+                        focused ? releaseButtonColor : 0)));
         LinearLayout.LayoutParams downloadParams = new LinearLayout.LayoutParams(-1, dp(42));
         downloadParams.topMargin = dp(8);
         downloadParams.bottomMargin = dp(10);
@@ -6983,21 +6986,6 @@ public class MainActivity extends Activity {
         // a release has no poster or its remote image cannot be loaded.
         poster.setImageResource(R.drawable.kinozal_poster_placeholder);
         posterColumn.addView(poster, new LinearLayout.LayoutParams(-1, dp(260)));
-
-        // Release type is shown directly below the poster, before the ratings.
-        String releaseType = normalizeReleaseType(torrent == null ? "r0" : torrent.releaseType);
-        String releaseTypeLabel = "r1".equals(releaseType) ? "ЗОЛОТАЯ РАЗДАЧА"
-                : "r2".equals(releaseType) ? "СЕРЕБРЯНАЯ РАЗДАЧА" : "ОБЫЧНАЯ РАЗДАЧА";
-        int releaseTypeTint = releaseTypeColor(releaseType);
-        TextView releaseTypeBadge = text(releaseTypeLabel, 12, releaseTypeTint, true);
-        releaseTypeBadge.setGravity(Gravity.CENTER);
-        releaseTypeBadge.setMaxLines(1);
-        releaseTypeBadge.setSingleLine(true);
-        releaseTypeBadge.setPadding(dp(6), dp(7), dp(6), dp(7));
-        releaseTypeBadge.setBackground(shape(PANEL, releaseTypeTint));
-        LinearLayout.LayoutParams releaseTypeParams = new LinearLayout.LayoutParams(-1, dp(34));
-        releaseTypeParams.topMargin = dp(7);
-        posterColumn.addView(releaseTypeBadge, releaseTypeParams);
 
         LinearLayout ratings = new LinearLayout(this);
         ratings.setOrientation(LinearLayout.VERTICAL);
