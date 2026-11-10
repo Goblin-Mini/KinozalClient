@@ -22,6 +22,7 @@ import android.view.ViewGroup;
 import android.graphics.Rect;
 import android.view.inputmethod.EditorInfo;
 import android.widget.Button;
+import android.widget.ArrayAdapter;
 import android.widget.CheckBox;
 import android.widget.EditText;
 import android.widget.LinearLayout;
