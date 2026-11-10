@@ -56,31 +56,26 @@ final class TvHomeChannels {
 
     private static final String PREFS = "kinozal_settings";
     private static final String RECENT_KEY = "recently_viewed";
+    // Keep only the six collections requested for Android TV.
     private static final String[] CHANNEL_KEYS = {
-            "new_releases", "top_month", "top_ru_series", "top_foreign_series",
-            "top_movies", "top_cartoons", "top_music", "top_games", "continue"
+            "favorites", "continue", "top_movies", "top_ru_series",
+            "top_foreign_series", "top_month"
     };
     private static final String[] CHANNEL_NAMES = {
-            "Кинозал ТВ — Новинки кино",
-            "Кинозал ТВ — Топ раздач месяца",
-            "Кинозал ТВ — Топ русские сериалы",
-            "Кинозал ТВ — Топ иностранные сериалы",
+            "Кинозал ТВ — Избранное",
+            "Кинозал ТВ — Продолжить просмотр",
             "Кинозал ТВ — Топ фильмы",
-            "Кинозал ТВ — Топ мульты",
-            "Кинозал ТВ — Топ музыка",
-            "Кинозал ТВ — Топ игр",
-            "Кинозал ТВ — Продолжить просмотр"
+            "Кинозал ТВ — Топ русские сериалы",
+            "Кинозал ТВ — Топ зарубежные сериалы",
+            "Кинозал ТВ — Топ раздач месяца"
     };
     private static final String[] FEED_PATHS = {
-            "novinki.php",
-            "top.php?j=&t=0&d=0&k=0&f=0&w=2&s=0",
+            "local:favorites",
+            "local:recently-viewed",
+            "top.php?j=&t=1&d=0&k=0&f=0&w=2&s=0",
             "top.php?j=&t=31&d=0&k=0&f=0&w=2&s=0",
             "top.php?j=&t=32&d=0&k=0&f=0&w=2&s=0",
-            "top.php?j=&t=1&d=0&k=0&f=0&w=2&s=0",
-            "top.php?t=2&d=0&f=0&k=0&j=&s=0&w=2",
-            "top.php?j=&t=4&d=0&k=0&f=0&w=2&s=0",
-            "top.php?j=&t=7&d=0&k=0&f=0&w=2&s=0",
-            "local:recently-viewed"
+            "top.php?j=&t=0&d=0&k=0&f=0&w=2&s=0"
     };
     private static final int REQUEST_BROWSABLE = 7410;
     private static final List<Long> PENDING_BROWSABLE = new ArrayList<>();
@@ -121,18 +116,15 @@ final class TvHomeChannels {
                 diag(activity, "CHANNELS_BEFORE", "all=" + allChannelsBeforeSync.size()
                         + ", kinozal=" + kinozalChannelsBeforeSync.size()
                         + ", kinozalBrowsable=" + kinozalBrowsableBeforeSync);
-                String[] obsoleteIds = {"new_movies", "new_series", "top_series", "top_all"};
-                for (String key : obsoleteIds) {
-                    PreviewChannel old = findChannel(helper, "kinozal:" + key);
-                    if (old != null) {
-                        helper.deletePreviewChannel(old.getId());
-                        Log.i(TAG, "Deleted replaced legacy channel " + key);
+                // Remove channels from older versions that are no longer part
+                // of the six-channel Android TV lineup. Keep all other apps' channels.
+                for (PreviewChannel existing : new ArrayList<>(helper.getAllChannels())) {
+                    String internalId = existing.getInternalProviderId();
+                    if (internalId != null && internalId.startsWith("kinozal:")
+                            && !isRetainedChannel(internalId)) {
+                        helper.deletePreviewChannel(existing.getId());
+                        Log.i(TAG, "Deleted retired Kinozal channel " + internalId);
                     }
-                }
-                PreviewChannel obsoleteArrivals = findChannel(helper, "kinozal:new_arrivals");
-                if (obsoleteArrivals != null) {
-                    helper.deletePreviewChannel(obsoleteArrivals.getId());
-                    Log.i(TAG, "Deleted obsolete new-arrivals channel");
                 }
 
 
@@ -176,7 +168,14 @@ final class TvHomeChannels {
                         }
                     }
 
-                    JSONArray programs = i == CHANNEL_KEYS.length - 1 ? readRecentPrograms(activity) : findFeedItems(feeds, FEED_PATHS[i]);
+                    JSONArray programs;
+                    if ("favorites".equals(CHANNEL_KEYS[i])) {
+                        programs = readFavoritePrograms(activity);
+                    } else if ("continue".equals(CHANNEL_KEYS[i])) {
+                        programs = readRecentPrograms(activity);
+                    } else {
+                        programs = findFeedItems(feeds, FEED_PATHS[i]);
+                    }
                     replacePrograms(activity, helper, channelIds[i], CHANNEL_KEYS[i], programs);
                 }
 
@@ -373,6 +372,36 @@ final class TvHomeChannels {
             return path == null ? "" : path.replaceAll("/+$", "").toLowerCase(java.util.Locale.ROOT);
         } catch (Exception ignored) {
             return image == null ? "" : image.trim().toLowerCase(java.util.Locale.ROOT);
+        }
+    }
+
+    private static boolean isRetainedChannel(String internalId) {
+        for (String key : CHANNEL_KEYS) {
+            if (("kinozal:" + key).equals(internalId)) return true;
+        }
+        return false;
+    }
+
+    private static JSONArray readFavoritePrograms(Activity activity) {
+        String raw = activity.getSharedPreferences(PREFS, Activity.MODE_PRIVATE)
+                .getString("local_favorites", "[]");
+        try {
+            JSONArray source = new JSONArray(raw);
+            JSONArray result = new JSONArray();
+            for (int i = 0; i < Math.min(source.length(), 20); i++) {
+                JSONObject old = source.optJSONObject(i);
+                if (old == null) continue;
+                JSONObject item = new JSONObject();
+                item.put("title", old.optString("title", ""));
+                item.put("href", old.optString("href", ""));
+                item.put("size", old.optString("size", "—"));
+                item.put("seeds", old.optString("seeds", "—"));
+                item.put("image", old.optString("poster", ""));
+                result.put(item);
+            }
+            return result;
+        } catch (Exception e) {
+            return new JSONArray();
         }
     }
 
