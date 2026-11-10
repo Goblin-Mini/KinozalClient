@@ -3585,6 +3585,24 @@ public class MainActivity extends Activity {
                             else importUserBackup();
                         }).show());
         addSettingsAction(right, "Обновления", () -> new UpdateManager(this).check());
+        addSettingsAction(right, "Проверка при запуске: "
+                + (UpdateManager.isAutomaticCheckEnabled(this) ? "Вкл." : "Выкл."),
+                () -> {
+                    boolean enabled = UpdateManager.isAutomaticCheckEnabled(this);
+                    new AlertDialog.Builder(this)
+                            .setTitle("Проверка обновлений при запуске")
+                            .setMessage("Автоматически искать новые версии при запуске приложения?")
+                            .setPositiveButton("Включить", (dialog, which) -> {
+                                UpdateManager.setAutomaticCheckEnabled(this, true);
+                                showMessage("Автоматическая проверка обновлений включена");
+                            })
+                            .setNegativeButton("Отключить", (dialog, which) -> {
+                                UpdateManager.setAutomaticCheckEnabled(this, false);
+                                showMessage("Автоматическая проверка обновлений отключена");
+                            })
+                            .setNeutralButton("Отмена", null)
+                            .show();
+                });
         addSettingsAction(right, "Диагностика", () -> showCrashDiagnostics());
         addSettingsAction(right, "Проверка лент", () -> showManualFeedDiagnostic());
 
