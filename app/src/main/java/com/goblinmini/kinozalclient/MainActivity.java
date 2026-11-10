@@ -2504,6 +2504,13 @@ public class MainActivity extends Activity {
         homeCardBuildQueue.clear();
         homeCardBuildScheduled = false;
         homeRowsEnqueued = false;
+        // A newly rendered feed must start at the top; stale scroll position can
+        // otherwise let the first row draw over the fixed page heading/search area.
+        ScrollView feedScroll = "collections".equals(activeFeedScreen)
+                ? collectionsScrollView : homeScrollView;
+        if (feedScroll != null) feedScroll.post(() -> {
+            if (generation == homeRenderGeneration) feedScroll.scrollTo(0, 0);
+        });
         final List<HomeSection> snapshot = new ArrayList<>(sections);
         final int[] index = {0};
         Runnable[] next = new Runnable[1];
@@ -2669,7 +2676,11 @@ public class MainActivity extends Activity {
             list.addView(sectionHeader, titleParams);
             list.addView(horizontal, rowParams);
         }
-        horizontal.post(this::scheduleVisibleHomePosterLoad);
+        horizontal.post(() -> {
+            // Do not inherit a non-zero horizontal offset on the first display.
+            if (!replaced) horizontal.scrollTo(0, 0);
+            scheduleVisibleHomePosterLoad();
+        });
 
         final boolean rowWasReplaced = replaced;
         if (immediate) {
