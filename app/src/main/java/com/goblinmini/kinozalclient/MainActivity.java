@@ -7641,7 +7641,7 @@ public class MainActivity extends Activity {
                 throw new java.io.IOException("Сайт вернул не .torrent-файл. Возможно, сессия истекла или зеркало отклонило запрос.");
             }
             String safeTitle = data.title == null ? "kinozal-torrent" : data.title.trim();
-            safeTitle = safeTitle.replaceAll("[\\\\/:*?\\"<>|]", "_")
+            safeTitle = safeTitle.replaceAll("[/\\\\:*?\\\"<>|]", "_")
                     .replaceAll("\\s+", " ").trim();
             if (safeTitle.isEmpty()) safeTitle = "kinozal-torrent";
             pendingTorrentSaveBytes = bytes;
