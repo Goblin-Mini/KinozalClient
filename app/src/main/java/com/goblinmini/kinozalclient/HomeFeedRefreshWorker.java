@@ -124,6 +124,11 @@ public final class HomeFeedRefreshWorker extends Worker {
             }
             FeedDiagnostics.log(context, group, "CACHE_WRITE", "updated feed=" + title
                     + ", cards=" + items.length() + ", model=committed");
+            if ("home".equals(group)) {
+                // Refresh launcher rows in this WorkManager process even when the Activity is stopped.
+                TvHomeChannels.syncFromWorker(context,
+                        new File(context.getFilesDir(), "kinozal_tv_channels_v1.json"));
+            }
             FeedDiagnostics.log(context, group, "WORKER_DONE", "elapsedMs="
                     + (android.os.SystemClock.elapsedRealtime() - workerStarted));
             Log.i(TAG, "Updated " + group + " feed " + index + ": " + title + ", cards=" + items.length());
