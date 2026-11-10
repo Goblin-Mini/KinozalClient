@@ -90,8 +90,8 @@ jobs:
         if: github.ref_name == 'fix/home-feed-js-extractor-diagnostics' && github.event_name == 'push'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: test-update-1.0.3
-          name: Кинозал ТВ 1.0.3 (тест обновления)
+          tag_name: test-update-1.0.4
+          name: Кинозал ТВ 1.0.4 (тест автообновления)
           target_commitish: fix/home-feed-js-extractor-diagnostics
           files: dist/KinozalClient.apk
           overwrite_files: true
