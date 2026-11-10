@@ -3584,27 +3584,8 @@ public class MainActivity extends Activity {
                             if (which == 0) exportUserBackup();
                             else importUserBackup();
                         }).show());
-        addSettingsAction(right, "Обновления", () -> new UpdateManager(this).check());
-        addSettingsAction(right, "Проверка при запуске: "
-                + (UpdateManager.isAutomaticCheckEnabled(this) ? "Вкл." : "Выкл."),
-                () -> {
-                    boolean enabled = UpdateManager.isAutomaticCheckEnabled(this);
-                    new AlertDialog.Builder(this)
-                            .setTitle("Проверка обновлений при запуске")
-                            .setMessage("Автоматически искать новые версии при запуске приложения?")
-                            .setPositiveButton("Включить", (dialog, which) -> {
-                                UpdateManager.setAutomaticCheckEnabled(this, true);
-                                showMessage("Автоматическая проверка обновлений включена");
-                            })
-                            .setNegativeButton("Отключить", (dialog, which) -> {
-                                UpdateManager.setAutomaticCheckEnabled(this, false);
-                                showMessage("Автоматическая проверка обновлений отключена");
-                            })
-                            .setNeutralButton("Отмена", null)
-                            .show();
-                });
+        addSettingsAction(right, "Обновления", () -> showUpdateSettings());
         addSettingsAction(right, "Диагностика", () -> showCrashDiagnostics());
-        addSettingsAction(right, "Проверка лент", () -> showManualFeedDiagnostic());
 
         LinearLayout bottomRow = new LinearLayout(this);
         bottomRow.setOrientation(LinearLayout.HORIZONTAL);
@@ -3989,6 +3970,54 @@ public class MainActivity extends Activity {
                 showMessage("Данные восстановлены. Введите пароль SOCKS5 и включите прокси в настройках.");
             } else showMessage("Резервная копия восстановлена");
         } catch (Exception e) { showMessage("Не удалось восстановить копию: " + safe(e.getMessage())); }
+    }
+
+    private void showUpdateSettings() {
+        LinearLayout panel = new LinearLayout(this);
+        panel.setOrientation(LinearLayout.VERTICAL);
+        panel.setPadding(dp(18), dp(14), dp(18), dp(10));
+        panel.setBackgroundColor(BG);
+
+        Button checkButton = settingsPillButton("Проверить обновление");
+        Button automaticButton = settingsPillButton("");
+        LinearLayout.LayoutParams buttonParams = new LinearLayout.LayoutParams(-1, dp(48));
+        panel.addView(checkButton, buttonParams);
+        LinearLayout.LayoutParams automaticParams = new LinearLayout.LayoutParams(-1, dp(48));
+        automaticParams.topMargin = dp(10);
+        panel.addView(automaticButton, automaticParams);
+
+        Runnable updateAutomaticLabel = () -> automaticButton.setText(
+                "Проверка при запуске: "
+                        + (UpdateManager.isAutomaticCheckEnabled(this) ? "Вкл." : "Выкл."));
+        updateAutomaticLabel.run();
+
+        AlertDialog dialog = new AlertDialog.Builder(this)
+                .setTitle("Обновления")
+                .setView(panel)
+                .setPositiveButton("Закрыть", null)
+                .create();
+        dialog.setOnShowListener(d -> {
+            checkButton.setOnClickListener(v -> {
+                dialog.dismiss();
+                new UpdateManager(this).check();
+            });
+            automaticButton.setOnClickListener(v -> {
+                boolean enabled = !UpdateManager.isAutomaticCheckEnabled(this);
+                UpdateManager.setAutomaticCheckEnabled(this, enabled);
+                updateAutomaticLabel.run();
+                showMessage(enabled
+                        ? "Автоматическая проверка обновлений включена"
+                        : "Автоматическая проверка обновлений отключена");
+            });
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setTextColor(GOLD);
+        });
+        dialog.show();
+        if (dialog.getWindow() != null) {
+            dialog.getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(BG));
+            dialog.getWindow().setLayout(Math.min(dp(520),
+                    getResources().getDisplayMetrics().widthPixels - dp(48)),
+                    ViewGroup.LayoutParams.WRAP_CONTENT);
+        }
     }
 
     private void showCrashDiagnostics() {
