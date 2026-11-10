@@ -6463,7 +6463,6 @@ public class MainActivity extends Activity {
 
         if (cachedDetails != null) {
             t.poster = cachedDetails.poster;
-            saveRecentlyViewed(t);
             // Reuse the parsed model; no HTML parsing or network wait on repeat opens.
             showTorrentDetails(t, cachedDetails);
         }
@@ -6502,7 +6501,6 @@ public class MainActivity extends Activity {
                 putCachedDetailData(cacheKey, details);
                 diskCache.put(cacheKey, html.getBytes(StandardCharsets.UTF_8));
                 t.poster = details.poster;
-                saveRecentlyViewed(t);
                 // Do not wait for the secondary screenshot request before
                 // presenting the already parsed release details.
                 if (href.equals(activeTorrentDetailsHref) && !hasCachedDetails) {
@@ -6811,7 +6809,6 @@ public class MainActivity extends Activity {
                 diskCache.put(key, html.getBytes(StandardCharsets.UTF_8));
                 if (href.equals(activeTorrentDetailsHref)) {
                     progress.setVisibility(View.GONE);
-                    saveRecentlyViewed(torrent);
                     // Prefetch only the detail HTML; screenshot data stays lazy.
                     showTorrentDetails(torrent, parsed);
                 }
@@ -7154,8 +7151,15 @@ public class MainActivity extends Activity {
         jackettTab.setOnClickListener(v -> searchJackett(torrent.title, data.poster));
         render[0].run();
 
-        watch.setOnClickListener(v -> playTorrent(data));
-        downloadTorrent.setOnClickListener(v -> downloadTorrentFile(data));
+        // Add a release to "Недавно смотрели" only after an explicit user action.
+        watch.setOnClickListener(v -> {
+            saveRecentlyViewed(torrent);
+            playTorrent(data);
+        });
+        downloadTorrent.setOnClickListener(v -> {
+            saveRecentlyViewed(torrent);
+            downloadTorrentFile(data);
+        });
         root.setLayoutParams(new ViewGroup.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         AlertDialog dialog = new AlertDialog.Builder(this)
