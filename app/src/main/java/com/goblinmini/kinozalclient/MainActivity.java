@@ -317,7 +317,7 @@ public class MainActivity extends Activity {
         // alongside proxy/session initialization so a returning user sees
         // useful content before the sequential WebView refresh begins.
         preloadHomeCache();
-        socks5Bridge = new Socks5ProxyBridge(this);
+        socks5Bridge = Socks5ProxyBridge.getInstance(this);
         String savedBrowserCookies = client.getSavedBrowserCookies();
         initializeNetwork(savedBrowserCookies);
         loadExternalCountryInfo(sidebarCountryInfo);
@@ -7723,5 +7723,5 @@ public class MainActivity extends Activity {
         super.onStop();
     }
 
-    @Override protected void onDestroy() { if (socks5Bridge != null) socks5Bridge.stop(); io.shutdownNow(); imageIo.shutdownNow(); homeRefreshIo.shutdownNow(); super.onDestroy(); }
+    @Override protected void onDestroy() { io.shutdownNow(); imageIo.shutdownNow(); homeRefreshIo.shutdownNow(); super.onDestroy(); }
 }
