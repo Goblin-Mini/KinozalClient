@@ -2637,12 +2637,20 @@ public class MainActivity extends Activity {
         android.widget.HorizontalScrollView horizontal = new android.widget.HorizontalScrollView(this);
         horizontal.setHorizontalScrollBarEnabled(false);
         horizontal.setFillViewport(false);
+        horizontal.setSmoothScrollingEnabled(true);
+        horizontal.setClipChildren(false);
+        horizontal.setClipToPadding(false);
         horizontal.setTag("home-row:" + section.path);
         horizontal.setOnScrollChangeListener((View v, int x, int y, int oldX, int oldY) -> scheduleVisibleHomePosterLoad());
         LinearLayout strip = new LinearLayout(this);
         strip.setOrientation(LinearLayout.HORIZONTAL);
+        strip.setGravity(Gravity.CENTER_VERTICAL);
+        strip.setClipChildren(false);
+        strip.setClipToPadding(false);
+        strip.setPadding(dp(4), dp(10), dp(12), dp(10));
         horizontal.addView(strip);
-        LinearLayout.LayoutParams rowParams = new LinearLayout.LayoutParams(-1, dp(260));
+        // Extra vertical room prevents the focused card's scale animation from being clipped.
+        LinearLayout.LayoutParams rowParams = new LinearLayout.LayoutParams(-1, dp(282));
 
         // Replace only this feed's existing views, preserving other rows and DPAD focus.
         String titleTag = "home-title:" + section.path;
@@ -2720,9 +2728,42 @@ public class MainActivity extends Activity {
         card.setBackground(shape(PANEL, 0));
         card.setFocusable(true);
         card.setClickable(true);
+        card.setClipChildren(false);
+        card.setClipToPadding(false);
+        card.setPivotX(dp(69));
+        card.setPivotY(dp(125));
         card.setOnFocusChangeListener((v, focused) -> {
+            v.animate().cancel();
             v.setBackground(shape(focused ? Color.rgb(57, 68, 70) : PANEL, focused ? GOLD : 0));
-            if (focused) loadHomePosterForCard(card);
+            // A restrained zoom makes the active poster obvious without covering its neighbours.
+            v.animate()
+                    .scaleX(focused ? 1.09f : 1f)
+                    .scaleY(focused ? 1.09f : 1f)
+                    .translationY(focused ? -dp(3) : 0f)
+                    .setDuration(focused ? 170L : 130L)
+                    .start();
+            v.setElevation(focused ? dp(10) : dp(1));
+            if (focused) {
+                loadHomePosterForCard(card);
+                ViewParent parent = card.getParent();
+                if (parent instanceof View) {
+                    View row = (View) parent;
+                    View horizontalParent = row.getParent() instanceof View
+                            ? (View) row.getParent() : null;
+                    if (horizontalParent instanceof android.widget.HorizontalScrollView) {
+                        android.widget.HorizontalScrollView scroller =
+                                (android.widget.HorizontalScrollView) horizontalParent;
+                        scroller.post(() -> {
+                            if (!card.hasFocus()) return;
+                            int cardCenter = card.getLeft() + card.getWidth() / 2;
+                            int targetX = Math.max(0, cardCenter - scroller.getWidth() / 2);
+                            if (Math.abs(scroller.getScrollX() - targetX) > dp(3)) {
+                                scroller.smoothScrollTo(targetX, 0);
+                            }
+                        });
+                    }
+                }
+            }
         });
 
         FrameLayout posterFrame = new FrameLayout(this);
