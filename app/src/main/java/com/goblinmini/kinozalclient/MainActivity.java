@@ -289,8 +289,20 @@ public class MainActivity extends Activity {
 
     private static class Category { String title, href, method = "GET", body = ""; }
 
+    private static String normalizeReleaseType(String value) {
+        return "r1".equals(value) || "r2".equals(value) ? value : "r0";
+    }
+
+    private int releaseTypeColor(String value) {
+        String type = normalizeReleaseType(value);
+        if ("r1".equals(type)) return Color.rgb(224, 175, 127); // #E0AF7F
+        if ("r2".equals(type)) return TEAL; // #73A4AA
+        return Color.WHITE;
+    }
+
     private static class Torrent {
         String title, href, size, seeds, leeches, uploaded, poster;
+        String releaseType = "r0";
     }
 
     @Override public void onCreate(Bundle state) {
@@ -5087,10 +5099,10 @@ public class MainActivity extends Activity {
                 + "if(!nameCell)continue;var links=nameCell.children;"
                 + "for(var a=0;a<links.length;a++){var link=links[a];"
                 + "if(link.tagName!=='A'||(link.getAttribute('href')||'').indexOf('details.php?id=')<0)continue;"
-                + "var title=(link.innerText||link.textContent||'').trim(),href=link.href||link.getAttribute('href');"
+                + "var title=(link.innerText||link.textContent||'').trim(),href=link.href||link.getAttribute('href'),releaseType=/^r[012]$/.test(link.className)?link.className:'r0';"
                 + "if(title.length<3||!href||seen[href])continue;seen[href]=1;"
                 + "function cellText(n){return cells.length>n?(cells[n].innerText||cells[n].textContent||'').trim():'—';}"
-                + "out.push({title:title,href:href,size:cellText(3),seeds:cellText(4),"
+                + "out.push({title:title,href:href,releaseType:releaseType,size:cellText(3),seeds:cellText(4),"
                 + "leeches:cellText(5),uploaded:cellText(6)});}}"
                 + "return JSON.stringify(out);"
                 + "}catch(e){return '[]';}})()";
@@ -5109,6 +5121,7 @@ public class MainActivity extends Activity {
                     Torrent torrent = new Torrent();
                     torrent.title = item.optString("title", "").trim();
                     torrent.href = item.optString("href", "").trim();
+                    torrent.releaseType = normalizeReleaseType(item.optString("releaseType", "r0"));
                     if (torrent.title.length() < 3 || torrent.href.isEmpty()) continue;
                     torrent.size = item.optString("size", "—");
                     torrent.seeds = item.optString("seeds", "—");
@@ -5202,6 +5215,7 @@ public class MainActivity extends Activity {
                     Torrent torrent = new Torrent();
                     torrent.title = name;
                     torrent.href = href;
+                    torrent.releaseType = normalizeReleaseType(anchor.className());
                     torrent.size = cells.size() > 3 ? cells.get(3).text().trim() : "—";
                     torrent.seeds = cells.size() > 4 ? cells.get(4).text().trim() : "—";
                     torrent.leeches = cells.size() > 5 ? cells.get(5).text().trim() : "—";
@@ -5365,7 +5379,7 @@ public class MainActivity extends Activity {
             card.setPadding(dp(14), dp(8), dp(14), dp(8));
             card.setBackground(shape(PANEL, 0));
             LinearLayout.LayoutParams cardParams = new LinearLayout.LayoutParams(0, dp(66), 1f);
-            TextView name = text(t.title, 16, Color.WHITE, true); name.setMaxLines(2);
+            TextView name = text(t.title, 16, releaseTypeColor(t.releaseType), true); name.setMaxLines(2);
             card.addView(name, new LinearLayout.LayoutParams(0, -2, 1f));
             TextView size = text(displayTorrentValue(t.size), 13, GOLD, false);
             size.setGravity(Gravity.CENTER);
@@ -6285,6 +6299,7 @@ public class MainActivity extends Activity {
                 t.leeches = o.optString("leeches", "—");
                 t.uploaded = o.optString("uploaded", "—");
                 t.poster = o.optString("poster", "");
+                t.releaseType = normalizeReleaseType(o.optString("releaseType", "r0"));
                 if (!t.href.isEmpty()) result.put(t.href, t);
             }
         } catch (Exception ignored) { }
@@ -6297,7 +6312,7 @@ public class MainActivity extends Activity {
             org.json.JSONObject o = new org.json.JSONObject();
             try {
                 o.put("title", t.title); o.put("href", t.href); o.put("size", t.size);
-                o.put("seeds", t.seeds); o.put("leeches", t.leeches); o.put("uploaded", t.uploaded); o.put("poster", t.poster == null ? "" : t.poster);
+                o.put("seeds", t.seeds); o.put("leeches", t.leeches); o.put("uploaded", t.uploaded); o.put("poster", t.poster == null ? "" : t.poster); o.put("releaseType", normalizeReleaseType(t.releaseType));
                 array.put(o);
             } catch (Exception ignored) { }
         }
