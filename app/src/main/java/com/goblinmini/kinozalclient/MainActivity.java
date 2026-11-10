@@ -6878,29 +6878,64 @@ public class MainActivity extends Activity {
         ImageView poster = new ImageView(this);
         poster.setScaleType(ImageView.ScaleType.FIT_CENTER);
         poster.setBackground(shape(PANEL, 0));
+        // Show the Kinozal brand artwork instead of an empty dark rectangle when
+        // a release has no poster or its remote image cannot be loaded.
+        poster.setImageResource(R.drawable.kinozal_sidebar_logo);
         posterColumn.addView(poster, new LinearLayout.LayoutParams(-1, dp(260)));
         LinearLayout ratings = new LinearLayout(this);
         ratings.setOrientation(LinearLayout.VERTICAL);
         ratings.setGravity(Gravity.CENTER_HORIZONTAL);
         ratings.setPadding(dp(2), dp(8), dp(2), dp(2));
 
-        TextView externalRatings = text(
-                "IMDb  " + data.imdbRating + "     Кинопоиск  " + data.kinopoiskRating,
-                12, Color.LTGRAY, false);
-        externalRatings.setGravity(Gravity.CENTER);
-        externalRatings.setSingleLine(true);
-        externalRatings.setIncludeFontPadding(false);
-        ratings.addView(externalRatings, new LinearLayout.LayoutParams(-1, -2));
+        LinearLayout imdbRow = new LinearLayout(this);
+        imdbRow.setGravity(Gravity.CENTER_VERTICAL);
+        TextView imdbLabel = text("▪ IMDb", 12, GOLD, true);
+        imdbRow.addView(imdbLabel, new LinearLayout.LayoutParams(0, -2, 1f));
+        TextView imdbValue = text(data.imdbRating, 12, Color.WHITE, true);
+        imdbValue.setGravity(Gravity.RIGHT | Gravity.CENTER_VERTICAL);
+        imdbRow.addView(imdbValue);
+        ratings.addView(imdbRow, new LinearLayout.LayoutParams(-1, -2));
+
+        LinearLayout kpRow = new LinearLayout(this);
+        kpRow.setGravity(Gravity.CENTER_VERTICAL);
+        TextView kpLabel = text("▪ Кинопоиск", 12, GOLD, true);
+        kpRow.addView(kpLabel, new LinearLayout.LayoutParams(0, -2, 1f));
+        TextView kpValue = text(data.kinopoiskRating, 12, Color.WHITE, true);
+        kpValue.setGravity(Gravity.RIGHT | Gravity.CENTER_VERTICAL);
+        kpRow.addView(kpValue);
+        ratings.addView(kpRow, new LinearLayout.LayoutParams(-1, -2));
 
         TextView kinozalRating = text("Kinozal  " + data.kinozalRating, 14, TEAL, true);
         kinozalRating.setGravity(Gravity.CENTER);
-        kinozalRating.setPadding(0, dp(3), 0, 0);
+        kinozalRating.setPadding(0, dp(4), 0, 0);
         ratings.addView(kinozalRating, new LinearLayout.LayoutParams(-1, -2));
 
-        TextView stars = text(data.kinozalStars, 15, GOLD, true);
-        stars.setGravity(Gravity.CENTER);
-        stars.setPadding(0, dp(3), 0, 0);
-        ratings.addView(stars, new LinearLayout.LayoutParams(-1, -2));
+        LinearLayout starRow = new LinearLayout(this);
+        starRow.setGravity(Gravity.CENTER);
+        int filledStars = 0;
+        try {
+            java.util.regex.Matcher ratingMatcher = java.util.regex.Pattern
+                    .compile("(\\\\d+(?:[.,]\\\\d+)?)").matcher(data.kinozalRating);
+            if (ratingMatcher.find()) filledStars = Math.max(0, Math.min(10,
+                    Math.round(Float.parseFloat(ratingMatcher.group(1).replace(',', '.')) * 2f)));
+        } catch (Exception ignored) { }
+        for (int i = 0; i < 10; i++) {
+            TextView star = text(i < filledStars ? "★" : "★", 13,
+                    i < filledStars ? GOLD : Color.rgb(105, 111, 115), true);
+            star.setGravity(Gravity.CENTER);
+            starRow.addView(star, new LinearLayout.LayoutParams(0, -2, 1f));
+        }
+        ratings.addView(starRow, new LinearLayout.LayoutParams(-1, -2));
+
+        LinearLayout numberRow = new LinearLayout(this);
+        numberRow.setGravity(Gravity.CENTER);
+        for (int i = 1; i <= 10; i++) {
+            TextView number = text(String.valueOf(i), 9,
+                    i <= filledStars ? GOLD : Color.LTGRAY, false);
+            number.setGravity(Gravity.CENTER);
+            numberRow.addView(number, new LinearLayout.LayoutParams(0, -2, 1f));
+        }
+        ratings.addView(numberRow, new LinearLayout.LayoutParams(-1, -2));
 
         posterColumn.addView(ratings, new LinearLayout.LayoutParams(-1, -2));
         LinearLayout.LayoutParams posterParams = new LinearLayout.LayoutParams(dp(190), -1);
