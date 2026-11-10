@@ -43,9 +43,8 @@ public final class HomeFeedRefreshWorker extends Worker {
         Context context = getApplicationContext();
         String mirror = context.getSharedPreferences("kinozal_settings", Context.MODE_PRIVATE)
                 .getString("mirror", KinozalHttpClient.DEFAULT_MIRROR);
-        Socks5ProxyBridge bridge = new Socks5ProxyBridge(context);
+        Socks5ProxyBridge bridge = Socks5ProxyBridge.getInstance(context);
         KinozalHttpClient client = new KinozalHttpClient(context, mirror);
-        boolean proxyStarted = false;
         long workerStarted = android.os.SystemClock.elapsedRealtime();
         String requestUrl = client.getMirror() + "/" + path.replaceFirst("^/+", "");
         FeedDiagnostics.log(context, group, "WORKER_START", "feed=" + (index + 1) + "/" + total
@@ -60,8 +59,7 @@ public final class HomeFeedRefreshWorker extends Worker {
             Socks5ProxyBridge.Settings proxySettings = bridge.getSettings();
             Integer webViewProxyPort = null;
             if (proxySettings.enabled) {
-                bridge.start();
-                proxyStarted = true;
+                bridge.ensureStarted();
                 webViewProxyPort = bridge.getLocalPort();
             }
             FeedDiagnostics.log(context, group, "REQUEST_START", "url=" + requestUrl
@@ -161,7 +159,8 @@ public final class HomeFeedRefreshWorker extends Worker {
                     reason == null || reason.trim().isEmpty() ? "ошибка сети или ответа сайта" : reason);
             return Result.retry();
         } finally {
-            if (proxyStarted) bridge.stop();
+            // The bridge is shared with MainActivity and must remain alive while
+            // WebView's process-wide proxy override points to its loopback port.
         }
     }
 
