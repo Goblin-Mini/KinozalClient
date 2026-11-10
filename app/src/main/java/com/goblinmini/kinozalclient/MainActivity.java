@@ -3420,6 +3420,7 @@ public class MainActivity extends Activity {
     private int getAccentColor(String key) {
         if ("silver".equals(key)) return Color.rgb(214, 219, 224);
         if ("bronze".equals(key)) return Color.rgb(205, 145, 96);
+        if ("olive".equals(key)) return Color.rgb(133, 173, 73);
         return Color.rgb(251, 226, 173);
     }
 
@@ -3509,8 +3510,8 @@ public class MainActivity extends Activity {
     }
 
     private void showAccentPicker() {
-        String[] labels = {"Золотистый", "Серебряный", "Бронзовый"};
-        String[] keys = {"gold", "silver", "bronze"};
+        String[] labels = {"Золотистый", "Серебряный", "Бронзовый", "Оливковый"};
+        String[] keys = {"gold", "silver", "bronze", "olive"};
         String current = getSharedPreferences(PREFS, MODE_PRIVATE).getString("accent_color", "gold");
         int selected = 0;
         for (int i = 0; i < keys.length; i++) if (keys[i].equals(current)) selected = i;
