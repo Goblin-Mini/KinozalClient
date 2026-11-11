@@ -4302,8 +4302,13 @@ public class MainActivity extends Activity {
         Button github = button("⌘   GitHub");
         for (Button action : new Button[]{homepage, github}) {
             action.setTextSize(14);
-            action.setTextColor(linkColor);
+            action.setTextColor(BG);
             action.setGravity(Gravity.CENTER);
+            action.setBackground(shape(GOLD, 0));
+            action.setOnFocusChangeListener((v, focused) -> {
+                action.setBackground(shape(focused ? Color.rgb(255, 239, 198) : GOLD,
+                        focused ? GOLD : 0));
+            });
             LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT, dp(46));
             params.topMargin = dp(8);
@@ -4316,8 +4321,12 @@ public class MainActivity extends Activity {
 
         Button support = button("♥   Поддержать проект");
         support.setTextSize(14);
-        support.setTextColor(linkColor);
+        support.setTextColor(BG);
         support.setGravity(Gravity.CENTER);
+        support.setBackground(shape(GOLD, 0));
+        support.setOnFocusChangeListener((v, focused) ->
+                support.setBackground(shape(focused ? Color.rgb(255, 239, 198) : GOLD,
+                        focused ? GOLD : 0)));
         LinearLayout.LayoutParams supportParams = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, dp(46));
         supportParams.topMargin = dp(8);
@@ -4327,7 +4336,7 @@ public class MainActivity extends Activity {
 
         LinearLayout authorsRow = new LinearLayout(this);
         authorsRow.setOrientation(LinearLayout.HORIZONTAL);
-        authorsRow.setGravity(Gravity.CENTER_VERTICAL);
+        authorsRow.setGravity(Gravity.CENTER);
         authorsRow.setPadding(0, dp(12), 0, dp(2));
         TextView copyright = text("© ", 14, GOLD, true);
         authorsRow.addView(copyright);
@@ -4347,7 +4356,8 @@ public class MainActivity extends Activity {
         chatgptAuthor.setOnClickListener(v -> openAboutLink(
                 "https://chatgpt.com/", "Не удалось открыть ChatGPT."));
         authorsRow.addView(chatgptAuthor);
-        panel.addView(authorsRow);
+        panel.addView(authorsRow, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
         AlertDialog aboutDialog = new AlertDialog.Builder(this)
                 .setTitle("О приложении")
