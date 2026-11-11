@@ -7036,15 +7036,30 @@ public class MainActivity extends Activity {
             data.releasePagesd = releaseTab.group(2);
         }
 
-        java.util.regex.Matcher similarTab = java.util.regex.Pattern.compile(
-                "id=\\\"tbch[\\s\\S]*?showtab\\(([\\s\\S]*?),([\\s\\S]*?)\\)[\\s\\S]*?>([\\s\\S]*?)<",
-                java.util.regex.Pattern.CASE_INSENSITIVE).matcher(doc.html());
-        while (similarTab.find()) {
-            String tabLabel = Jsoup.parse(similarTab.group(3)).text().toLowerCase(java.util.Locale.ROOT);
-            if (!tabLabel.contains("подоб")) continue;
-            data.similarRequestId = similarTab.group(1).replaceAll("[\\\"']", "").trim();
-            data.similarPagesd = similarTab.group(2).replaceAll("[\\\"']", "").trim();
-            break;
+        // Kinozal renders the "Подобные" list directly in #tabs2 on the
+        // details page. It is NOT a showtab()/get_srv_details.php AJAX tab.
+        // Parse the already-present table and keep its native release classes.
+        Element similarTable = doc.selectFirst("#tabs2 table.tables3");
+        if (similarTable != null) {
+            java.util.LinkedHashSet<String> similarSeen = new java.util.LinkedHashSet<>();
+            for (Element row : similarTable.select("tr")) {
+                Element link = row.selectFirst("td a[href*=details.php]");
+                if (link == null) continue;
+                String relatedHref = link.absUrl("href");
+                String relatedTitle = link.text().trim();
+                if (relatedHref.isEmpty() || relatedTitle.length() < 3 || !similarSeen.add(relatedHref)) continue;
+                Elements cells = row.select("> td");
+                Torrent related = new Torrent();
+                related.title = relatedTitle;
+                related.href = relatedHref;
+                related.size = cells.size() > 2 ? cells.get(2).text().trim() : "—";
+                related.seeds = cells.size() > 3 ? cells.get(3).text().trim() : "—";
+                related.leeches = cells.size() > 4 ? cells.get(4).text().trim() : "—";
+                related.releaseType = link.classNames().contains("r1") ? "r1"
+                        : link.classNames().contains("r2") ? "r2" : "r0";
+                data.similarTorrents.add(related);
+            }
+            data.similarLoaded = true;
         }
 
         // Kinozal comments are embedded in the release page as div.tx blocks.
