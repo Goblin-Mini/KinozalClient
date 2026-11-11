@@ -7433,16 +7433,18 @@ public class MainActivity extends Activity {
 
         LinearLayout starRow = new LinearLayout(this);
         starRow.setGravity(Gravity.CENTER);
-        int filledStars = 0;
+        float kinozalScore = 0f;
         try {
             java.util.regex.Matcher ratingMatcher = java.util.regex.Pattern
                     .compile("(\\\\d+(?:[.,]\\\\d+)?)").matcher(data.kinozalRating);
-            if (ratingMatcher.find()) filledStars = Math.max(0, Math.min(10,
-                    Math.round(Float.parseFloat(ratingMatcher.group(1).replace(',', '.')) * 2f)));
+            if (ratingMatcher.find()) kinozalScore = Math.max(0f, Math.min(10f,
+                    Float.parseFloat(ratingMatcher.group(1).replace(',', '.'))));
         } catch (Exception ignored) { }
         for (int i = 0; i < 10; i++) {
-            TextView star = text(i < filledStars ? "★" : "★", 13,
-                    i < filledStars ? GOLD : Color.rgb(105, 111, 115), true);
+            String glyph = kinozalScore >= i + 1f ? "★"
+                    : kinozalScore >= i + 0.5f ? "⯪" : "☆";
+            TextView star = text(glyph, 13,
+                    kinozalScore >= i + 0.5f ? GOLD : Color.rgb(105, 111, 115), true);
             star.setGravity(Gravity.CENTER);
             starRow.addView(star, new LinearLayout.LayoutParams(0, -2, 1f));
         }
