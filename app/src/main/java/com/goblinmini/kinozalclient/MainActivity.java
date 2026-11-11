@@ -6471,6 +6471,7 @@ public class MainActivity extends Activity {
             }
             // If the user closes the first-launch authorization window without
             // completing it, don't leave the application on an empty screen.
+            // The next launch will follow the saved startup section normally.
             if (firstLaunchAuthorizationShown && !startupCatalogReady) {
                 firstLaunchAuthorizationShown = false;
                 markStartupCatalogReady();
