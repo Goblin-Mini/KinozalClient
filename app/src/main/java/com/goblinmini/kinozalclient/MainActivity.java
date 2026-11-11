@@ -5249,7 +5249,20 @@ public class MainActivity extends Activity {
         pendingBrowserCallback = (html, error) -> {
             if (browserRequestTimeout != null) browserHandler.removeCallbacks(browserRequestTimeout);
             browserRequestTimeout = null;
-            runOnUiThread(() -> callback.accept(error == null ? html : null));
+            runOnUiThread(() -> {
+                String result = error == null ? html : null;
+                boolean loginRedirect = result == null && lastBrowserError != null
+                        && lastBrowserError.contains("перенаправил на авторизацию");
+                // Feed requests and catalogue navigation must recover an expired
+                // session in the same way. Previously only load() did this, so
+                // a long-idle session could leave Home/Collections empty.
+                if (loginRedirect && !autoSessionRestoreInProgress
+                        && client.getSavedCredentials() != null) {
+                    restoreExpiredSessionAndRetry(path, postBody, callback);
+                } else {
+                    callback.accept(result);
+                }
+            });
         };
         browserRequestTimeout = () -> {
             if (pendingBrowserCallback == null) return;
