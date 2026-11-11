@@ -148,6 +148,8 @@ public class MainActivity extends Activity {
     private final android.os.Handler browserHandler = new android.os.Handler(android.os.Looper.getMainLooper());
     private Runnable browserRequestTimeout;
     private boolean startupCatalogReady = false;
+    private boolean firstLaunchAuthorizationPending = false;
+    private boolean firstLaunchAuthorizationShown = false;
     private String pendingTvTorrentHref = "";
     private String pendingTvTorrentTitle = "";
     private String pendingExternalSearchQuery = "";
@@ -405,6 +407,15 @@ public class MainActivity extends Activity {
     }
 
     private void continueStartup(String savedBrowserCookies) {
+        android.content.SharedPreferences prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
+        if (!prefs.getBoolean("first_launch_authorization_handled", false)) {
+            // On a fresh install, show the Kinozal authorization window before
+            // opening any catalogue page. Persist the one-time decision so
+            // later launches follow the user's configured startup section.
+            prefs.edit().putBoolean("first_launch_authorization_handled", true).apply();
+            firstLaunchAuthorizationPending = true;
+            return;
+        }
         if (savedBrowserCookies != null) restoreBrowserSession(savedBrowserCookies);
         else markStartupCatalogReady();
     }
@@ -550,7 +561,14 @@ public class MainActivity extends Activity {
     @Override public void onWindowFocusChanged(boolean hasFocus) {
         super.onWindowFocusChanged(hasFocus);
         if (hasFocus) {
-            startInitialCatalogWhenReady();
+            if (firstLaunchAuthorizationPending && !firstLaunchAuthorizationShown
+                    && root != null && root.isAttachedToWindow()) {
+                firstLaunchAuthorizationShown = true;
+                firstLaunchAuthorizationPending = false;
+                browserHandler.postDelayed(this::showLogin, 350);
+            } else {
+                startInitialCatalogWhenReady();
+            }
             scheduleAutomaticUpdateCheck();
         }
     }
@@ -6437,7 +6455,11 @@ public class MainActivity extends Activity {
             dialog.dismiss();
             showMessage("Браузерная сессия сохранена. Загружаю каталог через WebView.");
             status.setText("Браузерная сессия активна");
-            load("browse.php", "Все раздачи");
+            if (firstLaunchAuthorizationShown) {
+                markStartupCatalogReady();
+            } else {
+                load("browse.php", "Все раздачи");
+            }
         });
         dialog.setOnDismissListener(d -> {
             if (web.getParent() == panel) {
