@@ -7037,13 +7037,13 @@ public class MainActivity extends Activity {
         }
 
         java.util.regex.Matcher similarTab = java.util.regex.Pattern.compile(
-                "id=[^>]*?showtab\\(([0-9]+),([0-9]+)\\)[^>]*?>([^<]*)<",
+                "id=\\\"tbch[\\s\\S]*?showtab\\(([\\s\\S]*?),([\\s\\S]*?)\\)[\\s\\S]*?>([\\s\\S]*?)<",
                 java.util.regex.Pattern.CASE_INSENSITIVE).matcher(doc.html());
         while (similarTab.find()) {
             String tabLabel = Jsoup.parse(similarTab.group(3)).text().toLowerCase(java.util.Locale.ROOT);
             if (!tabLabel.contains("подоб")) continue;
-            data.similarRequestId = similarTab.group(1);
-            data.similarPagesd = similarTab.group(2);
+            data.similarRequestId = similarTab.group(1).replaceAll("[\\\"']", "").trim();
+            data.similarPagesd = similarTab.group(2).replaceAll("[\\\"']", "").trim();
             break;
         }
 
