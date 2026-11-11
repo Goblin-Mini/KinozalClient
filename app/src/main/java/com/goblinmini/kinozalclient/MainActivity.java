@@ -4301,14 +4301,9 @@ public class MainActivity extends Activity {
         Button homepage = button("⌂   Домашняя страница");
         Button github = button("⌘   GitHub");
         for (Button action : new Button[]{homepage, github}) {
+            // Use the same PANEL background, GOLD text and focus treatment
+            // as the ordinary settings rows via button().
             action.setTextSize(14);
-            action.setTextColor(BG);
-            action.setGravity(Gravity.CENTER);
-            action.setBackground(shape(GOLD, 0));
-            action.setOnFocusChangeListener((v, focused) -> {
-                action.setBackground(shape(focused ? Color.rgb(255, 239, 198) : GOLD,
-                        focused ? GOLD : 0));
-            });
             LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT, dp(46));
             params.topMargin = dp(8);
@@ -4320,13 +4315,8 @@ public class MainActivity extends Activity {
                 "https://github.com/Goblin-Mini/KinozalClient", "Не удалось открыть GitHub."));
 
         Button support = button("♥   Поддержать проект");
+        // Keep the default settings-row appearance from button(). 
         support.setTextSize(14);
-        support.setTextColor(BG);
-        support.setGravity(Gravity.CENTER);
-        support.setBackground(shape(GOLD, 0));
-        support.setOnFocusChangeListener((v, focused) ->
-                support.setBackground(shape(focused ? Color.rgb(255, 239, 198) : GOLD,
-                        focused ? GOLD : 0)));
         LinearLayout.LayoutParams supportParams = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, dp(46));
         supportParams.topMargin = dp(8);
