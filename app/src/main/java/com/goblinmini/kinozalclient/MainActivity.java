@@ -7468,6 +7468,7 @@ public class MainActivity extends Activity {
         Button jackettTab = button("Другие");
         Button[] tabButtons = {descriptionTab, technicalTab, releaseTab, screenshotsTab, similarTab, commentsTab, jackettTab};
         for (int tabIndex = 0; tabIndex < tabButtons.length; tabIndex++) {
+            tabButtons[tabIndex].setTextSize(fontSize(13));
             LinearLayout.LayoutParams tabParams = new LinearLayout.LayoutParams(0, dp(44), 1);
             if (tabIndex > 0) tabParams.leftMargin = dp(10);
             tabs.addView(tabButtons[tabIndex], tabParams);
