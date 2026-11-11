@@ -7037,7 +7037,7 @@ public class MainActivity extends Activity {
         }
 
         java.util.regex.Matcher similarTab = java.util.regex.Pattern.compile(
-                "id=\\"tbch[\\s\\S]*?showtab\\(([0-9]+),([0-9]+)\\)[\\s\\S]*?>([\\s\\S]*?)<",
+                "id=[^>]*?showtab\\(([0-9]+),([0-9]+)\\)[^>]*?>([^<]*)<",
                 java.util.regex.Pattern.CASE_INSENSITIVE).matcher(doc.html());
         while (similarTab.find()) {
             String tabLabel = Jsoup.parse(similarTab.group(3)).text().toLowerCase(java.util.Locale.ROOT);
