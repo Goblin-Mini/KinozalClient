@@ -1376,6 +1376,17 @@ public class MainActivity extends Activity {
         github.setOnClickListener(v -> openAboutLink(
                 "https://github.com/Goblin-Mini/KinozalClient", "Не удалось открыть GitHub."));
 
+        Button support = button("♥   Поддержать проект");
+        support.setTextSize(14);
+        support.setTextColor(linkColor);
+        support.setGravity(Gravity.CENTER);
+        LinearLayout.LayoutParams supportParams = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(46));
+        supportParams.topMargin = dp(8);
+        panel.addView(support, supportParams);
+        support.setOnClickListener(v -> openAboutLink(
+                "https://godonate.ru/@kinozal-tv", "Не удалось открыть страницу поддержки."));
+
         LinearLayout authorsRow = new LinearLayout(this);
         authorsRow.setOrientation(LinearLayout.HORIZONTAL);
         authorsRow.setGravity(Gravity.CENTER_VERTICAL);
@@ -1399,17 +1410,6 @@ public class MainActivity extends Activity {
                 "https://chatgpt.com/", "Не удалось открыть ChatGPT."));
         authorsRow.addView(chatgptAuthor);
         panel.addView(authorsRow);
-
-        Button support = button("♥   Поддержать проект");
-        support.setTextSize(14);
-        support.setTextColor(linkColor);
-        support.setGravity(Gravity.CENTER);
-        LinearLayout.LayoutParams supportParams = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, dp(46));
-        supportParams.topMargin = dp(8);
-        panel.addView(support, supportParams);
-        support.setOnClickListener(v -> openAboutLink(
-                "https://godonate.ru/@kinozal-tv", "Не удалось открыть страницу поддержки."));
 
         AlertDialog aboutDialog = new AlertDialog.Builder(this)
                 .setTitle("О приложении")
