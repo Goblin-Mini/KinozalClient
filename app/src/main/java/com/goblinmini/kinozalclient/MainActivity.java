@@ -1358,21 +1358,26 @@ public class MainActivity extends Activity {
         description.setLineSpacing(dp(3), 1f);
         panel.addView(description);
 
-        TextView github = text("GitHub: github.com/Goblin-Mini/KinozalClient",
-                14, TEAL, false);
-        github.setPadding(0, dp(14), 0, dp(14));
-        github.setFocusable(true);
-        github.setOnClickListener(v -> {
-            try {
-                startActivity(new Intent(Intent.ACTION_VIEW,
-                        Uri.parse("https://github.com/Goblin-Mini/KinozalClient")));
-            } catch (Exception e) {
-                showMessage("Не удалось открыть GitHub.");
-            }
-        });
-        panel.addView(github);
+        Button homepage = button("⌂   Домашняя страница");
+        Button support = button("♥   Поддержать проект");
+        Button github = button("⌘   GitHub");
+        for (Button action : new Button[]{homepage, support, github}) {
+            action.setTextSize(14);
+            action.setGravity(Gravity.CENTER);
+            LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, dp(46));
+            params.topMargin = dp(8);
+            panel.addView(action, params);
+        }
+        homepage.setOnClickListener(v -> openAboutLink(
+                "https://kinozal-tv.pages.dev/", "Не удалось открыть домашнюю страницу."));
+        support.setOnClickListener(v -> openAboutLink(
+                "https://godonate.ru/@kinozal-tv", "Не удалось открыть страницу поддержки."));
+        github.setOnClickListener(v -> openAboutLink(
+                "https://github.com/Goblin-Mini/KinozalClient", "Не удалось открыть GitHub."));
 
         TextView authors = text("Авторство: GoblinMini и ChatGPT", 14, GOLD, true);
+        authors.setPadding(0, dp(10), 0, 0);
         panel.addView(authors);
 
         AlertDialog aboutDialog = new AlertDialog.Builder(this)
@@ -1391,6 +1396,15 @@ public class MainActivity extends Activity {
         github.setOnFocusChangeListener((v, focused) ->
                 github.setTextColor(focused ? GOLD : TEAL));
         github.requestFocus();
+    }
+
+    private void openAboutLink(String url, String errorMessage) {
+        try {
+            Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
+            startActivity(intent);
+        } catch (Exception e) {
+            showMessage(errorMessage);
+        }
     }
 
     private static final String JACKETT_PREFS = "jackett_settings";
