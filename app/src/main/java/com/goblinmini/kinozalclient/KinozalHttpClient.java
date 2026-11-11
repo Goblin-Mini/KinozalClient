@@ -267,8 +267,7 @@ public final class KinozalHttpClient {
             connection.setReadTimeout(20000);
             connection.setInstanceFollowRedirects(false);
             connection.setRequestMethod("GET");
-            connection.setRequestProperty("User-Agent",
-                    "Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 Chrome/120.0 Mobile Safari/537.36");
+            connection.setRequestProperty("User-Agent", userAgent);
             connection.setRequestProperty("Accept",
                     "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8");
             connection.setRequestProperty("Accept-Language", "ru-RU,ru;q=0.9,en;q=0.7");
@@ -323,7 +322,7 @@ public final class KinozalHttpClient {
             connection.setReadTimeout(20000);
             connection.setInstanceFollowRedirects(false);
             connection.setRequestMethod(currentMethod);
-            connection.setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 Chrome/120.0 Mobile Safari/537.36");
+            connection.setRequestProperty("User-Agent", userAgent);
             connection.setRequestProperty("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8");
             connection.setRequestProperty("Accept-Language", "ru-RU,ru;q=0.9,en;q=0.7");
             URI uri = URI.create(current);
