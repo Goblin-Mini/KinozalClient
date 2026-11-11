@@ -6849,6 +6849,11 @@ public class MainActivity extends Activity {
         final java.util.List<String> comments = new java.util.ArrayList<>();
         String screenshotRequestId = "";
         String screenshotPagesd = "";
+        String similarRequestId = "";
+        String similarPagesd = "";
+        final java.util.List<Torrent> similarTorrents = new java.util.ArrayList<>();
+        boolean similarLoaded = false;
+        boolean similarLoading = false;
         String releaseRequestId = "";
         String releasePagesd = "";
         String releaseText = "";
@@ -7031,6 +7036,17 @@ public class MainActivity extends Activity {
             data.releasePagesd = releaseTab.group(2);
         }
 
+        java.util.regex.Matcher similarTab = java.util.regex.Pattern.compile(
+                "id=\\"tbch[\\s\\S]*?showtab\\(([0-9]+),([0-9]+)\\)[\\s\\S]*?>([\\s\\S]*?)<",
+                java.util.regex.Pattern.CASE_INSENSITIVE).matcher(doc.html());
+        while (similarTab.find()) {
+            String tabLabel = Jsoup.parse(similarTab.group(3)).text().toLowerCase(java.util.Locale.ROOT);
+            if (!tabLabel.contains("подоб")) continue;
+            data.similarRequestId = similarTab.group(1);
+            data.similarPagesd = similarTab.group(2);
+            break;
+        }
+
         // Kinozal comments are embedded in the release page as div.tx blocks.
         // Read-only extraction: no input field, reply or submit action.
         java.util.LinkedHashSet<String> uniqueComments = new java.util.LinkedHashSet<>();
@@ -7128,6 +7144,46 @@ public class MainActivity extends Activity {
                 }
             });
         }
+    }
+
+    private void loadSimilarTorrents(TorrentDetails details,
+            java.util.function.Consumer<TorrentDetails> callback) {
+        if (details == null || details.similarRequestId.isEmpty() || details.similarPagesd.isEmpty()) {
+            callback.accept(details); return;
+        }
+        final String endpoint = Uri.parse(details.sourcePage).buildUpon().path("/get_srv_details.php")
+                .clearQuery().appendQueryParameter("id", details.similarRequestId)
+                .appendQueryParameter("pagesd", details.similarPagesd).build().toString();
+        java.util.function.Consumer<String> onHtml = html -> {
+            details.similarTorrents.clear();
+            if (html != null && !html.trim().isEmpty()) try {
+                Document fragment = Jsoup.parse(html, endpoint);
+                java.util.LinkedHashSet<String> seen = new java.util.LinkedHashSet<>();
+                for (Element link : fragment.select("a[href*=details.php]")) {
+                    String href = link.absUrl("href"), name = link.text().trim();
+                    if (!href.contains("details.php?id=") || href.isEmpty() || name.length() < 3 || !seen.add(href)) continue;
+                    Torrent related = new Torrent(); related.title = name; related.href = href;
+                    related.size = related.seeds = related.leeches = "—";
+                    Element row = link.closest("tr");
+                    if (row != null) {
+                        Elements cells = row.select("> td");
+                        if (cells.size() > 2) related.size = cells.get(2).text().trim();
+                        if (cells.size() > 3) related.seeds = cells.get(3).text().trim();
+                        if (cells.size() > 4) related.leeches = cells.get(4).text().trim();
+                    }
+                    details.similarTorrents.add(related);
+                }
+            } catch (Exception e) { Log.w("KinozalSimilar", "Parse failed", e); }
+            details.similarLoaded = true; details.similarLoading = false;
+            if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) callback.accept(details);
+            else runOnUiThread(() -> callback.accept(details));
+        };
+        if (sessionWebView != null) fetchBrowserPage(endpoint, null, onHtml);
+        else executeSafely(io, () -> {
+            try { onHtml.accept(client.fetch(endpoint)); }
+            catch (Exception e) { Log.w("KinozalSimilar", "Load failed", e);
+                runOnUiThread(() -> { details.similarLoading = false; details.similarLoaded = true; callback.accept(details); }); }
+        });
     }
 
     private void loadScreenshotThumbnails(TorrentDetails details,
@@ -7390,9 +7446,10 @@ public class MainActivity extends Activity {
         Button technicalTab = button("Техданные");
         Button releaseTab = button("Релиз");
         Button screenshotsTab = button("Скриншоты");
+        Button similarTab = button("Подобные");
         Button commentsTab = button("Комменты");
         Button jackettTab = button("Другие");
-        Button[] tabButtons = {descriptionTab, technicalTab, releaseTab, screenshotsTab, commentsTab, jackettTab};
+        Button[] tabButtons = {descriptionTab, technicalTab, releaseTab, screenshotsTab, similarTab, commentsTab, jackettTab};
         for (int tabIndex = 0; tabIndex < tabButtons.length; tabIndex++) {
             LinearLayout.LayoutParams tabParams = new LinearLayout.LayoutParams(0, dp(44), 1);
             if (tabIndex > 0) tabParams.leftMargin = dp(10);
@@ -7499,6 +7556,35 @@ public class MainActivity extends Activity {
                 return;
             }
             if (active[0] == 4) {
+                if (!data.similarLoaded) {
+                    detailContent.addView(text("Загружаем похожие раздачи…", 15, Color.LTGRAY, false));
+                    if (!data.similarLoading && !data.similarRequestId.isEmpty() && !data.similarPagesd.isEmpty()) {
+                        data.similarLoading = true;
+                        loadSimilarTorrents(data, ready -> { if (active[0] == 4) render[0].run(); });
+                    } else if (data.similarRequestId.isEmpty() || data.similarPagesd.isEmpty()) {
+                        data.similarLoaded = true; detailContent.removeAllViews();
+                        detailContent.addView(text("Вкладка «Подобные» на странице не найдена.", 15, Color.LTGRAY, false));
+                    }
+                } else if (data.similarTorrents.isEmpty()) {
+                    detailContent.addView(text("Похожие раздачи не найдены.", 15, Color.LTGRAY, false));
+                } else {
+                    detailContent.addView(text("Подобные раздачи (" + data.similarTorrents.size() + ")", 13, TEAL, true));
+                    for (Torrent related : data.similarTorrents) {
+                        LinearLayout row = new LinearLayout(this); row.setOrientation(LinearLayout.HORIZONTAL);
+                        row.setGravity(Gravity.CENTER_VERTICAL); row.setFocusable(true);
+                        row.setBackground(shape(PANEL, 0)); row.setPadding(dp(8), dp(8), dp(8), dp(8));
+                        TextView name = text(related.title, 14, releaseTypeColor(related.releaseType), true);
+                        name.setMaxLines(2); row.addView(name, new LinearLayout.LayoutParams(0, -2, 1f));
+                        TextView meta = text(related.size + "  ↑" + related.seeds + "  ↓" + related.leeches, 11, Color.LTGRAY, false);
+                        meta.setGravity(Gravity.CENTER); row.addView(meta, new LinearLayout.LayoutParams(dp(150), -2));
+                        row.setOnClickListener(v -> showTorrent(related));
+                        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-1, -2);
+                        params.bottomMargin = dp(6); detailContent.addView(row, params);
+                    }
+                }
+                detailsScroll.scrollTo(0, 0); return;
+            }
+            if (active[0] == 5) {
                 if (data.comments.isEmpty()) {
                     detailContent.addView(text("Комментарии к этой раздаче не найдены.",
                             15, Color.LTGRAY, false));
@@ -7580,6 +7666,8 @@ public class MainActivity extends Activity {
                 v.setBackground(shape(focused ? Color.rgb(65, 72, 73) : PANEL, focused ? GOLD : 0)));
         screenshotsTab.setOnFocusChangeListener((v, focused) ->
                 v.setBackground(shape(focused ? Color.rgb(65, 72, 73) : PANEL, focused ? GOLD : 0)));
+        similarTab.setOnFocusChangeListener((v, focused) ->
+                v.setBackground(shape(focused ? Color.rgb(65, 72, 73) : PANEL, focused ? GOLD : 0)));
         commentsTab.setOnFocusChangeListener((v, focused) ->
                 v.setBackground(shape(focused ? Color.rgb(65, 72, 73) : PANEL, focused ? GOLD : 0)));
         jackettTab.setOnFocusChangeListener((v, focused) ->
@@ -7588,7 +7676,8 @@ public class MainActivity extends Activity {
         technicalTab.setOnClickListener(v -> { active[0] = 1; render[0].run(); });
         releaseTab.setOnClickListener(v -> { active[0] = 2; render[0].run(); });
         screenshotsTab.setOnClickListener(v -> { active[0] = 3; render[0].run(); });
-        commentsTab.setOnClickListener(v -> { active[0] = 4; render[0].run(); });
+        similarTab.setOnClickListener(v -> { active[0] = 4; render[0].run(); });
+        commentsTab.setOnClickListener(v -> { active[0] = 5; render[0].run(); });
         jackettTab.setOnClickListener(v -> searchJackett(torrent.title, data.poster));
         render[0].run();
 
