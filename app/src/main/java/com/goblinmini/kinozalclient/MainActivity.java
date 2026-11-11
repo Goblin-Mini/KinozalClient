@@ -4296,22 +4296,58 @@ public class MainActivity extends Activity {
         description.setLineSpacing(dp(3), 1f);
         panel.addView(description);
 
-        TextView github = text("GitHub: github.com/Goblin-Mini/KinozalClient",
-                14, TEAL, false);
-        github.setPadding(0, dp(14), 0, dp(14));
-        github.setFocusable(true);
-        github.setOnClickListener(v -> {
-            try {
-                startActivity(new Intent(Intent.ACTION_VIEW,
-                        Uri.parse("https://github.com/Goblin-Mini/KinozalClient")));
-            } catch (Exception e) {
-                showMessage("Не удалось открыть GitHub.");
-            }
-        });
-        panel.addView(github);
+        final int linkColor = Color.rgb(0x9B, 0x2C, 0x0A);
 
-        TextView authors = text("Авторство: GoblinMini и ChatGPT", 14, GOLD, true);
-        panel.addView(authors);
+        Button homepage = button("⌂   Домашняя страница");
+        Button github = button("⌘   GitHub");
+        for (Button action : new Button[]{homepage, github}) {
+            action.setTextSize(14);
+            action.setTextColor(linkColor);
+            action.setGravity(Gravity.CENTER);
+            LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, dp(46));
+            params.topMargin = dp(8);
+            panel.addView(action, params);
+        }
+        homepage.setOnClickListener(v -> openAboutLink(
+                "https://kinozal-tv.pages.dev/", "Не удалось открыть домашнюю страницу."));
+        github.setOnClickListener(v -> openAboutLink(
+                "https://github.com/Goblin-Mini/KinozalClient", "Не удалось открыть GitHub."));
+
+        Button support = button("♥   Поддержать проект");
+        support.setTextSize(14);
+        support.setTextColor(linkColor);
+        support.setGravity(Gravity.CENTER);
+        LinearLayout.LayoutParams supportParams = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(46));
+        supportParams.topMargin = dp(8);
+        panel.addView(support, supportParams);
+        support.setOnClickListener(v -> openAboutLink(
+                "https://godonate.ru/@kinozal-tv", "Не удалось открыть страницу поддержки."));
+
+        LinearLayout authorsRow = new LinearLayout(this);
+        authorsRow.setOrientation(LinearLayout.HORIZONTAL);
+        authorsRow.setGravity(Gravity.CENTER_VERTICAL);
+        authorsRow.setPadding(0, dp(12), 0, dp(2));
+        TextView copyright = text("© ", 14, GOLD, true);
+        authorsRow.addView(copyright);
+
+        TextView goblinAuthor = text("GoblinMini", 14, linkColor, true);
+        goblinAuthor.setFocusable(true);
+        goblinAuthor.setOnClickListener(v -> openAboutLink(
+                "https://4pda.to/forum/index.php?showuser=8382684",
+                "Не удалось открыть страницу GoblinMini на 4PDA."));
+        authorsRow.addView(goblinAuthor);
+
+        TextView separator = text("  ·  ", 14, GOLD, false);
+        authorsRow.addView(separator);
+
+        TextView chatgptAuthor = text("ChatGPT", 14, linkColor, true);
+        chatgptAuthor.setFocusable(true);
+        chatgptAuthor.setOnClickListener(v -> openAboutLink(
+                "https://chatgpt.com/", "Не удалось открыть ChatGPT."));
+        authorsRow.addView(chatgptAuthor);
+        panel.addView(authorsRow);
 
         AlertDialog aboutDialog = new AlertDialog.Builder(this)
                 .setTitle("О приложении")
@@ -4327,8 +4363,17 @@ public class MainActivity extends Activity {
         }
         aboutDialog.getButton(AlertDialog.BUTTON_POSITIVE).setTextColor(GOLD);
         github.setOnFocusChangeListener((v, focused) ->
-                github.setTextColor(focused ? GOLD : TEAL));
+                github.setTextColor(focused ? GOLD : linkColor));
         github.requestFocus();
+    }
+
+    private void openAboutLink(String url, String errorMessage) {
+        try {
+            Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
+            startActivity(intent);
+        } catch (Exception e) {
+            showMessage(errorMessage);
+        }
     }
 
     private static final String JACKETT_PREFS = "jackett_settings";
