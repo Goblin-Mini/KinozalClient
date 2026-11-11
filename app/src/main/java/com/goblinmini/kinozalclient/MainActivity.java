@@ -6451,11 +6451,13 @@ public class MainActivity extends Activity {
                     return;
                 }
             }
+            boolean wasFirstLaunchAuthorization = firstLaunchAuthorizationShown;
+            firstLaunchAuthorizationShown = false;
             detachWeb.run();
             dialog.dismiss();
             showMessage("Браузерная сессия сохранена. Загружаю каталог через WebView.");
             status.setText("Браузерная сессия активна");
-            if (firstLaunchAuthorizationShown) {
+            if (wasFirstLaunchAuthorization) {
                 markStartupCatalogReady();
             } else {
                 load("browse.php", "Все раздачи");
@@ -6466,6 +6468,12 @@ public class MainActivity extends Activity {
                 panel.removeView(web);
                 web.setVisibility(View.INVISIBLE);
                 if (web.getParent() == null) root.addView(web, new LinearLayout.LayoutParams(1, 1));
+            }
+            // If the user closes the first-launch authorization window without
+            // completing it, don't leave the application on an empty screen.
+            if (firstLaunchAuthorizationShown && !startupCatalogReady) {
+                firstLaunchAuthorizationShown = false;
+                markStartupCatalogReady();
             }
         });
         dialog.show();
