@@ -7436,7 +7436,7 @@ public class MainActivity extends Activity {
         float kinozalScore = 0f;
         try {
             java.util.regex.Matcher ratingMatcher = java.util.regex.Pattern
-                    .compile("(\\\\d+(?:[.,]\\\\d+)?)").matcher(data.kinozalRating);
+                    .compile("(\\d+(?:[.,]\\d+)?)").matcher(data.kinozalRating);
             if (ratingMatcher.find()) kinozalScore = Math.max(0f, Math.min(10f,
                     Float.parseFloat(ratingMatcher.group(1).replace(',', '.'))));
         } catch (Exception ignored) { }
