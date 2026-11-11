@@ -152,6 +152,7 @@ public class MainActivity extends Activity {
     private String pendingTvTorrentTitle = "";
     private String pendingExternalSearchQuery = "";
     private boolean startupCatalogStarted = false;
+    private boolean autoSessionRestoreInProgress = false;
     private boolean automaticUpdateCheckScheduled = false;
     private boolean homeCacheDisplayed = false;
     private boolean homeCacheLoadFinished = false;
@@ -4831,6 +4832,113 @@ public class MainActivity extends Activity {
 
     private void load(String path, String title) { load(path, title, null); }
 
+    /**
+     * Re-authenticate once when Kinozal explicitly redirects a catalogue request
+     * to its login form. Keep Cloudflare cookies from WebView, perform the login
+     * on the I/O executor, then copy the refreshed session back into WebView.
+     */
+    private void restoreExpiredSessionAndRetry(String path, String postBody,
+            java.util.function.Consumer<String> callback) {
+        if (autoSessionRestoreInProgress) {
+            callback.accept(null);
+            return;
+        }
+        String[] credentials = client.getSavedCredentials();
+        if (credentials == null) {
+            lastBrowserError = "Сессия Kinozal истекла, сохранённые данные входа не найдены.";
+            callback.accept(null);
+            return;
+        }
+        autoSessionRestoreInProgress = true;
+        status.setText("Сессия истекла. Восстанавливаем авторизацию…");
+        final String browserCookieHeader;
+        try {
+            browserCookieHeader = CookieManager.getInstance().getCookie(client.getMirror());
+        } catch (Exception ignored) {
+            // Native session cookies may still be sufficient if WebView has none.
+            executeSafely(io, () -> performAutomaticLogin(path, postBody, callback,
+                    credentials, null));
+            return;
+        }
+        executeSafely(io, () -> performAutomaticLogin(path, postBody, callback,
+                credentials, browserCookieHeader));
+    }
+
+    private void performAutomaticLogin(String path, String postBody,
+            java.util.function.Consumer<String> callback, String[] credentials,
+            String browserCookieHeader) {
+        try {
+            if (browserCookieHeader != null && !browserCookieHeader.trim().isEmpty()) {
+                client.importBrowserCookies(browserCookieHeader);
+            }
+            client.login(credentials[0], credentials[1]);
+            String refreshedCookies = client.getCookieHeader();
+            if (refreshedCookies == null || refreshedCookies.trim().isEmpty()) {
+                throw new SecurityException("Сайт не выдал новую сессию после входа.");
+            }
+            runOnUiThread(() -> applyRestoredCookiesAndRetry(path, postBody,
+                    refreshedCookies, callback));
+        } catch (Exception e) {
+            String error = safe(e.getMessage());
+            Log.w("KinozalAuth", "Automatic session restoration failed", e);
+            runOnUiThread(() -> {
+                autoSessionRestoreInProgress = false;
+                lastBrowserError = "Не удалось автоматически восстановить авторизацию: " + error;
+                status.setText(lastBrowserError);
+                if (sidebarLoginInfo != null) updateSidebarLoginStatus(false);
+                callback.accept(null);
+            });
+        }
+    }
+
+    private void applyRestoredCookiesAndRetry(String path, String postBody,
+            String cookieHeader, java.util.function.Consumer<String> callback) {
+        CookieManager manager = CookieManager.getInstance();
+        manager.setAcceptCookie(true);
+        String[] pairs = cookieHeader.split(";");
+        java.util.List<String> validPairs = new java.util.ArrayList<>();
+        for (String pair : pairs) if (pair.trim().contains("=")) validPairs.add(pair.trim());
+        if (validPairs.isEmpty()) {
+            autoSessionRestoreInProgress = false;
+            lastBrowserError = "Повторный вход выполнен, но cookies сессии пусты.";
+            callback.accept(null);
+            return;
+        }
+        final int[] remaining = {validPairs.size()};
+        final boolean[] rejected = {false};
+        android.webkit.ValueCallback<Boolean> cookieCallback = accepted -> {
+            if (!Boolean.TRUE.equals(accepted)) rejected[0] = true;
+            remaining[0]--;
+            if (remaining[0] == 0) {
+                manager.flush();
+                if (rejected[0]) {
+                    autoSessionRestoreInProgress = false;
+                    lastBrowserError = "Не удалось обновить cookies браузерной сессии.";
+                    callback.accept(null);
+                    return;
+                }
+                fetchBrowserPage(path, postBody, html -> {
+                    autoSessionRestoreInProgress = false;
+                    if (html == null || html.isEmpty()) {
+                        lastBrowserError = "Повторный вход выполнен, но каталог не открылся. "
+                                + lastBrowserError;
+                    } else {
+                        lastKinozalConnectionStatus = "установлено";
+                        updateSidebarConnectionInfo();
+                        updateSidebarLoginStatus(true);
+                    }
+                    callback.accept(html);
+                });
+            }
+        };
+        String cookieUrl = client.getMirror();
+        for (String pair : validPairs) {
+            manager.setCookie(cookieUrl, pair + "; Path=/; Secure; SameSite=Lax",
+                    cookieCallback);
+        }
+        try { client.saveBrowserCookies(cookieHeader); } catch (Exception ignored) { }
+    }
+
     private void load(String path, String title, String postBody) {
         if (deferBrowserNavigationIfBusy(() -> load(path, title, postBody))) return;
         activateBrowseScreen();
@@ -4850,6 +4958,23 @@ public class MainActivity extends Activity {
                     lastKinozalConnectionStatus = "установлено";
                     updateSidebarConnectionInfo();
                     showLoadedPage(html);
+                } else if (lastBrowserError != null
+                        && lastBrowserError.contains("перенаправил на авторизацию")) {
+                    restoreExpiredSessionAndRetry(path, postBody, restoredHtml -> {
+                        if (restoredHtml != null && !restoredHtml.isEmpty()) {
+                            lastKinozalConnectionStatus = "установлено";
+                            updateSidebarConnectionInfo();
+                            showLoadedPage(restoredHtml);
+                        } else {
+                            lastKinozalConnectionStatus = "нет соединения";
+                            if (sidebarConnectionInfo != null)
+                                sidebarConnectionInfo.setText("Подключение к Kinozal: нет соединения");
+                            progress.setVisibility(View.GONE);
+                            status.setText(lastBrowserError);
+                            addEmpty("Не удалось восстановить авторизацию автоматически. "
+                                    + "Откройте Настройки → Авторизация.");
+                        }
+                    });
                 } else {
                     lastKinozalConnectionStatus = "нет соединения";
                     if (sidebarConnectionInfo != null) sidebarConnectionInfo.setText("Подключение к Kinozal: нет соединения");
