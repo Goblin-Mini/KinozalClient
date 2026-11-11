@@ -7462,7 +7462,7 @@ public class MainActivity extends Activity {
         Button descriptionTab = button("Описание");
         Button technicalTab = button("Техданные");
         Button releaseTab = button("Релиз");
-        Button screenshotsTab = button("Скриншоты");
+        Button screenshotsTab = button("Скрины");
         Button similarTab = button("Подобные");
         Button commentsTab = button("Комменты");
         Button jackettTab = button("Другие");
