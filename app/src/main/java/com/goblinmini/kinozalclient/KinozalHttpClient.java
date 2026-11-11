@@ -427,6 +427,17 @@ public final class KinozalHttpClient {
         persistCookies();
     }
 
+    /** Build a current Cookie header for synchronizing the authenticated native session into WebView. */
+    public synchronized String getCookieHeader() {
+        StringBuilder value = new StringBuilder();
+        for (HttpCookie cookie : cookies.getCookieStore().getCookies()) {
+            if (cookie == null || cookie.hasExpired()) continue;
+            if (value.length() > 0) value.append("; ");
+            value.append(cookie.getName()).append("=").append(cookie.getValue());
+        }
+        return value.toString();
+    }
+
     private void persistCookies() throws Exception {
         StringBuilder value = new StringBuilder();
         for (HttpCookie cookie : cookies.getCookieStore().getCookies()) {
