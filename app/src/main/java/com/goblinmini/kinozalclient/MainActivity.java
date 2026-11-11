@@ -2447,6 +2447,7 @@ public class MainActivity extends Activity {
         if ("running".equals(state)) {
             if (visibleGroup && panel != null && label != null && bar != null) {
                 panel.setVisibility(View.VISIBLE);
+                label.setVisibility(View.VISIBLE);
                 label.setText(bulk
                         ? "Обновление лент: " + (index + 1) + " из " + total + " — " + title
                         : "Обновляется лента: " + title);
@@ -2465,8 +2466,9 @@ public class MainActivity extends Activity {
                 if (bulk && index + 1 >= total) {
                     label.setText("Все " + total + " лент обновлены");
                 } else if (bulk) {
-                    label.setText("Готово " + (index + 1) + " из " + total
-                            + ". Следующая лента будет обновляться по очереди");
+                    // Keep the thin progress indicator, but hide the verbose
+                    // queued-subscriptions status line from the feed screen.
+                    label.setVisibility(View.GONE);
                 } else {
                     label.setText("Лента обновлена: " + title);
                     final String completedMessage = label.getText().toString();
