@@ -5251,6 +5251,19 @@ public class MainActivity extends Activity {
                         org.json.JSONObject state = new org.json.JSONObject(json);
                         String html = state.optString("html", "");
                         if (!state.optBoolean("challenge", true) && html.length() > 1000) {
+                            CookieManager manager = CookieManager.getInstance();
+                            String currentCookies = manager.getCookie(client.getMirror());
+                            if (currentCookies != null && !currentCookies.isEmpty()) {
+                                try {
+                                    manager.flush();
+                                    client.saveBrowserCookies(currentCookies);
+                                    client.importBrowserCookies(currentCookies);
+                                } catch (Exception cookieError) {
+                                    FeedDiagnostics.log(MainActivity.this, "auth",
+                                            "CLOUDFLARE_COOKIE_SYNC_FAILED",
+                                            cookieError.getClass().getSimpleName());
+                                }
+                            }
                             appendFeedDiagnostic("CLOUDFLARE_RESOLVED",
                                     "url=" + view.getUrl() + ", waitMs="
                                     + (android.os.SystemClock.elapsedRealtime() - startedAt));
