@@ -1297,6 +1297,12 @@ public class MainActivity extends Activity {
                         }
                         String resultPath = paths[resultIndex];
                         String resultHtml = result.optString("html", "");
+                        if (isCloudflareChallengeHtml(resultHtml)) {
+                            batchOk = false;
+                            appendFeedDiagnostic("CLOUDFLARE_BATCH_BLOCKED",
+                                    resultPath + " response is a Cloudflare challenge; switching to real WebView navigation");
+                            continue;
+                        }
                         org.json.JSONArray extractedItems = result.optJSONArray("items");
                         appendHomeExtractorDiagnostics(extractedItems, resultPath);
                         HomeSection section = new HomeSection(titles[resultIndex], resultPath);
@@ -5188,35 +5194,14 @@ public class MainActivity extends Activity {
                             cb.onPage(null, lastBrowserError);
                             return;
                         }
-                        String pageUrl = view.getUrl() == null ? "" : view.getUrl().toLowerCase(java.util.Locale.ROOT);
-                        final String loadedHtml = html;
-                        final String loadedUrl = pageUrl;
-                        logBrowsePerf("dom-extract", evaluateDuration,
-                                "htmlChars=" + loadedHtml.length());
-                        // DOM parsing on the WebView/UI thread caused visible
-                        // stalls for large Kinozal pages. Validate the login
-                        // redirect on the background I/O executor instead.
-                        executeSafely(io, () -> {
-                            long loginCheckStartedAt = android.os.SystemClock.elapsedRealtime();
-                            boolean loginForm = containsLoginPasswordInput(loadedHtml);
-                            logBrowsePerf("login-check",
-                                    android.os.SystemClock.elapsedRealtime() - loginCheckStartedAt,
-                                    "htmlChars=" + loadedHtml.length());
-                            final boolean redirectedToLogin = loginForm
-                                    || loadedUrl.contains("login.php")
-                                    || loadedUrl.contains("takelogin.php");
-                            runOnUiThread(() -> {
-                                updateSidebarLoginStatus(!redirectedToLogin);
-                                if (redirectedToLogin) {
-                                    lastBrowserError = "Сайт перенаправил на авторизацию. URL: " + view.getUrl();
-                                    cb.onPage(null, lastBrowserError);
-                                    return;
-                                }
-                                lastBrowserError = "Первичная страница загружена: " + url
-                                        + ", HTML=" + loadedHtml.length() + " символов";
-                                cb.onPage(loadedHtml, null);
-                            });
-                        });
+                        if (isCloudflareChallengeHtml(html)) {
+                            appendFeedDiagnostic("CLOUDFLARE_CHALLENGE",
+                                    "real WebView navigation waiting for challenge completion; url=" + url);
+                            waitForCloudflarePage(view, url, cb,
+                                    android.os.SystemClock.elapsedRealtime(), 0);
+                            return;
+                        }
+                        deliverBrowserPage(view, url, html, cb, evaluateDuration);
                     });
                 }
                 String currentCookies = manager.getCookie(client.getMirror());
@@ -5230,6 +5215,77 @@ public class MainActivity extends Activity {
         });
         web.setWebChromeClient(new WebChromeClient());
         if (noCookies) markStartupCatalogReady();
+    }
+
+    private void waitForCloudflarePage(WebView view, String requestedUrl,
+            BrowserPageCallback callback, long startedAt, int attempt) {
+        if (view != sessionWebView || isFinishing() || isDestroyed()) {
+            callback.onPage(null, "Проверка Cloudflare прервана: браузерная сессия закрыта.");
+            return;
+        }
+        if (android.os.SystemClock.elapsedRealtime() - startedAt > 80000L) {
+            lastBrowserError = "Cloudflare не завершил проверку за 80 секунд. Откройте Kinozal в браузере и завершите проверку.";
+            appendFeedDiagnostic("CLOUDFLARE_WAIT_TIMEOUT", "url=" + requestedUrl);
+            callback.onPage(null, lastBrowserError);
+            return;
+        }
+        browserHandler.postDelayed(() -> view.evaluateJavascript(
+                "(function(){var h=document.documentElement?document.documentElement.outerHTML:'';"
+                + "var t=(document.title||'')+' '+(document.body?document.body.innerText:'');"
+                + "var l=(location.href||'').toLowerCase();"
+                + "var c=/just a moment|checking your browser|enable javascript and cookies|attention required|cf-chl-|challenge-platform/i.test(t+' '+h);"
+                + "var login=!!document.querySelector('form input[type=password]')||/login\\.php|takelogin\\.php/.test(l);"
+                + "return JSON.stringify({html:h,url:l,challenge:c,login:login});})()",
+                value -> {
+                    try {
+                        String json = new org.json.JSONArray("[" + value + "]").getString(0);
+                        org.json.JSONObject state = new org.json.JSONObject(json);
+                        String html = state.optString("html", "");
+                        if (!state.optBoolean("challenge", true) && html.length() > 1000) {
+                            appendFeedDiagnostic("CLOUDFLARE_RESOLVED",
+                                    "url=" + view.getUrl() + ", waitMs="
+                                    + (android.os.SystemClock.elapsedRealtime() - startedAt));
+                            deliverBrowserPage(view, view.getUrl(), html, callback, 0L);
+                            return;
+                        }
+                        if (state.optBoolean("login", false)) {
+                            lastBrowserError = "Kinozal перенаправил на авторизацию после проверки Cloudflare.";
+                            callback.onPage(null, lastBrowserError);
+                            return;
+                        }
+                    } catch (Exception ignored) { }
+                    waitForCloudflarePage(view, requestedUrl, callback, startedAt, attempt + 1);
+                }), attempt == 0 ? 1000 : 1200);
+    }
+
+    private void deliverBrowserPage(WebView view, String url, String html,
+            BrowserPageCallback callback, long evaluateDuration) {
+        String pageUrl = view.getUrl() == null ? "" : view.getUrl().toLowerCase(java.util.Locale.ROOT);
+        final String loadedHtml = html;
+        final String loadedUrl = pageUrl;
+        logBrowsePerf("dom-extract", evaluateDuration, "htmlChars=" + loadedHtml.length());
+        // Validate login redirects away from the WebView/UI thread.
+        executeSafely(io, () -> {
+            long loginCheckStartedAt = android.os.SystemClock.elapsedRealtime();
+            boolean loginForm = containsLoginPasswordInput(loadedHtml);
+            logBrowsePerf("login-check",
+                    android.os.SystemClock.elapsedRealtime() - loginCheckStartedAt,
+                    "htmlChars=" + loadedHtml.length());
+            final boolean redirectedToLogin = loginForm
+                    || loadedUrl.contains("login.php")
+                    || loadedUrl.contains("takelogin.php");
+            runOnUiThread(() -> {
+                updateSidebarLoginStatus(!redirectedToLogin);
+                if (redirectedToLogin) {
+                    lastBrowserError = "Сайт перенаправил на авторизацию. URL: " + view.getUrl();
+                    callback.onPage(null, lastBrowserError);
+                    return;
+                }
+                lastBrowserError = "Первичная страница загружена: " + url
+                        + ", HTML=" + loadedHtml.length() + " символов";
+                callback.onPage(loadedHtml, null);
+            });
+        });
     }
 
     // Fast equivalent of form:has(input[type=password]) for login detection.
@@ -5253,6 +5309,17 @@ public class MainActivity extends Activity {
             formStart = formEnd + 6;
         }
         return false;
+    }
+
+    private boolean isCloudflareChallengeHtml(String html) {
+        if (html == null || html.isEmpty()) return false;
+        String lower = html.toLowerCase(java.util.Locale.ROOT);
+        return lower.contains("just a moment")
+                || lower.contains("cf-chl-")
+                || lower.contains("challenge-platform")
+                || lower.contains("checking your browser")
+                || lower.contains("enable javascript and cookies")
+                || lower.contains("attention required");
     }
 
     private void fetchBrowserPage(String path, String postBody,
@@ -5296,9 +5363,10 @@ public class MainActivity extends Activity {
             pendingBrowserCallback = null;
             browserRequestTimeout = null;
             web.stopLoading();
-            timedOut.onPage(null, "Тайм-аут ожидания ответа Kinozal (30 секунд). Проверьте соединение или авторизацию.");
+            timedOut.onPage(null, "Тайм-аут ожидания ответа Kinozal (90 секунд). Проверьте соединение или авторизацию.");
         };
-        browserHandler.postDelayed(browserRequestTimeout, 30000);
+        // Cloudflare may need extra time to run its browser challenge scripts.
+        browserHandler.postDelayed(browserRequestTimeout, 90000);
         if (postBody == null) {
             web.loadUrl(target);
         } else {
