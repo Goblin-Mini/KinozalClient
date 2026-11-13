@@ -4988,10 +4988,10 @@ public class MainActivity extends Activity {
                 return;
             }
             web.evaluateJavascript("(function(){var p=document.querySelector('input[type=password]');"
-                    + "return p?'LOGIN':'OK';})()", value -> {
+                    + "var u=(location.href||'').toLowerCase();var challenge=document.querySelector('#challenge-form,.cf-challenge,iframe[src*=challenge],input[name=cf-turnstile-response]');"
+                    + "return p||u.indexOf('login.php')>=0||u.indexOf('takelogin.php')>=0?'LOGIN':(challenge?'CHALLENGE':'OK');})()", value -> {
                 String result = value == null ? "" : value.replace("\"", "");
                 if (result.contains("OK")) {
-                    finished[0] = true;
                     CookieManager manager = CookieManager.getInstance();
                     manager.flush();
                     String cookies = manager.getCookie(client.getMirror());
@@ -5004,6 +5004,7 @@ public class MainActivity extends Activity {
                             return;
                         }
                     }
+                    finished[0] = true;
                     FeedDiagnostics.log(this, "auth", "SESSION_RESTORE_OK",
                             "durationMs=" + (android.os.SystemClock.elapsedRealtime() - startedAt));
                     fetchBrowserPage(path, postBody, html -> {
@@ -5019,7 +5020,7 @@ public class MainActivity extends Activity {
                         callback.accept(html);
                     });
                 } else {
-                    browserHandler.postDelayed(poll[0], 500);
+                    browserHandler.postDelayed(poll[0], result.contains("CHALLENGE") ? 1200 : 500);
                 }
             });
         };
