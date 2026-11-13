@@ -5157,6 +5157,14 @@ public class MainActivity extends Activity {
                     android.webkit.WebResourceResponse response) {
                 super.onReceivedHttpError(view, request, response);
                 if (request.isForMainFrame() && pendingBrowserCallback != null) {
+                    // Cloudflare commonly serves its JavaScript challenge with HTTP 403.
+                    // Do not discard that document: onPageFinished must inspect it and
+                    // give the existing WebView time to complete the browser challenge.
+                    if (response.getStatusCode() == 403) {
+                        appendFeedDiagnostic("CLOUDFLARE_HTTP_403",
+                                "allowing WebView challenge document; url=" + request.getUrl());
+                        return;
+                    }
                     lastBrowserError = "HTTP " + response.getStatusCode() + " "
                             + response.getReasonPhrase() + "; URL: " + request.getUrl();
                     BrowserPageCallback cb = pendingBrowserCallback;
@@ -5233,7 +5241,8 @@ public class MainActivity extends Activity {
                 "(function(){var h=document.documentElement?document.documentElement.outerHTML:'';"
                 + "var t=(document.title||'')+' '+(document.body?document.body.innerText:'');"
                 + "var l=(location.href||'').toLowerCase();"
-                + "var c=/just a moment|checking your browser|enable javascript and cookies|attention required|cf-chl-|challenge-platform/i.test(t+' '+h);"
+                + "var c=/just a moment|checking your browser|enable javascript and cookies|attention required/i.test(t)"
+                + "||!!document.querySelector('#challenge-form,.cf-challenge,iframe[src*=challenge],input[name=cf-turnstile-response]');"
                 + "var login=!!document.querySelector('form input[type=password]')||/login\\.php|takelogin\\.php/.test(l);"
                 + "return JSON.stringify({html:h,url:l,challenge:c,login:login});})()",
                 value -> {
