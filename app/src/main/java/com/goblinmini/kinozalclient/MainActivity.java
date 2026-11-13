@@ -4898,9 +4898,8 @@ public class MainActivity extends Activity {
     private void load(String path, String title) { load(path, title, null); }
 
     /**
-     * Re-authenticate once when Kinozal explicitly redirects a catalogue request
-     * to its login form. Keep Cloudflare cookies from WebView, perform the login
-     * on the I/O executor, then copy the refreshed session back into WebView.
+     * Restore an expired Kinozal session inside the existing WebView.
+     * This preserves the browser's Cloudflare clearance and cookie attributes.
      */
     private void restoreExpiredSessionAndRetry(String path, String postBody,
             java.util.function.Consumer<String> callback) {
@@ -4908,100 +4907,126 @@ public class MainActivity extends Activity {
             callback.accept(null);
             return;
         }
-        String[] credentials = client.getSavedCredentials();
-        if (credentials == null) {
-            lastBrowserError = "Сессия Kinozal истекла, сохранённые данные входа не найдены.";
+        final String[] credentials = client.getSavedCredentials();
+        if (credentials == null || credentials.length < 2
+                || credentials[0] == null || credentials[0].trim().isEmpty()
+                || credentials[1] == null || credentials[1].isEmpty()) {
+            lastBrowserError = "Сессия Kinozal истекла. Откройте Настройки → Авторизация.";
+            callback.accept(null);
+            return;
+        }
+        final WebView web = sessionWebView;
+        if (web == null) {
+            lastBrowserError = "Браузерная сессия недоступна. Откройте Настройки → Авторизация.";
             callback.accept(null);
             return;
         }
         autoSessionRestoreInProgress = true;
-        status.setText("Сессия истекла. Восстанавливаем авторизацию…");
-        final String browserCookieHeader;
-        try {
-            browserCookieHeader = CookieManager.getInstance().getCookie(client.getMirror());
-        } catch (Exception ignored) {
-            // Native session cookies may still be sufficient if WebView has none.
-            executeSafely(io, () -> performAutomaticLogin(path, postBody, callback,
-                    credentials, null));
-            return;
-        }
-        executeSafely(io, () -> performAutomaticLogin(path, postBody, callback,
-                credentials, browserCookieHeader));
-    }
+        status.setText("Сессия истекла. Повторный вход через браузер…");
+        FeedDiagnostics.log(this, "auth", "SESSION_RESTORE_START",
+                "transport=WebView, mirror=" + client.getMirror());
 
-    private void performAutomaticLogin(String path, String postBody,
-            java.util.function.Consumer<String> callback, String[] credentials,
-            String browserCookieHeader) {
-        try {
-            if (browserCookieHeader != null && !browserCookieHeader.trim().isEmpty()) {
-                client.importBrowserCookies(browserCookieHeader);
-            }
-            client.login(credentials[0], credentials[1]);
-            String refreshedCookies = client.getCookieHeader();
-            if (refreshedCookies == null || refreshedCookies.trim().isEmpty()) {
-                throw new SecurityException("Сайт не выдал новую сессию после входа.");
-            }
-            runOnUiThread(() -> applyRestoredCookiesAndRetry(path, postBody,
-                    refreshedCookies, callback));
-        } catch (Exception e) {
-            String error = safe(e.getMessage());
-            Log.w("KinozalAuth", "Automatic session restoration failed", e);
-            runOnUiThread(() -> {
-                autoSessionRestoreInProgress = false;
-                lastBrowserError = "Не удалось автоматически восстановить авторизацию: " + error;
-                status.setText(lastBrowserError);
-                if (sidebarLoginInfo != null) updateSidebarLoginStatus(false);
-                callback.accept(null);
-            });
+        if (browserRequestTimeout != null) browserHandler.removeCallbacks(browserRequestTimeout);
+        if (pendingBrowserCallback != null) {
+            pendingBrowserCallback = null;
+            browserRequestTimeout = null;
         }
-    }
 
-    private void applyRestoredCookiesAndRetry(String path, String postBody,
-            String cookieHeader, java.util.function.Consumer<String> callback) {
-        CookieManager manager = CookieManager.getInstance();
-        manager.setAcceptCookie(true);
-        String[] pairs = cookieHeader.split(";");
-        java.util.List<String> validPairs = new java.util.ArrayList<>();
-        for (String pair : pairs) if (pair.trim().contains("=")) validPairs.add(pair.trim());
-        if (validPairs.isEmpty()) {
+        final long startedAt = android.os.SystemClock.elapsedRealtime();
+        final boolean[] submitted = {false};
+        final boolean[] finished = {false};
+        final Runnable[] poll = new Runnable[1];
+
+        Runnable finishFailure = () -> {
+            if (finished[0]) return;
+            finished[0] = true;
             autoSessionRestoreInProgress = false;
-            lastBrowserError = "Повторный вход выполнен, но cookies сессии пусты.";
+            String message = "Не удалось автоматически восстановить авторизацию. "
+                    + "Проверьте логин и пароль в Настройки → Авторизация.";
+            lastBrowserError = message;
+            status.setText(message);
+            updateSidebarLoginStatus(false);
+            FeedDiagnostics.log(this, "auth", "SESSION_RESTORE_FAILED",
+                    "durationMs=" + (android.os.SystemClock.elapsedRealtime() - startedAt));
             callback.accept(null);
-            return;
-        }
-        final int[] remaining = {validPairs.size()};
-        final boolean[] rejected = {false};
-        android.webkit.ValueCallback<Boolean> cookieCallback = accepted -> {
-            if (!Boolean.TRUE.equals(accepted)) rejected[0] = true;
-            remaining[0]--;
-            if (remaining[0] == 0) {
-                manager.flush();
-                if (rejected[0]) {
-                    autoSessionRestoreInProgress = false;
-                    lastBrowserError = "Не удалось обновить cookies браузерной сессии.";
-                    callback.accept(null);
-                    return;
-                }
-                fetchBrowserPage(path, postBody, html -> {
-                    autoSessionRestoreInProgress = false;
-                    if (html == null || html.isEmpty()) {
-                        lastBrowserError = "Повторный вход выполнен, но каталог не открылся. "
-                                + lastBrowserError;
-                    } else {
-                        lastKinozalConnectionStatus = "установлено";
-                        updateSidebarConnectionInfo();
-                        updateSidebarLoginStatus(true);
-                    }
-                    callback.accept(html);
-                });
-            }
         };
-        String cookieUrl = client.getMirror();
-        for (String pair : validPairs) {
-            manager.setCookie(cookieUrl, pair + "; Path=/; Secure; SameSite=Lax",
-                    cookieCallback);
-        }
-        try { client.saveBrowserCookies(cookieHeader); } catch (Exception ignored) { }
+
+        poll[0] = () -> {
+            if (finished[0] || isFinishing() || isDestroyed()) return;
+            if (android.os.SystemClock.elapsedRealtime() - startedAt > 25000L) {
+                finishFailure.run();
+                return;
+            }
+            String script;
+            if (!submitted[0]) {
+                script = "(function(){try{var p=document.querySelector('input[type=password]');"
+                        + "if(!p)return 'WAIT';var f=p.closest('form');"
+                        + "var scope=f||p.parentElement&&p.parentElement.parentElement||document;"
+                        + "var all=[].slice.call(scope.querySelectorAll('input'));"
+                        + "var u=all.find(function(e){var t=(e.type||'text').toLowerCase();"
+                        + "var n=((e.name||'')+' '+(e.id||'')+' '+(e.placeholder||'')+' '+"
+                        + "(e.getAttribute('autocomplete')||'')).toLowerCase();"
+                        + "return e!==p&&!e.disabled&&t!=='search'&&['text','email'].indexOf(t)>=0&&"
+                        + "(/login|user|name|nick|email/.test(n)||!n);});"
+                        + "if(!u)return 'NO_USER_FIELD';"
+                        + "function put(e,v){var d=Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value');"
+                        + "d.set.call(e,v);e.dispatchEvent(new Event('input',{bubbles:true}));"
+                        + "e.dispatchEvent(new Event('change',{bubbles:true}));}"
+                        + "put(u," + org.json.JSONObject.quote(credentials[0]) + ");"
+                        + "put(p," + org.json.JSONObject.quote(credentials[1]) + ");"
+                        + "if(f){if(f.requestSubmit)f.requestSubmit();else f.submit();return 'SUBMITTED';}"
+                        + "var b=scope.querySelector('input[type=submit],button[type=submit],button');"
+                        + "if(b){b.click();return 'SUBMITTED';}return 'NO_SUBMIT';"
+                        + "}catch(e){return 'ERROR';}})()";
+                web.evaluateJavascript(script, value -> {
+                    String result = value == null ? "" : value.replace("\"", "");
+                    if (result.contains("SUBMITTED")) submitted[0] = true;
+                    else if (result.contains("NO_USER_FIELD") || result.contains("NO_SUBMIT")
+                            || result.contains("ERROR")) finishFailure.run();
+                    else browserHandler.postDelayed(poll[0], 350);
+                });
+                return;
+            }
+            web.evaluateJavascript("(function(){var p=document.querySelector('input[type=password]');"
+                    + "return p?'LOGIN':'OK';})()", value -> {
+                String result = value == null ? "" : value.replace("\"", "");
+                if (result.contains("OK")) {
+                    finished[0] = true;
+                    CookieManager manager = CookieManager.getInstance();
+                    manager.flush();
+                    String cookies = manager.getCookie(client.getMirror());
+                    if (cookies != null && !cookies.trim().isEmpty()) {
+                        try {
+                            client.saveBrowserCookies(cookies);
+                            client.importBrowserCookies(cookies);
+                        } catch (Exception e) {
+                            finishFailure.run();
+                            return;
+                        }
+                    }
+                    FeedDiagnostics.log(this, "auth", "SESSION_RESTORE_OK",
+                            "durationMs=" + (android.os.SystemClock.elapsedRealtime() - startedAt));
+                    fetchBrowserPage(path, postBody, html -> {
+                        autoSessionRestoreInProgress = false;
+                        if (html == null || html.isEmpty()) {
+                            lastBrowserError = "Вход выполнен, но запрошенная страница не загрузилась.";
+                            updateSidebarLoginStatus(false);
+                        } else {
+                            lastKinozalConnectionStatus = "установлено";
+                            updateSidebarConnectionInfo();
+                            updateSidebarLoginStatus(true);
+                        }
+                        callback.accept(html);
+                    });
+                } else {
+                    browserHandler.postDelayed(poll[0], 500);
+                }
+            });
+        };
+
+        web.stopLoading();
+        web.loadUrl(client.getMirror() + "/login.php?m=5");
+        browserHandler.postDelayed(poll[0], 500);
     }
 
     private void load(String path, String title, String postBody) {
