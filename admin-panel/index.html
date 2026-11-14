@@ -53,14 +53,14 @@ main{max-width:1260px;margin:30px auto;padding:0 22px 60px}.page-title{display:f
   </div>
 
   <section class="panel">
-   <div class="panel-head"><div><h2>Выдать лицензию Plus</h2><div class="panel-desc">Бессрочная лицензия с выбранным количеством устройств</div></div><span class="pill">PLUS · Lifetime</span></div>
+   <div class="panel-head"><div><h2>Выдать лицензию Plus</h2><div class="panel-desc">Срок Plus начинается с первой активации кода</div></div><span class="pill">PLUS</span></div>
    <form id="issueForm" class="create-grid">
     <div class="field"><label for="customer">Покупатель / номер заказа</label><input id="customer" maxlength="160" placeholder="Например, Заказ 001"></div>
     <div class="field"><label for="deviceLimit">Устройств</label><select id="deviceLimit"><option value="1">1 устройство</option><option value="2">2 устройства</option><option value="3" selected>3 устройства</option><option value="4">4 устройства</option><option value="5">5 устройств</option><option value="6">6 устройств</option><option value="7">7 устройств</option><option value="8">8 устройств</option><option value="9">9 устройств</option><option value="10">10 устройств</option></select></div>
-    <div class="field"><label for="codeDays">Срок действия кода</label><select id="codeDays"><option value="0" selected>Бессрочно</option><option value="7">7 дней</option><option value="30">30 дней</option><option value="60">60 дней</option><option value="90">90 дней</option><option value="180">180 дней</option><option value="365">365 дней</option></select></div>
+    <div class="field"><label for="licenseDays">Срок лицензии Plus</label><select id="licenseDays"><option value="0" selected>Бессрочно</option><option value="7">7 дней</option><option value="30">30 дней</option><option value="60">60 дней</option><option value="90">90 дней</option><option value="180">180 дней</option><option value="365">365 дней</option></select></div>
     <button id="issueButton" type="submit">Создать лицензию</button>
    </form>
-   <div class="notice small">По умолчанию код активации бессрочный. При желании можно установить срок. После активации лицензия Plus действует бессрочно. Выдавай код только после подтверждения оплаты.</div>
+   <div class="notice small">Код активации действителен 90 дней с момента выдачи. Срок лицензии Plus начинается при первой успешной активации: выбранное количество дней или бессрочно. Выдавай код только после подтверждения оплаты.</div>
    <div id="issueResult" class="message"></div>
   </section>
 
@@ -70,7 +70,7 @@ main{max-width:1260px;margin:30px auto;padding:0 22px 60px}.page-title{display:f
     <input id="search" type="search" placeholder="Поиск по владельцу или ID">
     <select id="statusFilter"><option value="all">Все статусы</option><option value="active">Активные</option><option value="revoked">Отозванные</option></select>
    </div>
-   <div class="table-wrap"><table><thead><tr><th>Лицензия / владелец</th><th>Статус</th><th>Устройства</th><th>Дата выдачи</th><th>Код действителен до</th><th>Управление</th></tr></thead><tbody id="licenseRows"><tr><td colspan="6" class="empty">Загрузка…</td></tr></tbody></table></div>
+   <div class="table-wrap"><table><thead><tr><th>Лицензия / владелец</th><th>Статус</th><th>Устройства</th><th>Создана</th><th>Срок Plus</th><th>Управление</th></tr></thead><tbody id="licenseRows"><tr><td colspan="6" class="empty">Загрузка…</td></tr></tbody></table></div>
    <div id="listError" class="message error"></div>
   </section>
 
@@ -154,10 +154,10 @@ main{max-width:1260px;margin:30px auto;padding:0 22px 60px}.page-title{display:f
  $("refresh").onclick=load;$("search").oninput=renderLicenses;$("statusFilter").onchange=renderLicenses;
  $("issueForm").addEventListener("submit",async function(e){
   e.preventDefault();$("issueResult").textContent="";$("issueResult").className="message";$("issueButton").disabled=true;
-  const body={customer_label:$("customer").value.trim(),device_limit:Number($("deviceLimit").value),code_valid_days:Number($("codeDays").value)};
+  const body={customer_label:$("customer").value.trim(),device_limit:Number($("deviceLimit").value),license_days:Number($("licenseDays").value)};
   try{
    const data=await api("/admin/licenses",{method:"POST",body:JSON.stringify(body)});
-   $("issueResult").innerHTML="<div class=\"notice\"><b>Лицензия создана. Код показывается только один раз — скопируй его и передай покупателю безопасно.</b><div class=\"codebox\"><span class=\"codevalue\" id=\"issuedCode\">"+escapeHtml(data.activation_code)+"</span><button id=\"copyCode\">Копировать код</button></div><div class=\"small\" style=\"margin-top:8px;color:#dfc28c\">Лимит устройств: "+Number(data.device_limit)+" · Код: "+(data.code_expires_at?("до "+date(data.code_expires_at)):"бессрочный")+" · Plus бессрочный</div></div>";
+   $("issueResult").innerHTML="<div class=\"notice\"><b>Лицензия создана. Код показывается только один раз — скопируй его и передай покупателю безопасно.</b><div class=\"codebox\"><span class=\"codevalue\" id=\"issuedCode\">"+escapeHtml(data.activation_code)+"</span><button id=\"copyCode\">Копировать код</button></div><div class=\"small\" style=\"margin-top:8px;color:#dfc28c\">Лимит устройств: "+Number(data.device_limit)+" · Код действителен до: "+date(data.code_expires_at)+" · Plus: "+(Number(data.license_days)===0?"бессрочно":(Number(data.license_days)+" дней с первой активации"))+"</div></div>";
    $("copyCode").onclick=async function(){try{await navigator.clipboard.writeText(data.activation_code);$("copyCode").textContent="Скопировано"}catch(e){$("copyCode").textContent="Выдели и скопируй код выше"}};
    $("customer").value="";await load();
   }catch(err){$("issueResult").className="message error";$("issueResult").textContent="Не удалось создать лицензию: "+err.message}
@@ -175,7 +175,7 @@ main{max-width:1260px;margin:30px auto;padding:0 22px 60px}.page-title{display:f
   currentDeviceLicense=id;$("devicePanel").classList.remove("hidden");$("deviceTitle").textContent="Лицензия "+id;$("deviceRows").innerHTML="<tr><td colspan=\"5\" class=\"empty\">Загрузка…</td></tr>";$("deviceError").textContent="";
   try{
    const data=await api("/admin/licenses/"+id+"/devices",{method:"GET"});
-   $("deviceTitle").textContent=(data.license.customer_label||"Без подписи")+" · "+id;
+   $("deviceTitle").textContent=(data.license.customer_label||"Без подписи")+" · "+id+" · Plus: "+(Number(data.license.duration_days||0)===0?"бессрочно":(data.license.expires_at?("до "+date(data.license.expires_at)):(data.license.duration_days+" дней · ожидает активации")));
    $("activationCodeRows").innerHTML=(data.activation_codes||[]).map(function(c){
     const status=c.status==="revoked"?"Отозван":c.status==="expired"?"Истёк":"Активен";
     return "<tr><td><span class=\"id\">"+escapeHtml(c.code_display||"Код выдан")+"</span></td><td>"+date(c.created_at)+"</td><td>"+(c.expires_at?date(c.expires_at):"Бессрочно")+"</td><td><span class=\"pill "+(c.status==="active"?"":"off")+"\">"+status+"</span></td></tr>";
