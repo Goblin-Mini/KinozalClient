@@ -43,6 +43,38 @@ async function sha256(value: string): Promise<string> {
   return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
+
+
+async function codeCryptoKey(env: Env): Promise<CryptoKey> {
+  const material = "kinozal-plus-code-encryption:" + env.ADMIN_TOKEN;
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(material));
+  return crypto.subtle.importKey("raw", digest, { name: "AES-GCM" }, false, ["encrypt", "decrypt"]);
+}
+function toHex(bytes: Uint8Array): string {
+  return [...bytes].map((value) => value.toString(16).padStart(2, "0")).join("");
+}
+function fromHex(value: string): Uint8Array {
+  if (!/^(?:[a-f0-9]{2})+$/i.test(value)) throw new Error("invalid_encrypted_code");
+  return new Uint8Array(value.match(/.{2}/g)!.map((part) => parseInt(part, 16)));
+}
+async function encryptActivationCode(code: string, env: Env): Promise<{ encryptedCode: string; iv: string }> {
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const ciphertext = await crypto.subtle.encrypt(
+    { name: "AES-GCM", iv },
+    await codeCryptoKey(env),
+    new TextEncoder().encode(code),
+  );
+  return { encryptedCode: toHex(new Uint8Array(ciphertext)), iv: toHex(iv) };
+}
+async function decryptActivationCode(ciphertext: string, iv: string, env: Env): Promise<string> {
+  const plaintext = await crypto.subtle.decrypt(
+    { name: "AES-GCM", iv: fromHex(iv) },
+    await codeCryptoKey(env),
+    fromHex(ciphertext),
+  );
+  return new TextDecoder().decode(plaintext);
+}
+
 function equalSecret(a: string, b: string): boolean {
   const left = new TextEncoder().encode(a);
   const right = new TextEncoder().encode(b);
@@ -318,6 +350,7 @@ async function adminCreateLicense(request: Request, env: Env): Promise<Response>
   const activationId = randomHex(16);
   const code = randomCode();
   const codeHash = await sha256(normalizeCode(code));
+  const encrypted = await encryptActivationCode(code, env);
   const codeExpiresAt = new Date(Date.now() + codeDays * 86400000).toISOString();
 
   await env.DB.batch([
@@ -325,8 +358,8 @@ async function adminCreateLicense(request: Request, env: Env): Promise<Response>
       "INSERT INTO licenses (id, customer_label, plan, status, device_limit, duration_days, expires_at) VALUES (?, ?, 'plus_lifetime', 'active', ?, ?, NULL)"
     ).bind(licenseId, label || null, deviceLimit, licenseDays),
     env.DB.prepare(
-      "INSERT INTO activation_codes (id, license_id, code_hash, expires_at) VALUES (?, ?, ?, ?)"
-    ).bind(activationId, licenseId, codeHash, codeExpiresAt),
+      "INSERT INTO activation_codes (id, license_id, code_hash, expires_at, encrypted_code, encryption_iv) VALUES (?, ?, ?, ?, ?, ?)"
+    ).bind(activationId, licenseId, codeHash, codeExpiresAt, encrypted.encryptedCode, encrypted.iv),
   ]);
 
   return response(request, env, {
@@ -338,8 +371,58 @@ async function adminCreateLicense(request: Request, env: Env): Promise<Response>
     license_expires_at: null,
     device_limit: deviceLimit,
     plan: "plus_lifetime",
-    note: "Код показывается только один раз. Передайте его покупателю безопасным способом.",
+    note: "Код хранится в зашифрованном виде и доступен для просмотра в защищённой панели администратора.",
   }, 201);
+}
+
+
+async function adminListCodes(request: Request, env: Env, licenseId: string): Promise<Response> {
+  if (!await requireAdmin(request, env)) return response(request, env, { error: "unauthorized" }, 401);
+  const license = await env.DB.prepare(
+    "SELECT id, customer_label, plan, status, duration_days, expires_at FROM licenses WHERE id=?"
+  ).bind(licenseId).first<any>();
+  if (!license) return response(request, env, { error: "license_not_found" }, 404);
+  const rows = await env.DB.prepare(
+    "SELECT id, expires_at, created_at, revoked_at, encrypted_code, encryption_iv FROM activation_codes WHERE license_id=? ORDER BY created_at DESC"
+  ).bind(licenseId).all<any>();
+  const now = Date.now();
+  const codes = await Promise.all((rows.results || []).map(async (row: any) => ({
+    id: row.id,
+    expires_at: row.expires_at,
+    created_at: row.created_at,
+    revoked_at: row.revoked_at,
+    status: row.revoked_at ? "revoked" : (row.expires_at && new Date(row.expires_at).getTime() <= now ? "expired" : "active"),
+    activation_code: row.encrypted_code && row.encryption_iv
+      ? await decryptActivationCode(row.encrypted_code, row.encryption_iv, env) : null,
+    recoverable: !!(row.encrypted_code && row.encryption_iv),
+  })));
+  return response(request, env, { license, codes });
+}
+
+async function adminReissueCode(request: Request, env: Env, licenseId: string): Promise<Response> {
+  if (!await requireAdmin(request, env)) return response(request, env, { error: "unauthorized" }, 401);
+  const license = await env.DB.prepare("SELECT id, status FROM licenses WHERE id=?").bind(licenseId).first<any>();
+  if (!license) return response(request, env, { error: "license_not_found" }, 404);
+  if (license.status !== "active") return response(request, env, { error: "license_revoked" }, 409);
+  const body = await readJson(request);
+  const days = body?.code_valid_days === undefined ? 90 : Number(body.code_valid_days);
+  if (!Number.isInteger(days) || days < 1 || days > 365) {
+    return response(request, env, { error: "code_valid_days_must_be_1_to_365" }, 400);
+  }
+  const code = randomCode();
+  const codeHash = await sha256(normalizeCode(code));
+  const encrypted = await encryptActivationCode(code, env);
+  const expiresAt = new Date(Date.now() + days * 86400000).toISOString();
+  const id = randomHex(16);
+  await env.DB.batch([
+    env.DB.prepare(
+      "UPDATE activation_codes SET revoked_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE license_id=? AND revoked_at IS NULL"
+    ).bind(licenseId),
+    env.DB.prepare(
+      "INSERT INTO activation_codes (id, license_id, code_hash, expires_at, encrypted_code, encryption_iv) VALUES (?, ?, ?, ?, ?, ?)"
+    ).bind(id, licenseId, codeHash, expiresAt, encrypted.encryptedCode, encrypted.iv),
+  ]);
+  return response(request, env, { success: true, code_id: id, activation_code: code, code_expires_at: expiresAt }, 201);
 }
 
 async function adminListDevices(request: Request, env: Env, licenseId: string): Promise<Response> {
@@ -415,6 +498,10 @@ export default {
       if (request.method === "POST" && url.pathname === "/admin/licenses") {
         return await adminCreateLicense(request, env);
       }
+      const codesMatch = url.pathname.match(/^\/admin\/licenses\/([a-f0-9]{32})\/codes$/);
+      if (request.method === "GET" && codesMatch) return await adminListCodes(request, env, codesMatch[1]);
+      const reissueMatch = url.pathname.match(/^\/admin\/licenses\/([a-f0-9]{32})\/activation-code$/);
+      if (request.method === "POST" && reissueMatch) return await adminReissueCode(request, env, reissueMatch[1]);
       const devicesMatch = url.pathname.match(/^\/admin\/licenses\/([a-f0-9]{32})\/devices$/);
       if (request.method === "GET" && devicesMatch) {
         return await adminListDevices(request, env, devicesMatch[1]);
