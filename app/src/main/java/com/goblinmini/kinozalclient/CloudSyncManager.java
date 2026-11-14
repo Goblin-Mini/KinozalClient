@@ -79,7 +79,7 @@ public final class CloudSyncManager {
         String token = p.getString("cloud_sync_token", "");
         if (base.isEmpty() || token.isEmpty()) throw new IllegalStateException("Синхронизация не активирована");
         JSONObject local = readLocalSnapshot(p);
-        JSONObject outgoing = buildOutgoing(p, local);
+        JSONArray outgoing = buildOutgoing(p, local);
         JSONObject pushed = request(base + "/v1/sync", "PUT", token, new JSONObject().put("items", outgoing));
         applyServerSnapshot(p, pushed.optJSONArray("items"));
         p.edit().putString("cloud_sync_status", "Синхронизировано")
@@ -93,7 +93,7 @@ public final class CloudSyncManager {
         return result;
     }
 
-    private static JSONObject buildOutgoing(SharedPreferences p, JSONObject local) throws Exception {
+    private static JSONArray buildOutgoing(SharedPreferences p, JSONObject local) throws Exception {
         JSONObject meta = readMeta(p);
         long now = System.currentTimeMillis();
         JSONArray outgoing = new JSONArray();
@@ -165,7 +165,7 @@ public final class CloudSyncManager {
             String type = remote.optString("type", "");
             String key = remote.optString("key", "");
             if (key.isEmpty() || (!"favorite".equals(type) && !"history".equals(type))) continue;
-            JSONObject target = "favorite".equals(type) ? favorites : history;
+            Map<String, JSONObject> target = "favorite".equals(type) ? favorites : history;
             JSONObject timestamps = "favorite".equals(type) ? favoriteMeta : historyMeta;
             long remoteTime = remote.optLong("updated_at", 0);
             long localTime = timestamps.optLong(key, 0);
