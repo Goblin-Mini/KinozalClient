@@ -57,10 +57,10 @@ main{max-width:1260px;margin:30px auto;padding:0 22px 60px}.page-title{display:f
    <form id="issueForm" class="create-grid">
     <div class="field"><label for="customer">Покупатель / номер заказа</label><input id="customer" maxlength="160" placeholder="Например, Заказ 001"></div>
     <div class="field"><label for="deviceLimit">Устройств</label><select id="deviceLimit"><option value="1">1 устройство</option><option value="2">2 устройства</option><option value="3" selected>3 устройства</option><option value="4">4 устройства</option><option value="5">5 устройств</option><option value="6">6 устройств</option><option value="7">7 устройств</option><option value="8">8 устройств</option><option value="9">9 устройств</option><option value="10">10 устройств</option></select></div>
-    <div class="field"><label for="codeDays">Срок действия кода</label><select id="codeDays"><option value="7">7 дней</option><option value="30">30 дней</option><option value="60">60 дней</option><option value="90" selected>90 дней</option><option value="180">180 дней</option><option value="365">365 дней</option></select></div>
+    <div class="field"><label for="codeDays">Срок действия кода</label><select id="codeDays"><option value="0" selected>Бессрочно</option><option value="7">7 дней</option><option value="30">30 дней</option><option value="60">60 дней</option><option value="90">90 дней</option><option value="180">180 дней</option><option value="365">365 дней</option></select></div>
     <button id="issueButton" type="submit">Создать лицензию</button>
    </form>
-   <div class="notice small">Код активации ограничен по сроку, но после активации лицензия Plus действует бессрочно. Выдавай код только после подтверждения оплаты.</div>
+   <div class="notice small">По умолчанию код активации бессрочный. При желании можно установить срок. После активации лицензия Plus действует бессрочно. Выдавай код только после подтверждения оплаты.</div>
    <div id="issueResult" class="message"></div>
   </section>
 
@@ -76,7 +76,11 @@ main{max-width:1260px;margin:30px auto;padding:0 22px 60px}.page-title{display:f
 
   <section class="panel device-panel hidden" id="devicePanel">
    <div class="panel-head"><div><h2>Устройства лицензии</h2><div class="panel-desc" id="deviceTitle"></div></div><button class="secondary" id="closeDevices">Закрыть</button></div>
+   <h3 style="font-size:14px;margin:12px 0">Устройства</h3>
    <div class="table-wrap"><table><thead><tr><th>Устройство</th><th>Добавлено</th><th>Последняя активность</th><th>Статус</th><th></th></tr></thead><tbody id="deviceRows"></tbody></table></div>
+   <h3 style="font-size:14px;margin:20px 0 10px">Коды активации</h3>
+   <div class="table-wrap"><table><thead><tr><th>Код</th><th>Выдан</th><th>Действителен до</th><th>Статус</th></tr></thead><tbody id="activationCodeRows"></tbody></table></div>
+   <div class="small muted" style="margin-top:8px">Полный код не хранится на сервере и доступен только один раз при выдаче. Здесь отображаются история, срок и состояние кодов.</div>
    <div id="deviceError" class="message error"></div>
   </section>
 
@@ -116,7 +120,7 @@ main{max-width:1260px;margin:30px auto;padding:0 22px 60px}.page-title{display:f
    return "<tr><td><div class=\"owner\">"+escapeHtml(x.customer_label||"Без подписи")+"</div><div class=\"id\" title=\""+escapeHtml(x.id)+"\">"+escapeHtml(x.id)+"</div></td>"+
     "<td><span class=\"pill "+(active?"":"off")+"\">"+(active?"Активна":"Отозвана")+"</span></td>"+
     "<td>"+Number(x.active_devices||0)+" / "+Number(x.device_limit||0)+"</td>"+
-    "<td>"+date(x.created_at)+"</td><td>"+date(x.code_expires_at)+"</td>"+
+    "<td>"+date(x.created_at)+"</td><td>"+(x.code_expires_at?date(x.code_expires_at):"Бессрочно")+"</td>"+
     "<td><div class=\"actions\"><button class=\"secondary\" data-devices=\""+escapeHtml(x.id)+"\">Устройства</button>"+(active?"<button class=\"danger\" data-revoke=\""+escapeHtml(x.id)+"\">Отозвать</button>":"")+"</div></td></tr>";
   }).join("")||"<tr><td colspan=\"6\" class=\"empty\">По заданным условиям лицензии не найдены</td></tr>";
   $("listCaption").textContent="Показано "+rows.length+" из "+licenseRows.length+" последних лицензий";
@@ -153,7 +157,7 @@ main{max-width:1260px;margin:30px auto;padding:0 22px 60px}.page-title{display:f
   const body={customer_label:$("customer").value.trim(),device_limit:Number($("deviceLimit").value),code_valid_days:Number($("codeDays").value)};
   try{
    const data=await api("/admin/licenses",{method:"POST",body:JSON.stringify(body)});
-   $("issueResult").innerHTML="<div class=\"notice\"><b>Лицензия создана. Код показывается только один раз — скопируй его и передай покупателю безопасно.</b><div class=\"codebox\"><span class=\"codevalue\" id=\"issuedCode\">"+escapeHtml(data.activation_code)+"</span><button id=\"copyCode\">Копировать код</button></div><div class=\"small\" style=\"margin-top:8px;color:#dfc28c\">Лимит устройств: "+Number(data.device_limit)+" · Код действителен до "+date(data.code_expires_at)+" · Plus бессрочный</div></div>";
+   $("issueResult").innerHTML="<div class=\"notice\"><b>Лицензия создана. Код показывается только один раз — скопируй его и передай покупателю безопасно.</b><div class=\"codebox\"><span class=\"codevalue\" id=\"issuedCode\">"+escapeHtml(data.activation_code)+"</span><button id=\"copyCode\">Копировать код</button></div><div class=\"small\" style=\"margin-top:8px;color:#dfc28c\">Лимит устройств: "+Number(data.device_limit)+" · Код: "+(data.code_expires_at?("до "+date(data.code_expires_at)):"бессрочный")+" · Plus бессрочный</div></div>";
    $("copyCode").onclick=async function(){try{await navigator.clipboard.writeText(data.activation_code);$("copyCode").textContent="Скопировано"}catch(e){$("copyCode").textContent="Выдели и скопируй код выше"}};
    $("customer").value="";await load();
   }catch(err){$("issueResult").className="message error";$("issueResult").textContent="Не удалось создать лицензию: "+err.message}
@@ -172,6 +176,10 @@ main{max-width:1260px;margin:30px auto;padding:0 22px 60px}.page-title{display:f
   try{
    const data=await api("/admin/licenses/"+id+"/devices",{method:"GET"});
    $("deviceTitle").textContent=(data.license.customer_label||"Без подписи")+" · "+id;
+   $("activationCodeRows").innerHTML=(data.activation_codes||[]).map(function(c){
+    const status=c.status==="revoked"?"Отозван":c.status==="expired"?"Истёк":"Активен";
+    return "<tr><td><span class=\"id\">"+escapeHtml(c.code_display||"Код выдан")+"</span></td><td>"+date(c.created_at)+"</td><td>"+(c.expires_at?date(c.expires_at):"Бессрочно")+"</td><td><span class=\"pill "+(c.status==="active"?"":"off")+"\">"+status+"</span></td></tr>";
+   }).join("")||"<tr><td colspan=\"4\" class=\"empty\">Коды активации не найдены</td></tr>";
    $("deviceRows").innerHTML=(data.devices||[]).map(function(d){
     const active=!d.revoked_at;
     return "<tr><td><div class=\"owner\">"+escapeHtml(d.device_label||"Устройство")+"</div><div class=\"id\">"+escapeHtml(d.id)+"</div></td><td>"+date(d.created_at)+"</td><td>"+date(d.last_seen_at)+"</td><td><span class=\"pill "+(active?"":"off")+"\">"+(active?"Активно":"Отключено")+"</span></td><td>"+(active?"<button class=\"danger\" data-device-revoke=\""+escapeHtml(d.id)+"\">Отключить</button>":"")+"</td></tr>";
