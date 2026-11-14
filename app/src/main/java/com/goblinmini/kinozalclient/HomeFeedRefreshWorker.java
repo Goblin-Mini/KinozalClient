@@ -205,8 +205,6 @@ public final class HomeFeedRefreshWorker extends Worker {
         JSONArray result = new JSONArray();
         Set<String> seen = new HashSet<>();
         Set<String> seenIds = new HashSet<>();
-        Set<String> seenTitles = new HashSet<>();
-        Set<String> seenImages = new HashSet<>();
         java.util.regex.Pattern idPattern = java.util.regex.Pattern.compile("[?&]id=(\\d+)",
                 java.util.regex.Pattern.CASE_INSENSITIVE);
         for (Element a : anchors) {
@@ -246,21 +244,9 @@ public final class HomeFeedRefreshWorker extends Worker {
             if (title.isEmpty() && img != null) title = img.attr("title").trim();
             if (title.isEmpty()) continue;
 
-            String titleKey = normalizeFeedTitle(title);
-            String imageKey = "";
-            if (img != null) {
-                String rawImage = img.hasAttr("data-src") ? img.attr("data-src")
-                        : img.hasAttr("data-original") ? img.attr("data-original") : img.attr("src");
-                try { imageKey = java.net.URI.create(rawImage).getPath(); }
-                catch (Exception ignored) { imageKey = rawImage; }
-                if (imageKey != null) imageKey = imageKey.toLowerCase(java.util.Locale.ROOT);
-            }
-            if (!titleKey.isEmpty() && seenTitles.contains(titleKey)) continue;
-            if (!imageKey.isEmpty() && seenImages.contains(imageKey)) continue;
-
+            // Torrent ID / href is the identity. Do not collapse distinct releases
+            // merely because they share a title or poster image.
             if (!torrentId.isEmpty()) seenIds.add(torrentId);
-            if (!titleKey.isEmpty()) seenTitles.add(titleKey);
-            if (!imageKey.isEmpty()) seenImages.add(imageKey);
 
             String image = "";
             if (img != null) {
