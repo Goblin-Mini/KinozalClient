@@ -170,10 +170,19 @@ public final class CloudSyncManager {
             long localTime = timestamps.optLong(key, 0);
             if (remoteTime < localTime) continue;
             timestamps.put(key, remoteTime);
-            if (remote.optBoolean("deleted", false)) target.remove(key);
-            else {
+            if (remote.optBoolean("deleted", false)) {
+                target.remove(key);
+                JSONObject payloads = meta.optJSONObject(type + "_payloads");
+                if (payloads != null) payloads.remove(key);
+            } else {
                 JSONObject data = remote.optJSONObject("data");
-                if (data != null) target.put(key, data);
+                if (data != null) {
+                    target.put(key, data);
+                    JSONObject payloads = meta.optJSONObject(type + "_payloads");
+                    if (payloads == null) payloads = new JSONObject();
+                    payloads.put(key, data.toString());
+                    meta.put(type + "_payloads", payloads);
+                }
             }
         }
 
