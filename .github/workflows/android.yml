@@ -42,7 +42,7 @@ jobs:
         run: gradle --no-daemon assembleDebug
 
       - name: Upload debug APK
-        if: github.event_name == 'pull_request' || github.ref_name == 'feature/magnet-playback' || github.ref_name == 'feature/performance' || github.ref_name == 'feature/screen-cache-background-refresh' || github.ref_name == 'feature/sidebar-login-status-stable-restore' || github.ref_name == 'fix/home-feed-js-extractor-diagnostics'
+        if: github.event_name == 'pull_request' || github.ref_name == 'feature/magnet-playback' || github.ref_name == 'feature/performance' || github.ref_name == 'feature/screen-cache-background-refresh' || github.ref_name == 'feature/sidebar-login-status-stable-restore' || github.ref_name == 'fix/home-feed-js-extractor-diagnostics' || github.ref_name == 'fix/cloud-sync-request-throttling'
         uses: actions/upload-artifact@v4
         with:
           name: KinozalClient-debug
