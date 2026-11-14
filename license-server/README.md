@@ -145,3 +145,19 @@ curl -X DELETE "https://YOUR-WORKER.workers.dev/admin/licenses/LICENSE_ID" \
 ## Timed Plus license migration
 
 For an existing D1 database, run `license-server/migrations/0002_license_duration.sql` exactly once in the Cloudflare D1 Console. It adds `duration_days` and `expires_at`; existing rows default to lifetime and are not shortened. Do not run this migration a second time. New timed licenses start their countdown on the first successful activation, not when the admin creates the code. The activation code remains redeemable for 90 days from issue. The Worker rejects license checks and sync calls after the entitlement expiry.
+
+
+## Protect the separate admin website with Cloudflare Access
+
+The admin website is hosted separately from the Worker API. Protect the Pages hostname
+(for example, `kinozal-tv-plus-admin.pages.dev`) with Cloudflare Access so only
+approved administrator identities can open the dashboard.
+
+1. In Cloudflare Zero Trust, open Access → Applications → Add an application.
+2. Choose **Self-hosted** and enter the exact admin Pages hostname as the application domain.
+3. Add an **Allow** policy for your administrator email address (or a dedicated admin email group).
+4. Use a one-time PIN or your preferred identity provider, then save and test in a private browser window.
+5. Do not protect the Worker API hostname with this Pages-only Access application: the Android app must continue reaching the Worker directly.
+6. Keep the `ADMIN_TOKEN` secret in the Worker. Access protects the dashboard page; the Worker continues to enforce `ADMIN_TOKEN` for every admin API action.
+
+Do not add the Worker hostname to the Pages Access application. If you later add a custom admin domain, update the Worker's `ALLOWED_ORIGIN` variable to that exact HTTPS origin.
