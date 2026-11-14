@@ -80,7 +80,7 @@ main{max-width:1260px;margin:30px auto;padding:0 22px 60px}.page-title{display:f
    <div class="table-wrap"><table><thead><tr><th>Устройство</th><th>Добавлено</th><th>Последняя активность</th><th>Статус</th><th></th></tr></thead><tbody id="deviceRows"></tbody></table></div>
    <h3 style="font-size:14px;margin:20px 0 10px">Коды активации</h3>
    <div class="table-wrap"><table><thead><tr><th>Код</th><th>Выдан</th><th>Действителен до</th><th>Статус</th><th></th></tr></thead><tbody id="activationCodeRows"></tbody></table></div><div class="toolbar" style="margin-top:12px"><div class="field" style="max-width:180px"><label for="reissueDays">Срок нового кода, дней</label><input id="reissueDays" type="number" min="1" max="365" value="90"></div><button id="reissueCode" class="secondary">Выпустить новый код</button></div><div id="reissueResult" class="message"></div>
-   <div class="small muted" style="margin-top:8px">Полный код не хранится на сервере и доступен только один раз при выдаче. Здесь отображаются история, срок и состояние кодов.</div>
+   <div class="small muted" style="margin-top:8px">Полные коды хранятся в базе в зашифрованном виде. Администратор может просматривать и копировать выданные коды; здесь также отображаются история, срок и состояние кодов.</div>
    <div id="deviceError" class="message error"></div>
   </section>
 
