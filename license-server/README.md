@@ -4,7 +4,9 @@ This service supports manual payment verification and manual license issuance. I
 
 ## Product rules
 
-- One-time license, lifetime entitlement.
+- Plus entitlement can be lifetime or time-limited (7, 30, 60, 90, 180, or 365 days).
+- The selected Plus term starts on the first successful device activation; all devices on the license share the same expiry.
+- Activation code itself is valid for 90 days after issuance.
 - One activation code can enroll up to 3 active installations.
 - The same code is entered on each of the customer's devices.
 - Revoking an old device frees a slot.
@@ -36,7 +38,7 @@ curl -X POST "https://YOUR-WORKER.workers.dev/admin/licenses" \
 
 The response contains a one-time activation code. Copy it and send it privately to the customer. The plaintext code is not stored and cannot be retrieved later. If it is lost before activation, revoke the old license and issue a new one.
 
-The default code validity is 90 days (configurable from 1 to 365 days). License lifetime does not expire after activation.
+The activation code is valid for 90 days after issuance. The Plus entitlement term is selected separately and starts on the first successful activation. Choose 0 for lifetime, or 7, 30, 60, 90, 180, or 365 days.
 
 ## Separate browser admin site
 
@@ -44,8 +46,8 @@ The administration interface is a standalone static site in `admin-panel/`. It i
 
 The Pages site calls the Worker API at `https://YOUR-WORKER.workers.dev`. It supports:
 - live totals for licenses, active licenses, devices and free device slots;
-- issuing lifetime Plus licenses after manual payment verification;
-- selecting the installation limit (1–10 devices) and activation-code validity (7–365 days);
+- issuing lifetime or time-limited Plus licenses after manual payment verification;
+- selecting the installation limit (1–10 devices) and Plus duration (lifetime, 7, 30, 60, 90, 180, or 365 days);
 - searching and filtering licenses;
 - viewing attached devices and revoking an individual device or an entire license.
 
@@ -138,3 +140,8 @@ curl -X DELETE "https://YOUR-WORKER.workers.dev/admin/licenses/LICENSE_ID" \
 - The Android sync client is integrated, but the Worker must be deployed and its D1 schema applied before cloud sync can be used.
 - No OWNER provisioning endpoint yet; owner entitlement remains a separate follow-up.
 - Before production use, test simultaneous activation attempts, expired/revoked codes, device revocation, token loss, and D1 behavior in a Cloudflare test database.
+
+
+## Timed Plus license migration
+
+For an existing D1 database, run `license-server/migrations/0002_license_duration.sql` exactly once in the Cloudflare D1 Console. It adds `duration_days` and `expires_at`; existing rows default to lifetime and are not shortened. Do not run this migration a second time. New timed licenses start their countdown on the first successful activation, not when the admin creates the code. The activation code remains redeemable for 90 days from issue. The Worker rejects license checks and sync calls after the entitlement expiry.
