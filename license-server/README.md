@@ -7,7 +7,7 @@ This service supports manual payment verification and manual license issuance. I
 - Plus entitlement can be lifetime or time-limited (7, 30, 60, 90, 180, or 365 days).
 - The selected Plus term starts on the first successful device activation; all devices on the license share the same expiry.
 - Activation code itself is valid for 90 days after issuance.
-- One activation code can enroll up to 3 active installations.
+- A license can have 1–10 active installations, according to its configured device limit.
 - The same code is entered on each of the customer's devices.
 - Revoking an old device frees a slot.
 - The app receives a per-installation device token; only its SHA-256 hash is stored.
