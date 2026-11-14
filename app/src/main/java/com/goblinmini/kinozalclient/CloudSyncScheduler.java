@@ -18,6 +18,36 @@ public final class CloudSyncScheduler {
 
     private CloudSyncScheduler() { }
 
+    private static final String ONE_TIME_WORK_NAME = "kinozal_plus_cloud_sync_debounced";
+
+    /**
+     * Debounces automatic sync requests so a burst of local edits results in one
+     * network request after the app has been quiet for 30 seconds.
+     */
+    public static void scheduleSoon(Context context) {
+        Context app = context.getApplicationContext();
+        if (!CloudSyncManager.isActivated(app)) return;
+
+        Constraints constraints = new Constraints.Builder()
+                .setRequiredNetworkType(NetworkType.CONNECTED)
+                .build();
+
+        OneTimeWorkRequest request = new OneTimeWorkRequest.Builder(CloudSyncWorker.class)
+                .setInitialDelay(30, TimeUnit.SECONDS)
+                .setConstraints(constraints)
+                .setBackoffCriteria(
+                        androidx.work.BackoffPolicy.EXPONENTIAL,
+                        PeriodicWorkRequest.MIN_BACKOFF_MILLIS,
+                        TimeUnit.MILLISECONDS)
+                .build();
+
+        WorkManager.getInstance(app).enqueueUniqueWork(
+                ONE_TIME_WORK_NAME,
+                ExistingWorkPolicy.REPLACE,
+                request);
+    }
+
+
     /**
      * Schedules a 6-hour periodic sync for activated Plus installations.
      * WorkManager persists this request across process death and device reboot.
