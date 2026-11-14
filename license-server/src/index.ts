@@ -254,6 +254,19 @@ async function putSyncItems(request: Request, env: Env): Promise<Response> {
   return await getSyncItems(request, env);
 }
 
+async function adminListLicenses(request: Request, env: Env): Promise<Response> {
+  if (!await requireAdmin(request, env)) return response(request, env, { error: "unauthorized" }, 401);
+  const rows = await env.DB.prepare(
+    "SELECT l.id, l.customer_label, l.plan, l.status, l.device_limit, l.created_at, l.revoked_at, " +
+    "(SELECT COUNT(*) FROM devices d WHERE d.license_id=l.id AND d.revoked_at IS NULL) AS active_devices, " +
+    "(SELECT COUNT(*) FROM devices d WHERE d.license_id=l.id) AS total_devices, " +
+    "(SELECT MAX(d.last_seen_at) FROM devices d WHERE d.license_id=l.id AND d.revoked_at IS NULL) AS last_seen_at, " +
+    "(SELECT MAX(c.expires_at) FROM activation_codes c WHERE c.license_id=l.id AND c.revoked_at IS NULL) AS code_expires_at " +
+    "FROM licenses l ORDER BY l.created_at DESC LIMIT 500"
+  ).all<any>();
+  const licenses = (rows.results || []).map((row: any) => ({ ...row, active_devices: Number(row.active_devices || 0), total_devices: Number(row.total_devices || 0) }));
+  return response(request, env, { licenses, total: licenses.length });
+}
 async function adminCreateLicense(request: Request, env: Env): Promise<Response> {
   if (!await requireAdmin(request, env)) return response(request, env, { error: "unauthorized" }, 401);
   const body = await readJson(request);
@@ -340,6 +353,9 @@ export default {
       }
       if (request.method === "GET" && url.pathname === "/v1/license") {
         return await getLicense(request, env);
+      }
+      if (request.method === "GET" && url.pathname === "/admin/licenses") {
+        return await adminListLicenses(request, env);
       }
       if (request.method === "POST" && url.pathname === "/admin/licenses") {
         return await adminCreateLicense(request, env);
