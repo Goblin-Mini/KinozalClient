@@ -188,6 +188,72 @@ async function getLicense(request: Request, env: Env): Promise<Response> {
   });
 }
 
+
+async function authenticatedDevice(request: Request, env: Env): Promise<any | null> {
+  const token = bearer(request);
+  if (!token) return null;
+  const tokenHash = await sha256(token);
+  return await env.DB.prepare(
+    `SELECT d.id AS device_id, d.license_id, l.plan, l.status
+     FROM devices d JOIN licenses l ON l.id=d.license_id
+     WHERE d.token_hash=? AND d.revoked_at IS NULL AND l.status='active'`
+  ).bind(tokenHash).first<any>();
+}
+
+async function getSyncItems(request: Request, env: Env): Promise<Response> {
+  const device = await authenticatedDevice(request, env);
+  if (!device) return response(request, env, { error: "license_required" }, 401);
+  const rows = await env.DB.prepare(
+    `SELECT item_type, item_key, payload, is_deleted, updated_at, updated_by
+     FROM sync_items WHERE license_id=? ORDER BY updated_at ASC`
+  ).bind(device.license_id).all<any>();
+  const items = (rows.results || []).map((row: any) => ({
+    type: row.item_type, key: row.item_key,
+    data: JSON.parse(row.payload || "{}"),
+    deleted: !!row.is_deleted, updated_at: row.updated_at,
+  }));
+  await env.DB.prepare("UPDATE devices SET last_seen_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?")
+    .bind(device.device_id).run();
+  return response(request, env, { items, server_time: Date.now(), plan: device.plan });
+}
+
+async function putSyncItems(request: Request, env: Env): Promise<Response> {
+  const device = await authenticatedDevice(request, env);
+  if (!device) return response(request, env, { error: "license_required" }, 401);
+  const body = await readJson(request);
+  const items = Array.isArray(body?.items) ? body.items : null;
+  if (!items || items.length > 500) {
+    return response(request, env, { error: "invalid_items" }, 400);
+  }
+  const statements: D1PreparedStatement[] = [];
+  for (const item of items) {
+    if (!item || (item.type !== "favorite" && item.type !== "history") ||
+        typeof item.key !== "string" || item.key.length < 1 || item.key.length > 2048 ||
+        typeof item.deleted !== "boolean") {
+      return response(request, env, { error: "invalid_sync_item" }, 400);
+    }
+    const updatedAt = Number.isSafeInteger(item.updated_at) && item.updated_at > 0
+      ? item.updated_at : Date.now();
+    const payload = item.data && typeof item.data === "object" && !Array.isArray(item.data)
+      ? JSON.stringify(item.data) : "{}";
+    if (payload.length > 12000) return response(request, env, { error: "sync_item_too_large" }, 413);
+    statements.push(env.DB.prepare(
+      `INSERT INTO sync_items (license_id, item_type, item_key, payload, is_deleted, updated_at, updated_by)
+       VALUES (?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(license_id, item_type, item_key) DO UPDATE SET
+         payload=excluded.payload, is_deleted=excluded.is_deleted,
+         updated_at=excluded.updated_at, updated_by=excluded.updated_by
+       WHERE excluded.updated_at > sync_items.updated_at
+          OR (excluded.updated_at = sync_items.updated_at AND excluded.updated_by > sync_items.updated_by)`
+    ).bind(device.license_id, item.type, item.key, payload, item.deleted ? 1 : 0,
+      updatedAt, device.device_id));
+  }
+  if (statements.length) await env.DB.batch(statements);
+  await env.DB.prepare("UPDATE devices SET last_seen_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?")
+    .bind(device.device_id).run();
+  return await getSyncItems(request, env);
+}
+
 async function adminCreateLicense(request: Request, env: Env): Promise<Response> {
   if (!await requireAdmin(request, env)) return response(request, env, { error: "unauthorized" }, 401);
   const body = await readJson(request);
@@ -265,6 +331,12 @@ export default {
       }
       if (request.method === "POST" && url.pathname === "/v1/devices/claim") {
         return await claimDevice(request, env);
+      }
+      if (request.method === "GET" && url.pathname === "/v1/sync") {
+        return await getSyncItems(request, env);
+      }
+      if (request.method === "PUT" && url.pathname === "/v1/sync") {
+        return await putSyncItems(request, env);
       }
       if (request.method === "GET" && url.pathname === "/v1/license") {
         return await getLicense(request, env);
