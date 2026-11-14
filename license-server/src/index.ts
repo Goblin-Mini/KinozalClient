@@ -453,6 +453,10 @@ export default {
       if (request.method === "POST" && url.pathname === "/admin/licenses") {
         return await adminCreateLicense(request, env);
       }
+      const codesMatch = url.pathname.match(/^\/admin\/licenses\/([a-f0-9]{32})\/codes$/);
+      if (request.method === "GET" && codesMatch) return await adminListCodes(request, env, codesMatch[1]);
+      const reissueMatch = url.pathname.match(/^\/admin\/licenses\/([a-f0-9]{32})\/activation-code$/);
+      if (request.method === "POST" && reissueMatch) return await adminReissueCode(request, env, reissueMatch[1]);
       const devicesMatch = url.pathname.match(/^\/admin\/licenses\/([a-f0-9]{32})\/devices$/);
       if (request.method === "GET" && devicesMatch) {
         return await adminListDevices(request, env, devicesMatch[1]);
