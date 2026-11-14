@@ -15,6 +15,7 @@ import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.Map;
@@ -146,8 +147,8 @@ public final class CloudSyncManager {
     private static void applyServerSnapshot(SharedPreferences p, JSONArray items) throws Exception {
         if (items == null) return;
         JSONObject meta = readMeta(p);
-        Map<String, JSONObject> favorites = new HashMap<>();
-        Map<String, JSONObject> history = new HashMap<>();
+        Map<String, JSONObject> favorites = new LinkedHashMap<>();
+        Map<String, JSONObject> history = new LinkedHashMap<>();
         JSONArray localFavorites = new JSONArray(p.getString(FAVORITES, "[]"));
         JSONArray localHistory = new JSONArray(p.getString(HISTORY, "[]"));
         indexLocal(localFavorites, favorites);
@@ -209,7 +210,10 @@ public final class CloudSyncManager {
 
     private static String valuesJson(Map<String, JSONObject> values, boolean newestFirst) throws Exception {
         JSONArray result = new JSONArray();
-        for (JSONObject item : values.values()) result.put(item);
+        java.util.ArrayList<JSONObject> ordered = new java.util.ArrayList<>(values.values());
+        if (newestFirst) java.util.Collections.reverse(ordered);
+        int start = newestFirst ? Math.max(0, ordered.size() - 30) : 0;
+        for (int i = start; i < ordered.size(); i++) result.put(ordered.get(i));
         return result.toString();
     }
 
