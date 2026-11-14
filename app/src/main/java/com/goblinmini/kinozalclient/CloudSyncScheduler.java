@@ -17,7 +17,7 @@ public final class CloudSyncScheduler {
     private CloudSyncScheduler() { }
 
     /**
-     * Schedules a 15-minute periodic sync for activated Plus installations.
+     * Schedules a 6-hour periodic sync for activated Plus installations.
      * WorkManager persists this request across process death and device reboot.
      */
     public static void ensureScheduled(Context context) {
@@ -29,7 +29,7 @@ public final class CloudSyncScheduler {
                 .build();
 
         PeriodicWorkRequest request = new PeriodicWorkRequest.Builder(
-                CloudSyncWorker.class, 15, TimeUnit.MINUTES)
+                CloudSyncWorker.class, 6, TimeUnit.HOURS)
                 .setConstraints(constraints)
                 .setBackoffCriteria(
                         androidx.work.BackoffPolicy.EXPONENTIAL,
@@ -39,7 +39,7 @@ public final class CloudSyncScheduler {
 
         WorkManager.getInstance(app).enqueueUniquePeriodicWork(
                 PERIODIC_WORK_NAME,
-                ExistingPeriodicWorkPolicy.KEEP,
+                ExistingPeriodicWorkPolicy.REPLACE,
                 request);
     }
 }
