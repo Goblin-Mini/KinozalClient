@@ -3784,6 +3784,7 @@ public class MainActivity extends Activity {
                         if (dialog.isShowing()) state.setText("Статус: " + CloudSyncManager.status(this));
                         activate.setEnabled(true);
                         showMessage("Устройство активировано");
+                        CloudSyncScheduler.ensureScheduled(MainActivity.this);
                         scheduleCloudSync();
                     });
                 } catch (Exception e) {
