@@ -6,6 +6,8 @@ import android.util.Log;
 public final class KinozalApplication extends Application {
     @Override public void onCreate() {
         super.onCreate();
+        // Restore periodic cloud sync after process/app restart for Plus devices.
+        CloudSyncScheduler.ensureScheduled(this);
         final Thread.UncaughtExceptionHandler previous = Thread.getDefaultUncaughtExceptionHandler();
         Thread.setDefaultUncaughtExceptionHandler((thread, error) -> {
             try {
