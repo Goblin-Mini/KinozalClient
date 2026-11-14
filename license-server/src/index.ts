@@ -337,7 +337,7 @@ async function adminCreateLicense(request: Request, env: Env): Promise<Response>
     license_days: licenseDays,
     license_expires_at: null,
     device_limit: deviceLimit,
-    plan: licenseDays === 0 ? "plus_lifetime" : "plus_timed",
+    plan: "plus_lifetime",
     note: "Код показывается только один раз. Передайте его покупателю безопасным способом.",
   }, 201);
 }
