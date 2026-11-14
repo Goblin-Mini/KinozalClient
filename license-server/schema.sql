@@ -39,3 +39,20 @@ CREATE INDEX IF NOT EXISTS idx_devices_license_active
   ON devices(license_id, revoked_at);
 CREATE INDEX IF NOT EXISTS idx_devices_installation
   ON devices(installation_id);
+
+
+-- Per-item sync records. Tombstones are retained so deletions propagate to
+-- devices that were offline when an item was removed.
+CREATE TABLE IF NOT EXISTS sync_items (
+  license_id TEXT NOT NULL REFERENCES licenses(id) ON DELETE CASCADE,
+  item_type TEXT NOT NULL CHECK (item_type IN ('favorite', 'history')),
+  item_key TEXT NOT NULL,
+  payload TEXT NOT NULL DEFAULT '{}',
+  is_deleted INTEGER NOT NULL DEFAULT 0 CHECK (is_deleted IN (0, 1)),
+  updated_at INTEGER NOT NULL,
+  updated_by TEXT NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+  PRIMARY KEY (license_id, item_type, item_key)
+);
+
+CREATE INDEX IF NOT EXISTS idx_sync_items_license_updated
+  ON sync_items(license_id, updated_at);
