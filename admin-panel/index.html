@@ -1,0 +1,191 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>Кинозал ТВ — Admin</title>
+<style>
+:root{color-scheme:dark;--bg:#0d0f12;--surface:#15181d;--surface2:#1b1f26;--line:#2b3039;--muted:#9aa3af;--text:#f4f5f6;--accent:#AE3712;--gold:#FCBD2B;--green:#5ac58b;--red:#f07171;--radius:15px}
+*{box-sizing:border-box}body{margin:0;background:radial-gradient(ellipse at 12% 0%,#211711 0,transparent 34%),var(--bg);color:var(--text);font:14px/1.5 Inter,Segoe UI,Arial,sans-serif}
+button,input,select{font:inherit}button{border:1px solid var(--accent);background:var(--accent);color:white;border-radius:9px;padding:10px 15px;font-weight:650;cursor:pointer}button:hover{filter:brightness(1.12)}button:disabled{opacity:.55;cursor:wait}button.secondary{background:#252a32;border-color:#3b424d}button.danger{background:#542323;border-color:#884040}input,select{width:100%;min-width:0;background:#0e1115;border:1px solid #353b46;color:var(--text);border-radius:9px;padding:11px 12px;outline:none}input:focus,select:focus{border-color:var(--gold)}label{display:block;color:#c4cad2;font-size:12px;margin-bottom:6px}.muted{color:var(--muted)}.small{font-size:12px}.hidden{display:none!important}
+header{height:72px;border-bottom:1px solid var(--line);background:#101216eF;display:flex;align-items:center;padding:0 max(22px,calc((100% - 1260px)/2));gap:16px;position:sticky;top:0;z-index:3;backdrop-filter:blur(14px)}
+.brand{display:flex;align-items:center;gap:12px}.logo{width:38px;height:38px;border-radius:11px;background:linear-gradient(145deg,var(--accent),#6e210d);display:grid;place-items:center;font-weight:900;color:#fff}.brand b{font-size:15px;letter-spacing:.2px}.brand small{display:block;color:var(--muted);font-size:11px}.header-right{margin-left:auto;display:flex;align-items:center;gap:12px}.connection{display:flex;align-items:center;gap:8px;color:var(--muted);font-size:12px}.dot{width:8px;height:8px;border-radius:50%;background:#6f7782}.dot.ok{background:var(--green);box-shadow:0 0 12px #5ac58b80}
+main{max-width:1260px;margin:30px auto;padding:0 22px 60px}.page-title{display:flex;align-items:flex-end;justify-content:space-between;gap:15px;margin-bottom:22px}.page-title h1{font-size:25px;margin:0 0 4px}.page-title p{margin:0;color:var(--muted)}
+.stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px;margin-bottom:20px}.stat,.panel{background:linear-gradient(160deg,#191d23,#14171c);border:1px solid var(--line);border-radius:var(--radius)}.stat{padding:18px 20px;min-height:116px}.stat .caption{color:var(--muted);font-size:12px}.stat strong{display:block;font-size:31px;line-height:1.25;margin-top:8px;letter-spacing:-.6px}.stat .sub{font-size:11px;color:#737e8b;margin-top:4px}
+.panel{padding:20px;margin-bottom:17px}.panel-head{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:16px}.panel h2{font-size:17px;margin:0}.panel-desc{color:var(--muted);font-size:12px;margin-top:4px}
+.create-grid{display:grid;grid-template-columns:minmax(180px,1.6fr) minmax(130px,.7fr) minmax(150px,.8fr) auto;gap:12px;align-items:end}.field{min-width:0}
+.notice{background:#2a2115;border:1px solid #69502a;color:#f4d69a;padding:12px 14px;border-radius:10px;margin-top:14px}.message{margin-top:12px;font-size:13px}.error{color:#ff9999}.success{color:#83dfad}.codebox{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:10px}.codevalue{font:600 17px/1.4 Consolas,monospace;letter-spacing:1px;color:#fff;background:#101216;border:1px dashed #76562c;border-radius:8px;padding:10px 13px;user-select:all;overflow-wrap:anywhere}
+.toolbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap}.toolbar input{max-width:330px}.toolbar select{max-width:170px}.table-wrap{overflow:auto;border:1px solid #292f38;border-radius:10px}table{width:100%;border-collapse:collapse;min-width:790px}th,td{text-align:left;padding:13px 12px;border-bottom:1px solid #292f38;vertical-align:middle}th{font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:#8f99a6;font-weight:650;background:#171b21}tbody tr:last-child td{border-bottom:0}tbody tr:hover{background:#ffffff05}.owner{font-weight:650}.id{font:11px Consolas,monospace;color:#77818e;margin-top:4px;max-width:245px;overflow:hidden;text-overflow:ellipsis}.pill{display:inline-flex;align-items:center;gap:6px;border-radius:30px;padding:4px 9px;font-size:11px;background:#1d382b;color:#91dfb1}.pill.off{background:#432526;color:#f3aaaa}.actions{display:flex;gap:7px;flex-wrap:wrap}.actions button{font-size:11px;padding:7px 9px}.empty{text-align:center;color:var(--muted);padding:30px}.payment-note{display:flex;align-items:flex-start;gap:13px}.payment-icon{width:36px;height:36px;border-radius:10px;background:#2e2619;color:var(--gold);display:grid;place-items:center;flex:0 0 36px;font-size:17px}.payment-note b{display:block;margin-bottom:3px}.payment-note p{margin:0;color:var(--muted);font-size:12px}
+.device-panel{margin-top:17px}.login-wrap{max-width:530px;margin:70px auto}.login-wrap .panel{padding:25px}.login-wrap h1{font-size:23px;margin:0 0 6px}.login-fields{display:grid;gap:13px;margin-top:20px}.login-fields .pair{display:grid;grid-template-columns:1fr 1.5fr;gap:10px}.foot{color:#69727e;text-align:center;font-size:11px;margin-top:25px}
+@media(max-width:900px){.stats{grid-template-columns:repeat(2,1fr)}.create-grid{grid-template-columns:1fr 1fr}.create-grid button{width:100%}}
+@media(max-width:560px){header{padding:0 15px;height:64px}.connection{display:none}main{padding:0 14px 45px;margin:22px auto}.stats{gap:9px}.stat{padding:14px;min-height:100px}.stat strong{font-size:25px}.page-title h1{font-size:21px}.panel{padding:15px}.create-grid{grid-template-columns:1fr}.toolbar{align-items:stretch}.toolbar input,.toolbar select{max-width:none;flex:1 1 100%}.login-wrap{margin:35px auto}.login-fields .pair{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<header>
+ <div class="brand"><div class="logo">КТ</div><div><b>Кинозал ТВ <span style="color:var(--gold)">PLUS</span></b><small>Панель администратора</small></div></div>
+ <div class="header-right"><div class="connection"><span class="dot" id="statusDot"></span><span id="statusText">Сервер не подключён</span></div><button class="secondary hidden" id="logout">Выйти</button></div>
+</header>
+<main>
+ <section id="loginView" class="login-wrap">
+  <div class="panel">
+   <h1>Вход администратора</h1>
+   <p class="muted" style="margin:4px 0 0">Подключение к серверу лицензий Кинозал ТВ.</p>
+   <form id="loginForm" class="login-fields">
+    <div><label for="apiUrl">Адрес API Worker</label><input id="apiUrl" type="url" value="https://kinozal-tv-license.goblinmini-4pda.workers.dev" required autocomplete="url"></div>
+    <div><label for="token">Секрет администратора (ADMIN_TOKEN)</label><input id="token" type="password" placeholder="Вставь секрет из Cloudflare" required autocomplete="off"></div>
+    <button id="connectButton" type="submit">Подключиться</button>
+    <div id="loginError" class="message error"></div>
+   </form>
+   <div class="notice small">Секрет используется только в оперативной памяти этой вкладки и не сохраняется в браузере. Адрес API можно сохранить для следующих входов.</div>
+  </div>
+  <div class="foot">Кинозал ТВ · Управление Plus</div>
+ </section>
+
+ <section id="dashboard" class="hidden">
+  <div class="page-title"><div><h1>Обзор лицензий</h1><p>Состояние подписок Plus, устройств и активаций</p></div><button class="secondary" id="refresh">Обновить данные</button></div>
+  <div class="stats">
+   <div class="stat"><div class="caption">Всего лицензий</div><strong id="statTotal">—</strong><div class="sub">Все выданные лицензии</div></div>
+   <div class="stat"><div class="caption">Активировано</div><strong id="statActive">—</strong><div class="sub">Лицензии в рабочем статусе</div></div>
+   <div class="stat"><div class="caption">Устройств</div><strong id="statDevices">—</strong><div class="sub">Активные установки</div></div>
+   <div class="stat"><div class="caption">Свободно мест</div><strong id="statSlots">—</strong><div class="sub">Доступные слоты устройств</div></div>
+  </div>
+
+  <section class="panel">
+   <div class="panel-head"><div><h2>Выдать лицензию Plus</h2><div class="panel-desc">Бессрочная лицензия с выбранным количеством устройств</div></div><span class="pill">PLUS · Lifetime</span></div>
+   <form id="issueForm" class="create-grid">
+    <div class="field"><label for="customer">Покупатель / номер заказа</label><input id="customer" maxlength="160" placeholder="Например, Заказ 001"></div>
+    <div class="field"><label for="deviceLimit">Устройств</label><select id="deviceLimit"><option value="1">1 устройство</option><option value="2">2 устройства</option><option value="3" selected>3 устройства</option><option value="4">4 устройства</option><option value="5">5 устройств</option><option value="6">6 устройств</option><option value="7">7 устройств</option><option value="8">8 устройств</option><option value="9">9 устройств</option><option value="10">10 устройств</option></select></div>
+    <div class="field"><label for="codeDays">Срок действия кода</label><select id="codeDays"><option value="7">7 дней</option><option value="30">30 дней</option><option value="60">60 дней</option><option value="90" selected>90 дней</option><option value="180">180 дней</option><option value="365">365 дней</option></select></div>
+    <button id="issueButton" type="submit">Создать лицензию</button>
+   </form>
+   <div class="notice small">Код активации ограничен по сроку, но после активации лицензия Plus действует бессрочно. Выдавай код только после подтверждения оплаты.</div>
+   <div id="issueResult" class="message"></div>
+  </section>
+
+  <section class="panel">
+   <div class="panel-head"><div><h2>Управление лицензиями</h2><div class="panel-desc" id="listCaption">Загружаем записи…</div></div></div>
+   <div class="toolbar" style="margin-bottom:13px">
+    <input id="search" type="search" placeholder="Поиск по владельцу или ID">
+    <select id="statusFilter"><option value="all">Все статусы</option><option value="active">Активные</option><option value="revoked">Отозванные</option></select>
+   </div>
+   <div class="table-wrap"><table><thead><tr><th>Лицензия / владелец</th><th>Статус</th><th>Устройства</th><th>Дата выдачи</th><th>Код действителен до</th><th>Управление</th></tr></thead><tbody id="licenseRows"><tr><td colspan="6" class="empty">Загрузка…</td></tr></tbody></table></div>
+   <div id="listError" class="message error"></div>
+  </section>
+
+  <section class="panel device-panel hidden" id="devicePanel">
+   <div class="panel-head"><div><h2>Устройства лицензии</h2><div class="panel-desc" id="deviceTitle"></div></div><button class="secondary" id="closeDevices">Закрыть</button></div>
+   <div class="table-wrap"><table><thead><tr><th>Устройство</th><th>Добавлено</th><th>Последняя активность</th><th>Статус</th><th></th></tr></thead><tbody id="deviceRows"></tbody></table></div>
+   <div id="deviceError" class="message error"></div>
+  </section>
+
+  <section class="panel">
+   <div class="payment-note"><div class="payment-icon">₽</div><div><b>Платежи: ручное подтверждение</b><p>Сейчас панель выдаёт лицензию после того, как администратор самостоятельно проверит оплату. Автоматическое получение заказов, статусы платежей, возвраты и чеки подключим отдельным этапом после выбора платёжного провайдера. Панель не показывает фиктивные платежи.</p></div></div>
+  </section>
+  <div class="foot">Данные загружаются непосредственно из Cloudflare D1 через защищённый Worker API.</div>
+ </section>
+</main>
+<script>
+(function(){
+ "use strict";
+ const DEFAULT_API="https://kinozal-tv-license.goblinmini-4pda.workers.dev";
+ const $=id=>document.getElementById(id);
+ let apiBase="",adminToken="",licenseRows=[],currentDeviceLicense="";
+ const savedApi=localStorage.getItem("ktv_admin_api");
+ $("apiUrl").value=savedApi||DEFAULT_API;
+ function escapeHtml(value){return String(value==null?"":value).replace(/[&<>"']/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]})}
+ function date(value){if(!value)return "—";const d=new Date(value);return isNaN(d.getTime())?"—":d.toLocaleString("ru-RU")}
+ function setStatus(ok,label){$("statusDot").className=ok?"dot ok":"dot";$("statusText").textContent=label}
+ function normalizeApi(value){const u=new URL(value.trim());if(u.protocol!=="https:")throw new Error("Для API требуется HTTPS");return u.origin+u.pathname.replace(/\/+$/,"")}
+ async function api(path,options){
+  const response=await fetch(apiBase+path,Object.assign({},options||{},{headers:Object.assign({"Authorization":"Bearer "+adminToken,"Content-Type":"application/json"},(options&&options.headers)||{})}));
+  const data=await response.json().catch(()=>({error:"invalid_response"}));
+  if(!response.ok)throw new Error(data.message||data.error||("HTTP "+response.status));
+  return data;
+ }
+ function showLogin(message){$("loginView").classList.remove("hidden");$("dashboard").classList.add("hidden");$("logout").classList.add("hidden");$("loginError").textContent=message||"";adminToken="";setStatus(false,"Сервер не подключён")}
+ function renderLicenses(){
+  const q=$("search").value.trim().toLowerCase(),status=$("statusFilter").value;
+  const rows=licenseRows.filter(function(x){
+   const matches=(String(x.customer_label||"").toLowerCase().includes(q)||String(x.id||"").toLowerCase().includes(q));
+   return matches&&(status==="all"||x.status===status);
+  });
+  $("licenseRows").innerHTML=rows.map(function(x){
+   const active=x.status==="active";
+   return "<tr><td><div class=\"owner\">"+escapeHtml(x.customer_label||"Без подписи")+"</div><div class=\"id\" title=\""+escapeHtml(x.id)+"\">"+escapeHtml(x.id)+"</div></td>"+
+    "<td><span class=\"pill "+(active?"":"off")+"\">"+(active?"Активна":"Отозвана")+"</span></td>"+
+    "<td>"+Number(x.active_devices||0)+" / "+Number(x.device_limit||0)+"</td>"+
+    "<td>"+date(x.created_at)+"</td><td>"+date(x.code_expires_at)+"</td>"+
+    "<td><div class=\"actions\"><button class=\"secondary\" data-devices=\""+escapeHtml(x.id)+"\">Устройства</button>"+(active?"<button class=\"danger\" data-revoke=\""+escapeHtml(x.id)+"\">Отозвать</button>":"")+"</div></td></tr>";
+  }).join("")||"<tr><td colspan=\"6\" class=\"empty\">По заданным условиям лицензии не найдены</td></tr>";
+  $("listCaption").textContent="Показано "+rows.length+" из "+licenseRows.length+" последних лицензий";
+ }
+ async function load(){
+  $("listError").textContent="";$("refresh").disabled=true;
+  try{
+   const data=await api("/admin/licenses",{method:"GET"});
+   licenseRows=Array.isArray(data.licenses)?data.licenses:[];
+   const summary=data.summary||{};
+   $("statTotal").textContent=Number(summary.total_licenses!=null?summary.total_licenses:licenseRows.length).toLocaleString("ru-RU");
+   $("statActive").textContent=Number(summary.active_licenses!=null?summary.active_licenses:licenseRows.filter(x=>x.status==="active").length).toLocaleString("ru-RU");
+   $("statDevices").textContent=Number(summary.active_devices!=null?summary.active_devices:licenseRows.reduce((n,x)=>n+Number(x.active_devices||0),0)).toLocaleString("ru-RU");
+   $("statSlots").textContent=Number(summary.free_slots!=null?summary.free_slots:licenseRows.reduce((n,x)=>n+Math.max(0,Number(x.device_limit||0)-Number(x.active_devices||0)),0)).toLocaleString("ru-RU");
+   renderLicenses();setStatus(true,"Сервер подключён");
+  }catch(e){$("listError").textContent="Не удалось загрузить лицензии: "+e.message;setStatus(false,"Ошибка соединения");if(e.message==="unauthorized")showLogin("Секрет не принят. Проверь ADMIN_TOKEN и попробуй ещё раз.")}
+  finally{$("refresh").disabled=false}
+ }
+ $("loginForm").addEventListener("submit",async function(e){
+  e.preventDefault();$("loginError").textContent="";$("connectButton").disabled=true;
+  try{
+   apiBase=normalizeApi($("apiUrl").value);adminToken=$("token").value.trim();if(!adminToken)throw new Error("Введи ADMIN_TOKEN");
+   await api("/admin/licenses",{method:"GET"});
+   localStorage.setItem("ktv_admin_api",apiBase);$("token").value="";
+   $("loginView").classList.add("hidden");$("dashboard").classList.remove("hidden");$("logout").classList.remove("hidden");
+   await load();
+  }catch(err){adminToken="";$("loginError").textContent="Не удалось подключиться: "+err.message;setStatus(false,"Ошибка соединения")}
+  finally{$("connectButton").disabled=false}
+ });
+ $("logout").onclick=function(){showLogin("Сеанс завершён. Секрет удалён из памяти вкладки.");$("token").value=""};
+ $("refresh").onclick=load;$("search").oninput=renderLicenses;$("statusFilter").onchange=renderLicenses;
+ $("issueForm").addEventListener("submit",async function(e){
+  e.preventDefault();$("issueResult").textContent="";$("issueResult").className="message";$("issueButton").disabled=true;
+  const body={customer_label:$("customer").value.trim(),device_limit:Number($("deviceLimit").value),code_valid_days:Number($("codeDays").value)};
+  try{
+   const data=await api("/admin/licenses",{method:"POST",body:JSON.stringify(body)});
+   $("issueResult").innerHTML="<div class=\"notice\"><b>Лицензия создана. Код показывается только один раз — скопируй его и передай покупателю безопасно.</b><div class=\"codebox\"><span class=\"codevalue\" id=\"issuedCode\">"+escapeHtml(data.activation_code)+"</span><button id=\"copyCode\">Копировать код</button></div><div class=\"small\" style=\"margin-top:8px;color:#dfc28c\">Лимит устройств: "+Number(data.device_limit)+" · Код действителен до "+date(data.code_expires_at)+" · Plus бессрочный</div></div>";
+   $("copyCode").onclick=async function(){try{await navigator.clipboard.writeText(data.activation_code);$("copyCode").textContent="Скопировано"}catch(e){$("copyCode").textContent="Выдели и скопируй код выше"}};
+   $("customer").value="";await load();
+  }catch(err){$("issueResult").className="message error";$("issueResult").textContent="Не удалось создать лицензию: "+err.message}
+  finally{$("issueButton").disabled=false}
+ });
+ $("licenseRows").addEventListener("click",async function(e){
+  const deviceButton=e.target.closest("[data-devices]"),revokeButton=e.target.closest("[data-revoke]");
+  if(deviceButton){await showDevices(deviceButton.dataset.devices);return}
+  if(revokeButton&&confirm("Отозвать лицензию целиком? Все устройства потеряют доступ к Plus и облачной синхронизации.")){
+   try{await api("/admin/licenses/"+revokeButton.dataset.revoke,{method:"DELETE"});await load();$("devicePanel").classList.add("hidden")}
+   catch(err){$("listError").textContent="Не удалось отозвать лицензию: "+err.message}
+  }
+ });
+ async function showDevices(id){
+  currentDeviceLicense=id;$("devicePanel").classList.remove("hidden");$("deviceTitle").textContent="Лицензия "+id;$("deviceRows").innerHTML="<tr><td colspan=\"5\" class=\"empty\">Загрузка…</td></tr>";$("deviceError").textContent="";
+  try{
+   const data=await api("/admin/licenses/"+id+"/devices",{method:"GET"});
+   $("deviceTitle").textContent=(data.license.customer_label||"Без подписи")+" · "+id;
+   $("deviceRows").innerHTML=(data.devices||[]).map(function(d){
+    const active=!d.revoked_at;
+    return "<tr><td><div class=\"owner\">"+escapeHtml(d.device_label||"Устройство")+"</div><div class=\"id\">"+escapeHtml(d.id)+"</div></td><td>"+date(d.created_at)+"</td><td>"+date(d.last_seen_at)+"</td><td><span class=\"pill "+(active?"":"off")+"\">"+(active?"Активно":"Отключено")+"</span></td><td>"+(active?"<button class=\"danger\" data-device-revoke=\""+escapeHtml(d.id)+"\">Отключить</button>":"")+"</td></tr>";
+   }).join("")||"<tr><td colspan=\"5\" class=\"empty\">Устройства пока не активированы</td></tr>";
+  }catch(err){$("deviceError").textContent="Не удалось получить устройства: "+err.message}
+ }
+ $("deviceRows").addEventListener("click",async function(e){
+  const button=e.target.closest("[data-device-revoke]");if(!button)return;
+  if(!confirm("Отключить это устройство? Один слот освободится для новой установки."))return;
+  try{await api("/admin/devices/"+button.dataset.deviceRevoke,{method:"DELETE"});await showDevices(currentDeviceLicense);await load()}
+  catch(err){$("deviceError").textContent="Не удалось отключить устройство: "+err.message}
+ });
+ $("closeDevices").onclick=function(){$("devicePanel").classList.add("hidden")};
+})();
+</script>
+</body>
+</html>
