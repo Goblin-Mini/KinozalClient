@@ -293,16 +293,32 @@ final class TvHomeChannels {
         if (requestCode == REQUEST_BROWSABLE) requestNextBrowsable(activity);
     }
 
+    static void refreshFavorites(Activity activity) {
+        refreshLocalChannel(activity, "favorites");
+    }
+
     static void refreshContinue(Activity activity) {
+        refreshLocalChannel(activity, "continue");
+    }
+
+    private static void refreshLocalChannel(Activity activity, String channelKey) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O || activity == null || activity.isFinishing()) return;
         EXECUTOR.execute(() -> {
             try {
                 PreviewChannelHelper helper = new PreviewChannelHelper(activity);
-                PreviewChannel channel = findChannel(helper, "kinozal:continue");
-                if (channel == null) return;
-                replacePrograms(activity, helper, channel.getId(), "continue", readRecentPrograms(activity));
+                PreviewChannel channel = findChannel(helper, "kinozal:" + channelKey);
+                if (channel == null) {
+                    diag(activity, "LOCAL_CHANNEL_REFRESH", channelKey + " channel not created yet");
+                    return;
+                }
+                JSONArray programs = "favorites".equals(channelKey)
+                        ? readFavoritePrograms(activity) : readRecentPrograms(activity);
+                replacePrograms(activity, helper, channel.getId(), channelKey, programs);
+                diag(activity, "LOCAL_CHANNEL_REFRESH", channelKey + " programs=" + programs.length());
             } catch (Exception e) {
-                Log.w(TAG, "Could not refresh continue-watching channel", e);
+                diag(activity, "LOCAL_CHANNEL_REFRESH_ERROR", channelKey + " " + e.getClass().getSimpleName()
+                        + ": " + e.getMessage());
+                Log.w(TAG, "Could not refresh " + channelKey + " channel", e);
             }
         });
     }
