@@ -290,10 +290,11 @@ async function adminCreateLicense(request: Request, env: Env): Promise<Response>
   if (!await requireAdmin(request, env)) return response(request, env, { error: "unauthorized" }, 401);
   const body = await readJson(request);
   const label = typeof body?.customer_label === "string" ? body.customer_label.trim().slice(0, 160) : "";
-  const expiryDays = Number.isInteger(body?.code_valid_days) ? Number(body?.code_valid_days) : 90;
+  const expiryDays = body?.code_valid_days === 0 || body?.code_valid_days === null
+    ? 0 : Number.isInteger(body?.code_valid_days) ? Number(body?.code_valid_days) : 0;
   const deviceLimit = Number.isInteger(body?.device_limit) ? Number(body?.device_limit) : 3;
-  if (expiryDays < 1 || expiryDays > 365) {
-    return response(request, env, { error: "code_valid_days_must_be_1_to_365" }, 400);
+  if (expiryDays !== 0 && (expiryDays < 1 || expiryDays > 365)) {
+    return response(request, env, { error: "code_valid_days_must_be_0_or_1_to_365" }, 400);
   }
   if (deviceLimit < 1 || deviceLimit > 10) {
     return response(request, env, { error: "device_limit_must_be_1_to_10" }, 400);
@@ -303,7 +304,7 @@ async function adminCreateLicense(request: Request, env: Env): Promise<Response>
   const activationId = randomHex(16);
   const code = randomCode();
   const codeHash = await sha256(normalizeCode(code));
-  const expiresAt = new Date(Date.now() + expiryDays * 86400000).toISOString();
+  const expiresAt = expiryDays === 0 ? null : new Date(Date.now() + expiryDays * 86400000).toISOString();
 
   await env.DB.batch([
     env.DB.prepare(
@@ -318,6 +319,7 @@ async function adminCreateLicense(request: Request, env: Env): Promise<Response>
     license_id: licenseId,
     activation_code: code,
     code_expires_at: expiresAt,
+    code_valid_days: expiryDays,
     device_limit: deviceLimit,
     plan: "plus_lifetime",
     note: "Код показывается только один раз. Передайте его покупателю безопасным способом.",
@@ -333,8 +335,22 @@ async function adminListDevices(request: Request, env: Env, licenseId: string): 
   const devices = await env.DB.prepare(
     `SELECT id, device_label, created_at, last_seen_at, revoked_at
      FROM devices WHERE license_id=? ORDER BY created_at DESC`
-  ).bind(licenseId).all();
-  return response(request, env, { license, devices: devices.results });
+  ).bind(licenseId).all<any>();
+  const codes = await env.DB.prepare(
+    `SELECT id, created_at, expires_at, revoked_at
+     FROM activation_codes WHERE license_id=? ORDER BY created_at DESC`
+  ).bind(licenseId).all<any>();
+  const now = Date.now();
+  const activationCodes = (codes.results || []).map((code: any) => ({
+    id: code.id,
+    created_at: code.created_at,
+    expires_at: code.expires_at,
+    revoked_at: code.revoked_at,
+    status: code.revoked_at ? "revoked" :
+      (code.expires_at && new Date(code.expires_at).getTime() <= now ? "expired" : "active"),
+    code_display: "Полный код показывался только при выдаче",
+  }));
+  return response(request, env, { license, devices: devices.results, activation_codes: activationCodes });
 }
 
 async function adminRevokeDevice(request: Request, env: Env, deviceId: string): Promise<Response> {
