@@ -34,7 +34,7 @@ curl -X POST "https://YOUR-WORKER.workers.dev/admin/licenses" \
   -d '{"customer_label":"Order 001","code_valid_days":90}'
 ```
 
-The response contains a one-time activation code. Copy it and send it privately to the customer. The plaintext code is not stored and cannot be retrieved later. If it is lost before activation, revoke the old license and issue a new one.
+The response contains an activation code. Codes are stored only as AES-GCM ciphertext; plaintext is returned only to the authenticated administrator. Keep `ADMIN_TOKEN` stable because it is used to derive the encryption key. If a code is lost, use the admin panel to view it or issue a replacement.
 
 The default code validity is 90 days (configurable from 1 to 365 days). License lifetime does not expire after activation.
 
@@ -51,7 +51,7 @@ Open this URL, enter the current `ADMIN_TOKEN` secret, and use the dashboard to:
 - revoke an individual device (frees one of the three slots);
 - revoke an entire license.
 
-The dashboard talks to the same-origin Worker API. The admin token is held only in the current browser tab's memory and is not saved to local storage. The activation code is shown only once after creation; copy it and send it privately to the customer. The dashboard does not process payments or verify receipts.
+The dashboard talks to the same-origin Worker API. The admin token is held only in the current browser tab's memory and is not saved to local storage. Activation codes can be viewed and copied later from each license's **Коды активации** section. Older codes created before encrypted storage cannot be recovered; issue a replacement for those licenses. The dashboard does not process payments or verify receipts.
 
 The Worker source is `license-server/src/index.ts`. Deploy the updated Worker before opening `/admin`; the dashboard requires the `GET /admin/licenses` endpoint added with this version. Keep the existing D1 binding named `DB` and the secret `ADMIN_TOKEN`.
 
@@ -87,7 +87,7 @@ The Android client uses the same per-device token issued by `POST /v1/devices/cl
 - The server applies per-item last-write-wins ordering and keeps tombstones so offline devices receive deletions.
 - The client keeps its local SharedPreferences data and defers synchronization when offline or when the license is unavailable.
 
-For an existing D1 database, apply the updated schema again (all tables/indexes use `IF NOT EXISTS`):
+For an existing D1 database, run the one-time migration `license-server/migrations/0002_encrypted_activation_codes.sql` in the D1 SQL console. For a new database, the main schema includes the encrypted-code columns. Do not rotate `ADMIN_TOKEN` without planning an encryption-key migration.
 
 ```sh
 npx wrangler d1 execute kinozal-tv-license --file=./schema.sql
