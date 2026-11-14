@@ -263,8 +263,8 @@ async function putSyncItems(request: Request, env: Env): Promise<Response> {
       updatedAt, device.device_id));
   }
   if (statements.length) await env.DB.batch(statements);
-  await env.DB.prepare("UPDATE devices SET last_seen_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?")
-    .bind(device.device_id).run();
+  // getSyncItems updates last_seen_at while returning the merged snapshot.
+  // Avoid a second identical D1 write on every sync request.
   return await getSyncItems(request, env);
 }
 
