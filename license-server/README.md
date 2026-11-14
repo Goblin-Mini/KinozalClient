@@ -126,3 +126,8 @@ curl -X DELETE "https://YOUR-WORKER.workers.dev/admin/licenses/LICENSE_ID" \
 - The Android sync client is integrated, but the Worker must be deployed and its D1 schema applied before cloud sync can be used.
 - No OWNER provisioning endpoint yet; owner entitlement remains a separate follow-up.
 - Before production use, test simultaneous activation attempts, expired/revoked codes, device revocation, token loss, and D1 behavior in a Cloudflare test database.
+
+
+## Existing database migration
+
+In Cloudflare Dashboard, open the existing D1 database, open its SQL console, paste the contents of `migrations/0002_encrypted_activation_codes.sql`, and execute once. Do not delete or recreate the database. The migration only adds two nullable columns to `activation_codes`.
