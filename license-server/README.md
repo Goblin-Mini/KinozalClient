@@ -7,7 +7,7 @@ This service supports manual payment verification and manual license issuance. I
 - Plus entitlement can be lifetime or time-limited (7, 30, 60, 90, 180, or 365 days).
 - The selected Plus term starts on the first successful device activation; all devices on the license share the same expiry.
 - Activation code itself is valid for 90 days after issuance.
-- One activation code can enroll up to 3 active installations.
+- A license can have 1–10 active installations, according to its configured device limit.
 - The same code is entered on each of the customer's devices.
 - Revoking an old device frees a slot.
 - The app receives a per-installation device token; only its SHA-256 hash is stored.
@@ -36,7 +36,7 @@ curl -X POST "https://YOUR-WORKER.workers.dev/admin/licenses" \
   -d '{"customer_label":"Order 001","code_valid_days":90}'
 ```
 
-The response contains a one-time activation code. Copy it and send it privately to the customer. The plaintext code is not stored and cannot be retrieved later. If it is lost before activation, revoke the old license and issue a new one.
+The response contains an activation code. It is stored as AES-GCM ciphertext and can be viewed only by an authenticated administrator. Keep ADMIN_TOKEN unchanged because it currently derives the encryption key. If a code is lost, view it in the admin panel or issue a replacement.
 
 The activation code is valid for 90 days after issuance. The Plus entitlement term is selected separately and starts on the first successful activation. Choose 0 for lifetime, or 7, 30, 60, 90, 180, or 365 days.
 
@@ -51,7 +51,7 @@ The Pages site calls the Worker API at `https://YOUR-WORKER.workers.dev`. It sup
 - searching and filtering licenses;
 - viewing attached devices and revoking an individual device or an entire license.
 
-The admin page stores the public API URL in browser local storage, but the `ADMIN_TOKEN` is held only in the current tab's memory. It is never written to local storage, the page source, or the repository. The activation code is shown only once after creation; copy it and send it privately to the customer.
+The admin page stores the public API URL in browser local storage, but the `ADMIN_TOKEN` is held only in the current tab's memory. It is never written to local storage, the page source, or the repository. Activation codes can be viewed and copied later from each license's «Коды активации» section. Codes created before encrypted storage cannot be recovered; issue a replacement for those licenses.
 
 ### Deploy the separate Pages site from the Cloudflare dashboard
 
@@ -101,11 +101,7 @@ The Android client uses the same per-device token issued by `POST /v1/devices/cl
 - The server applies per-item last-write-wins ordering and keeps tombstones so offline devices receive deletions.
 - The client keeps its local SharedPreferences data and defers synchronization when offline or when the license is unavailable.
 
-For an existing D1 database, apply the updated schema again (all tables/indexes use `IF NOT EXISTS`):
-
-```sh
-npx wrangler d1 execute kinozal-tv-license --file=./schema.sql
-```
+For an existing D1 database, run `license-server/migrations/0003_encrypted_activation_codes.sql` exactly once in the Cloudflare D1 SQL console. Do not run it again. For a new database, `schema.sql` already includes the encrypted-code columns.
 
 In the app open **Настройки → Синхронизация**, enter the deployed HTTPS Worker URL, save it, and activate each device with the same Plus activation code. Each installation consumes one of the license's three device slots.
 
@@ -135,6 +131,7 @@ curl -X DELETE "https://YOUR-WORKER.workers.dev/admin/licenses/LICENSE_ID" \
 ## Important current limitations
 
 - No customer login/account recovery yet.
+- Existing D1 databases require the one-time `0003_encrypted_activation_codes.sql` migration before deploying this Worker version.
 - The standalone Pages admin site must be deployed and its exact origin configured as Worker variable `ALLOWED_ORIGIN`.
 - No payment integration, receipt handling, refunds or automatic issuance; issuance is manual after external payment verification.
 - The Android sync client is integrated, but the Worker must be deployed and its D1 schema applied before cloud sync can be used.

@@ -79,7 +79,7 @@ main{max-width:1260px;margin:30px auto;padding:0 22px 60px}.page-title{display:f
    <h3 style="font-size:14px;margin:12px 0">Устройства</h3>
    <div class="table-wrap"><table><thead><tr><th>Устройство</th><th>Добавлено</th><th>Последняя активность</th><th>Статус</th><th></th></tr></thead><tbody id="deviceRows"></tbody></table></div>
    <h3 style="font-size:14px;margin:20px 0 10px">Коды активации</h3>
-   <div class="table-wrap"><table><thead><tr><th>Код</th><th>Выдан</th><th>Действителен до</th><th>Статус</th></tr></thead><tbody id="activationCodeRows"></tbody></table></div>
+   <div class="table-wrap"><table><thead><tr><th>Код</th><th>Выдан</th><th>Действителен до</th><th>Статус</th><th></th></tr></thead><tbody id="activationCodeRows"></tbody></table></div><div class="toolbar" style="margin-top:12px"><div class="field" style="max-width:180px"><label for="reissueDays">Срок нового кода, дней</label><input id="reissueDays" type="number" min="1" max="365" value="90"></div><button id="reissueCode" class="secondary">Выпустить новый код</button></div><div id="reissueResult" class="message"></div>
    <div class="small muted" style="margin-top:8px">Полный код не хранится на сервере и доступен только один раз при выдаче. Здесь отображаются история, срок и состояние кодов.</div>
    <div id="deviceError" class="message error"></div>
   </section>
@@ -157,7 +157,7 @@ main{max-width:1260px;margin:30px auto;padding:0 22px 60px}.page-title{display:f
   const body={customer_label:$("customer").value.trim(),device_limit:Number($("deviceLimit").value),license_days:Number($("licenseDays").value)};
   try{
    const data=await api("/admin/licenses",{method:"POST",body:JSON.stringify(body)});
-   $("issueResult").innerHTML="<div class=\"notice\"><b>Лицензия создана. Код показывается только один раз — скопируй его и передай покупателю безопасно.</b><div class=\"codebox\"><span class=\"codevalue\" id=\"issuedCode\">"+escapeHtml(data.activation_code)+"</span><button id=\"copyCode\">Копировать код</button></div><div class=\"small\" style=\"margin-top:8px;color:#dfc28c\">Лимит устройств: "+Number(data.device_limit)+" · Код действителен до: "+date(data.code_expires_at)+" · Plus: "+(Number(data.license_days)===0?"бессрочно":(Number(data.license_days)+" дней с первой активации"))+"</div></div>";
+   $("issueResult").innerHTML="<div class=\"notice\"><b>Лицензия создана. Код сохранён зашифрованным — его можно посмотреть позже в карточке лицензии.</b><div class=\"codebox\"><span class=\"codevalue\" id=\"issuedCode\">"+escapeHtml(data.activation_code)+"</span><button id=\"copyCode\">Копировать код</button></div><div class=\"small\" style=\"margin-top:8px;color:#dfc28c\">Лимит устройств: "+Number(data.device_limit)+" · Код действителен до: "+date(data.code_expires_at)+" · Plus: "+(Number(data.license_days)===0?"бессрочно":(Number(data.license_days)+" дней с первой активации"))+"</div></div>";
    $("copyCode").onclick=async function(){try{await navigator.clipboard.writeText(data.activation_code);$("copyCode").textContent="Скопировано"}catch(e){$("copyCode").textContent="Выдели и скопируй код выше"}};
    $("customer").value="";await load();
   }catch(err){$("issueResult").className="message error";$("issueResult").textContent="Не удалось создать лицензию: "+err.message}
@@ -176,16 +176,36 @@ main{max-width:1260px;margin:30px auto;padding:0 22px 60px}.page-title{display:f
   try{
    const data=await api("/admin/licenses/"+id+"/devices",{method:"GET"});
    $("deviceTitle").textContent=(data.license.customer_label||"Без подписи")+" · "+id+" · Plus: "+(Number(data.license.duration_days||0)===0?"бессрочно":(data.license.expires_at?("до "+date(data.license.expires_at)):(data.license.duration_days+" дней · ожидает активации")));
-   $("activationCodeRows").innerHTML=(data.activation_codes||[]).map(function(c){
+   const codeData=await api("/admin/licenses/"+id+"/codes",{method:"GET"});
+   $("activationCodeRows").innerHTML=(codeData.codes||[]).map(function(c){
     const status=c.status==="revoked"?"Отозван":c.status==="expired"?"Истёк":"Активен";
-    return "<tr><td><span class=\"id\">"+escapeHtml(c.code_display||"Код выдан")+"</span></td><td>"+date(c.created_at)+"</td><td>"+(c.expires_at?date(c.expires_at):"Бессрочно")+"</td><td><span class=\"pill "+(c.status==="active"?"":"off")+"\">"+status+"</span></td></tr>";
-   }).join("")||"<tr><td colspan=\"4\" class=\"empty\">Коды активации не найдены</td></tr>";
+    const codeCell=c.activation_code?escapeHtml(c.activation_code):"Старый код — недоступен";
+    const copy=c.activation_code?"<button class=\"secondary\" data-copy-activation=\""+escapeHtml(c.activation_code)+"\">Копировать</button>":"—";
+    return "<tr><td><span class=\"id\">"+codeCell+"</span></td><td>"+date(c.created_at)+"</td><td>"+(c.expires_at?date(c.expires_at):"—")+"</td><td><span class=\"pill "+(c.status==="active"?"":"off")+"\">"+status+"</span></td><td>"+copy+"</td></tr>";
+   }).join("")||"<tr><td colspan=\"5\" class=\"empty\">Коды активации не найдены</td></tr>";
    $("deviceRows").innerHTML=(data.devices||[]).map(function(d){
     const active=!d.revoked_at;
     return "<tr><td><div class=\"owner\">"+escapeHtml(d.device_label||"Устройство")+"</div><div class=\"id\">"+escapeHtml(d.id)+"</div></td><td>"+date(d.created_at)+"</td><td>"+date(d.last_seen_at)+"</td><td><span class=\"pill "+(active?"":"off")+"\">"+(active?"Активно":"Отключено")+"</span></td><td>"+(active?"<button class=\"danger\" data-device-revoke=\""+escapeHtml(d.id)+"\">Отключить</button>":"")+"</td></tr>";
    }).join("")||"<tr><td colspan=\"5\" class=\"empty\">Устройства пока не активированы</td></tr>";
   }catch(err){$("deviceError").textContent="Не удалось получить устройства: "+err.message}
  }
+ $("activationCodeRows").addEventListener("click",async function(e){
+  const button=e.target.closest("[data-copy-activation]");if(!button)return;
+  try{await navigator.clipboard.writeText(button.dataset.copyActivation);button.textContent="Скопировано"}catch(err){$("reissueResult").textContent="Не удалось скопировать код: "+err.message}
+ });
+ $("reissueCode").onclick=async function(){
+  const days=Number($("reissueDays").value);$("reissueResult").textContent="";
+  if(!Number.isInteger(days)||days<1||days>365){$("reissueResult").className="message error";$("reissueResult").textContent="Срок должен быть от 1 до 365 дней";return}
+  $("reissueCode").disabled=true;
+  try{
+   const result=await api("/admin/licenses/"+currentDeviceLicense+"/activation-code",{method:"POST",body:JSON.stringify({code_valid_days:days})});
+   $("reissueResult").className="message success";
+   $("reissueResult").innerHTML="Новый код: <b class=\"codevalue\">"+escapeHtml(result.activation_code)+"</b> <button id=\"copyNewActivation\" class=\"secondary\">Копировать</button>";
+   $("copyNewActivation").onclick=async function(){try{await navigator.clipboard.writeText(result.activation_code);this.textContent="Скопировано"}catch(e){this.textContent="Скопируй вручную"}};
+   await showDevices(currentDeviceLicense);await load();
+  }catch(err){$("reissueResult").className="message error";$("reissueResult").textContent="Не удалось выпустить код: "+err.message}
+  finally{$("reissueCode").disabled=false}
+ };
  $("deviceRows").addEventListener("click",async function(e){
   const button=e.target.closest("[data-device-revoke]");if(!button)return;
   if(!confirm("Отключить это устройство? Один слот освободится для новой установки."))return;
