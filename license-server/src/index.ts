@@ -64,7 +64,7 @@ function cors(request: Request, env: Env): Headers {
     headers.set("access-control-allow-origin", origin);
     headers.set("vary", "Origin");
   }
-  headers.set("access-control-allow-methods", "GET, POST, DELETE, OPTIONS");
+  headers.set("access-control-allow-methods", "GET, POST, PUT, DELETE, OPTIONS");
   headers.set("access-control-allow-headers", "authorization, content-type");
   return headers;
 }
