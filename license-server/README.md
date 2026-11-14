@@ -38,22 +38,34 @@ The response contains a one-time activation code. Copy it and send it privately 
 
 The default code validity is 90 days (configurable from 1 to 365 days). License lifetime does not expire after activation.
 
-## Web admin panel
+## Separate browser admin site
 
-The Worker serves a browser-based admin dashboard at:
+The administration interface is a standalone static site in `admin-panel/`. It is intended to be deployed as its own Cloudflare Pages project, separate from the license Worker and the public landing page.
 
-`https://YOUR-WORKER.workers.dev/admin`
+The Pages site calls the Worker API at `https://YOUR-WORKER.workers.dev`. It supports:
+- live totals for licenses, active licenses, devices and free device slots;
+- issuing lifetime Plus licenses after manual payment verification;
+- selecting the installation limit (1–10 devices) and activation-code validity (7–365 days);
+- searching and filtering licenses;
+- viewing attached devices and revoking an individual device or an entire license.
 
-Open this URL, enter the current `ADMIN_TOKEN` secret, and use the dashboard to:
-- issue a lifetime Plus license after manually confirming payment;
-- view licenses and active-device counts;
-- inspect installations attached to a license;
-- revoke an individual device (frees one of the three slots);
-- revoke an entire license.
+The admin page stores the public API URL in browser local storage, but the `ADMIN_TOKEN` is held only in the current tab's memory. It is never written to local storage, the page source, or the repository. The activation code is shown only once after creation; copy it and send it privately to the customer.
 
-The dashboard talks to the same-origin Worker API. The admin token is held only in the current browser tab's memory and is not saved to local storage. The activation code is shown only once after creation; copy it and send it privately to the customer. The dashboard does not process payments or verify receipts.
+### Deploy the separate Pages site from the Cloudflare dashboard
 
-The Worker source is `license-server/src/index.ts`. Deploy the updated Worker before opening `/admin`; the dashboard requires the `GET /admin/licenses` endpoint added with this version. Keep the existing D1 binding named `DB` and the secret `ADMIN_TOKEN`.
+1. In **Workers & Pages**, choose **Create application → Pages → Connect to Git**.
+2. Select `Goblin-Mini/KinozalClient` and the `main` branch.
+3. Leave the build command empty and set the build output directory to `admin-panel`. The repository root can remain the default.
+4. Name the Pages project `kinozal-tv-plus-admin` (or another available name), then deploy it. Cloudflare will show the exact `https://PROJECT.pages.dev` address.
+5. In the existing license Worker, open **Settings → Variables and Secrets** and add a plain-text variable named `ALLOWED_ORIGIN` with the exact Pages origin, for example `https://kinozal-tv-plus-admin.pages.dev`. Do not include a path or trailing slash.
+6. Deploy the Worker version containing `license-server/src/index.ts`. Keep the existing D1 binding named `DB` and secret `ADMIN_TOKEN`; neither should be recreated.
+7. Open the Pages URL, enter the Worker API URL and the existing `ADMIN_TOKEN`, then connect.
+
+The Worker only adds CORS permission for the exact value in `ALLOWED_ORIGIN`. Do not use a wildcard. If a custom domain is later attached to Pages, update this variable to that exact origin.
+
+### Payment status
+
+Payment processing is not connected yet. At this stage the administrator verifies payment outside the panel and issues Plus manually. The dashboard clearly labels this manual process; it does not invent payment records or claim that receipts have been checked. Payment-provider webhooks, orders, refunds and automatic issuance are a later stage.
 
 ## Android API
 
@@ -121,8 +133,8 @@ curl -X DELETE "https://YOUR-WORKER.workers.dev/admin/licenses/LICENSE_ID" \
 ## Important current limitations
 
 - No customer login/account recovery yet.
-- No web-based admin panel; admin operations use authenticated API calls.
-- No payment integration, receipts, refunds or automatic issuance.
+- The standalone Pages admin site must be deployed and its exact origin configured as Worker variable `ALLOWED_ORIGIN`.
+- No payment integration, receipt handling, refunds or automatic issuance; issuance is manual after external payment verification.
 - The Android sync client is integrated, but the Worker must be deployed and its D1 schema applied before cloud sync can be used.
 - No OWNER provisioning endpoint yet; owner entitlement remains a separate follow-up.
 - Before production use, test simultaneous activation attempts, expired/revoked codes, device revocation, token loss, and D1 behavior in a Cloudflare test database.
