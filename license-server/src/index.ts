@@ -19,6 +19,7 @@ const ADMIN_HTML = String.raw`<!doctype html>
 <div class="stats"><div class="panel stat"><strong id="sTotal">—</strong><span>Всего лицензий</span></div><div class="panel stat"><strong id="sActive">—</strong><span>Активных лицензий</span></div><div class="panel stat"><strong id="sDevices">—</strong><span>Активных устройств</span></div><div class="panel stat"><strong id="sSlots">—</strong><span>Свободных слотов</span></div></div>
 <section class="panel"><h2 style="margin-top:0">Выдать Plus</h2><div class="muted">Создавай лицензию только после ручной проверки оплаты.</div><div class="row" style="margin-top:14px"><input id="customer" maxlength="160" placeholder="Покупатель / номер заказа"><input id="days" type="number" min="1" max="365" value="90" style="max-width:130px;flex:0 0 130px" title="Срок действия кода, дней"><button id="issue">Создать лицензию</button></div><div class="muted" style="margin-top:8px">Код активации действует 1–365 дней. После активации Plus бессрочный, до 3 устройств.</div><div id="issued" class="notice hidden"></div><p id="issueError" class="error"></p></section>
 <section class="panel"><div class="row"><div><h2 style="margin:0">Лицензии</h2><div class="muted">Последние 500 записей</div></div><input id="filter" placeholder="Поиск по покупателю или ID" style="max-width:320px"><button id="refresh" class="secondary">Обновить</button></div><div class="table-wrap" style="margin-top:14px"><table><thead><tr><th>Покупатель</th><th>Статус</th><th>Устройства</th><th>Создана</th><th>Код до</th><th>Действия</th></tr></thead><tbody id="licenses"></tbody></table></div><p id="listError" class="error"></p></section>
+<section id="codesPanel" class="panel hidden"><div class="row"><div><h2 style="margin:0">Коды активации</h2><div id="codesSubtitle" class="muted"></div></div><button id="closeCodes" class="secondary right">Закрыть</button></div><div id="codesList" style="margin-top:14px"></div><div class="row" style="margin-top:14px"><input id="reissueDays" type="number" min="1" max="365" value="90" style="max-width:150px"><button id="reissueCode">Выпустить новый код</button></div><p class="muted">Новый код заменит предыдущие неиспользованные коды. Уже активированные устройства сохранят лицензию.</p><p id="codesError" class="error"></p></section>
 <section id="devicePanel" class="panel hidden"><div class="row"><div><h2 style="margin:0">Устройства лицензии</h2><div id="deviceSubtitle" class="muted"></div></div><button id="closeDevices" class="secondary right">Закрыть</button></div><div class="table-wrap"><table><thead><tr><th>Название</th><th>Добавлено</th><th>Последняя активность</th><th>Статус</th><th></th></tr></thead><tbody id="devices"></tbody></table></div><p id="deviceError" class="error"></p></section>
 </section></main>
 <script>
@@ -29,13 +30,19 @@ const date=s=>s?new Date(s).toLocaleString("ru-RU"):"—";
 async function api(path,options={}){const r=await fetch(path,{...options,headers:{"Authorization":"Bearer "+adminToken,"Content-Type":"application/json",...(options.headers||{})}});const d=await r.json().catch(()=>({error:"invalid_response"}));if(!r.ok)throw new Error(d.message||d.error||("HTTP "+r.status));return d}
 function login(){ $("login").classList.remove("hidden");$("app").classList.add("hidden");$("logout").classList.add("hidden");adminToken="";}
 async function load(){ $("listError").textContent="";try{const d=await api("/admin/licenses");licenseRows=d.licenses||[];render();const a=licenseRows.filter(x=>x.status==="active");const n=a.reduce((v,x)=>v+x.active_devices,0);$("sTotal").textContent=licenseRows.length;$("sActive").textContent=a.length;$("sDevices").textContent=n;$("sSlots").textContent=a.reduce((v,x)=>v+Math.max(0,x.device_limit-x.active_devices),0)}catch(e){$("listError").textContent=e.message;if(e.message==="unauthorized")login()}}
-function render(){const q=$("filter").value.trim().toLowerCase();$("licenses").innerHTML=licenseRows.filter(x=>(x.customer_label||"").toLowerCase().includes(q)||x.id.toLowerCase().includes(q)).map(x=>'<tr><td><b>'+esc(x.customer_label||"Без подписи")+'</b><div class="muted code">'+esc(x.id)+'</div></td><td><span class="status '+(x.status==="active"?"":"off")+'">'+(x.status==="active"?"Активна":"Отозвана")+'</span></td><td>'+x.active_devices+' / '+x.device_limit+'</td><td>'+date(x.created_at)+'</td><td>'+date(x.code_expires_at)+'</td><td><div class="row"><button class="secondary" data-dev="'+esc(x.id)+'">Устройства</button>'+(x.status==="active"?'<button class="danger" data-revoke="'+esc(x.id)+'">Отозвать</button>':"")+'</div></td></tr>').join("")||'<tr><td colspan="6" class="muted">Ничего не найдено</td></tr>'}
+function render(){const q=$("filter").value.trim().toLowerCase();$("licenses").innerHTML=licenseRows.filter(x=>(x.customer_label||"").toLowerCase().includes(q)||x.id.toLowerCase().includes(q)).map(x=>'<tr><td><b>'+esc(x.customer_label||"Без подписи")+'</b><div class="muted code">'+esc(x.id)+'</div></td><td><span class="status '+(x.status==="active"?"":"off")+'">'+(x.status==="active"?"Активна":"Отозвана")+'</span></td><td>'+x.active_devices+' / '+x.device_limit+'</td><td>'+date(x.created_at)+'</td><td>'+date(x.code_expires_at)+'</td><td><div class="row"><button class="secondary" data-dev="'+esc(x.id)+'">Устройства</button><button class="secondary" data-codes="'+esc(x.id)+'">Коды активации</button>'+(x.status==="active"?'<button class="danger" data-revoke="'+esc(x.id)+'">Отозвать</button>':"")+'</div></td></tr>').join("")||'<tr><td colspan="6" class="muted">Ничего не найдено</td></tr>'}
 $("connect").onclick=async()=>{adminToken=$("token").value.trim();$("loginError").textContent="";if(!adminToken)return;$("connect").disabled=true;try{await api("/admin/licenses");$("login").classList.add("hidden");$("app").classList.remove("hidden");$("logout").classList.remove("hidden");await load()}catch(e){adminToken="";$("loginError").textContent="Не удалось войти: "+e.message}finally{$("connect").disabled=false}};
 $("logout").onclick=login;$("refresh").onclick=load;$("filter").oninput=render;
-$("issue").onclick=async()=>{const label=$("customer").value.trim(),days=Number($("days").value);$("issueError").textContent="";$("issued").classList.add("hidden");if(!Number.isInteger(days)||days<1||days>365){$("issueError").textContent="Срок кода должен быть от 1 до 365 дней";return}$("issue").disabled=true;try{const d=await api("/admin/licenses",{method:"POST",body:JSON.stringify({customer_label:label,code_valid_days:days})});$("issued").innerHTML='<b>Лицензия создана. Скопируй код сейчас — повторно получить его нельзя.</b><p class="code" id="newCode">'+esc(d.activation_code)+'</p><div class="row"><button id="copyCode">Копировать код</button><span class="muted">До '+date(d.code_expires_at)+'</span></div>';$("issued").classList.remove("hidden");$("copyCode").onclick=async()=>{await navigator.clipboard.writeText(d.activation_code);$("copyCode").textContent="Скопировано"};$("customer").value="";await load()}catch(e){$("issueError").textContent=e.message}finally{$("issue").disabled=false}};
-$("licenses").onclick=async e=>{const dev=e.target.closest("[data-dev]")?.dataset.dev,rev=e.target.closest("[data-revoke]")?.dataset.revoke;if(dev)await showDevices(dev);if(rev&&confirm("Отозвать лицензию целиком? Все устройства потеряют Plus и синхронизацию.")){try{await api("/admin/licenses/"+rev,{method:"DELETE"});await load()}catch(err){$("listError").textContent=err.message}}};
+$("issue").onclick=async()=>{const label=$("customer").value.trim(),days=Number($("days").value);$("issueError").textContent="";$("issued").classList.add("hidden");if(!Number.isInteger(days)||days<1||days>365){$("issueError").textContent="Срок кода должен быть от 1 до 365 дней";return}$("issue").disabled=true;try{const d=await api("/admin/licenses",{method:"POST",body:JSON.stringify({customer_label:label,code_valid_days:days})});$("issued").innerHTML='<b>Лицензия создана. Код сохранён зашифрованным; его можно посмотреть позже в карточке лицензии.</b><p class="code" id="newCode">'+esc(d.activation_code)+'</p><div class="row"><button id="copyCode">Копировать код</button><span class="muted">До '+date(d.code_expires_at)+'</span></div>';$("issued").classList.remove("hidden");$("copyCode").onclick=async()=>{await navigator.clipboard.writeText(d.activation_code);$("copyCode").textContent="Скопировано"};$("customer").value="";await load()}catch(e){$("issueError").textContent=e.message}finally{$("issue").disabled=false}};
+$("licenses").onclick=async e=>{const codes=e.target.closest("[data-codes]")?.dataset.codes;if(codes)await showCodes(codes);const dev=e.target.closest("[data-dev]")?.dataset.dev,rev=e.target.closest("[data-revoke]")?.dataset.revoke;if(dev)await showDevices(dev);if(rev&&confirm("Отозвать лицензию целиком? Все устройства потеряют Plus и синхронизацию.")){try{await api("/admin/licenses/"+rev,{method:"DELETE"});await load()}catch(err){$("listError").textContent=err.message}}};
 async function showDevices(id){$("devicePanel").classList.remove("hidden");$("deviceSubtitle").textContent=id;$("devices").innerHTML="";$("deviceError").textContent="";try{const d=await api("/admin/licenses/"+id+"/devices");$("deviceSubtitle").textContent=(d.license.customer_label||id)+" · "+id;$("devices").innerHTML=(d.devices||[]).map(x=>'<tr><td>'+esc(x.device_label||"Устройство")+'<div class="muted code">'+esc(x.id)+'</div></td><td>'+date(x.created_at)+'</td><td>'+date(x.last_seen_at)+'</td><td><span class="status '+(x.revoked_at?"off":"")+'">'+(x.revoked_at?"Отключено":"Активно")+'</span></td><td>'+(x.revoked_at?"":'<button class="danger" data-device-revoke="'+esc(x.id)+'">Отключить</button>')+'</td></tr>').join("")||'<tr><td colspan="5">Устройств пока нет</td></tr>'}catch(e){$("deviceError").textContent=e.message}}
 $("devices").onclick=async e=>{const id=e.target.closest("[data-device-revoke]")?.dataset.deviceRevoke;if(id&&confirm("Отключить это устройство? Освободится один слот.")){try{await api("/admin/devices/"+id,{method:"DELETE"});const licenseId=$("deviceSubtitle").textContent.split(" · ").pop();await showDevices(licenseId);await load()}catch(err){$("deviceError").textContent=err.message}}};
+
+let selectedLicenseForCodes="";
+async function showCodes(id){selectedLicenseForCodes=id;$("codesPanel").classList.remove("hidden");$("codesSubtitle").textContent=id;$("codesList").textContent="Загрузка…";$("codesError").textContent="";try{const d=await api("/admin/licenses/"+id+"/codes");$("codesSubtitle").textContent=(d.license.customer_label||id)+" · "+id;$("codesList").innerHTML=(d.codes||[]).map(c=>'<div class="panel"><div class="row"><b>'+date(c.created_at)+'</b><span class="status '+(c.revoked_at?"off":"")+'">'+(c.revoked_at?"Отозван":(new Date(c.expires_at)<new Date()?"Истёк":"Действует"))+'</span><span class="muted">До '+date(c.expires_at)+'</span></div>'+(c.activation_code?'<p class="code">'+esc(c.activation_code)+'</p><button class="secondary" data-copy-code="'+esc(c.activation_code)+'">Копировать</button>':'<p class="muted">Старый код был создан до защищённого хранения. Его нельзя восстановить — выпусти новый код ниже.</p>')+'</div>').join("")||'<p class="muted">Кодов пока нет</p>'}catch(e){$("codesError").textContent=e.message;$("codesList").textContent="Не удалось загрузить коды"}}
+$("codesList").onclick=async e=>{const code=e.target.closest("[data-copy-code]")?.dataset.copyCode;if(code){await navigator.clipboard.writeText(code);e.target.textContent="Скопировано"}};
+$("reissueCode").onclick=async()=>{const days=Number($("reissueDays").value);$("codesError").textContent="";if(!Number.isInteger(days)||days<1||days>365){$("codesError").textContent="Срок должен быть от 1 до 365 дней";return}try{const d=await api("/admin/licenses/"+selectedLicenseForCodes+"/activation-code",{method:"POST",body:JSON.stringify({code_valid_days:days})});await showCodes(selectedLicenseForCodes);const p=document.createElement("div");p.className="notice";p.innerHTML='<b>Новый код создан</b><p class="code">'+esc(d.activation_code)+'</p><button id="copyReissued">Копировать</button>';$("codesList").prepend(p);$("copyReissued").onclick=async()=>{await navigator.clipboard.writeText(d.activation_code);$("copyReissued").textContent="Скопировано"};await load()}catch(e){$("codesError").textContent=e.message}};
+$("closeCodes").onclick=()=>$("codesPanel").classList.add("hidden");
 $("closeDevices").onclick=()=>$("devicePanel").classList.add("hidden");
 </script></body></html>`;
 
@@ -74,6 +81,23 @@ function normalizeCode(code: string): string {
 async function sha256(value: string): Promise<string> {
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
   return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+
+async function codeCryptoKey(env: Env): Promise<CryptoKey> {
+  const raw = await crypto.subtle.digest("SHA-256", new TextEncoder().encode("kinozal-plus-code-encryption:" + env.ADMIN_TOKEN));
+  return await crypto.subtle.importKey("raw", raw, { name: "AES-GCM" }, false, ["encrypt", "decrypt"]);
+}
+async function encryptActivationCode(code: string, env: Env): Promise<{ cipher: string; iv: string }> {
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const encrypted = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, await codeCryptoKey(env), new TextEncoder().encode(code));
+  const hex = (v: Uint8Array) => [...v].map(x => x.toString(16).padStart(2, "0")).join("");
+  return { cipher: hex(new Uint8Array(encrypted)), iv: hex(iv) };
+}
+async function decryptActivationCode(cipher: string, ivHex: string, env: Env): Promise<string> {
+  const fromHex = (v: string) => new Uint8Array(v.match(/.{2}/g)?.map(x => parseInt(x, 16)) || []);
+  const plain = await crypto.subtle.decrypt({ name: "AES-GCM", iv: fromHex(ivHex) }, await codeCryptoKey(env), fromHex(cipher));
+  return new TextDecoder().decode(plain);
 }
 
 function equalSecret(a: string, b: string): boolean {
@@ -314,6 +338,7 @@ async function adminCreateLicense(request: Request, env: Env): Promise<Response>
   const activationId = randomHex(16);
   const code = randomCode();
   const codeHash = await sha256(normalizeCode(code));
+  const encrypted = await encryptActivationCode(code, env);
   const expiresAt = new Date(Date.now() + expiryDays * 86400000).toISOString();
 
   await env.DB.batch([
@@ -321,8 +346,8 @@ async function adminCreateLicense(request: Request, env: Env): Promise<Response>
       "INSERT INTO licenses (id, customer_label, plan, status, device_limit) VALUES (?, ?, 'plus_lifetime', 'active', 3)"
     ).bind(licenseId, label || null),
     env.DB.prepare(
-      "INSERT INTO activation_codes (id, license_id, code_hash, expires_at) VALUES (?, ?, ?, ?)"
-    ).bind(activationId, licenseId, codeHash, expiresAt),
+      "INSERT INTO activation_codes (id, license_id, code_hash, expires_at, encrypted_code, encryption_iv) VALUES (?, ?, ?, ?, ?, ?)"
+    ).bind(activationId, licenseId, codeHash, expiresAt, encrypted.cipher, encrypted.iv),
   ]);
 
   return response(request, env, {
@@ -331,8 +356,39 @@ async function adminCreateLicense(request: Request, env: Env): Promise<Response>
     code_expires_at: expiresAt,
     device_limit: 3,
     plan: "plus_lifetime",
-    note: "Код показывается только один раз. Передайте его покупателю безопасным способом.",
+    note: "Код доступен для просмотра в защищённой панели администратора.",
   }, 201);
+}
+
+
+async function adminListCodes(request: Request, env: Env, licenseId: string): Promise<Response> {
+  if (!await requireAdmin(request, env)) return response(request, env, { error: "unauthorized" }, 401);
+  const license = await env.DB.prepare("SELECT id, customer_label, plan, status FROM licenses WHERE id=?").bind(licenseId).first<any>();
+  if (!license) return response(request, env, { error: "license_not_found" }, 404);
+  const rows = await env.DB.prepare("SELECT id, expires_at, created_at, revoked_at, encrypted_code, encryption_iv FROM activation_codes WHERE license_id=? ORDER BY created_at DESC").bind(licenseId).all<any>();
+  const codes = await Promise.all((rows.results || []).map(async (row: any) => ({
+    id: row.id, expires_at: row.expires_at, created_at: row.created_at, revoked_at: row.revoked_at,
+    activation_code: row.encrypted_code && row.encryption_iv ? await decryptActivationCode(row.encrypted_code, row.encryption_iv, env) : null,
+    recoverable: !!(row.encrypted_code && row.encryption_iv),
+  })));
+  return response(request, env, { license, codes });
+}
+async function adminReissueCode(request: Request, env: Env, licenseId: string): Promise<Response> {
+  if (!await requireAdmin(request, env)) return response(request, env, { error: "unauthorized" }, 401);
+  const license = await env.DB.prepare("SELECT id, status FROM licenses WHERE id=?").bind(licenseId).first<any>();
+  if (!license) return response(request, env, { error: "license_not_found" }, 404);
+  if (license.status !== "active") return response(request, env, { error: "license_revoked" }, 409);
+  const body = await readJson(request);
+  const days = Number.isInteger(body?.code_valid_days) ? Number(body?.code_valid_days) : 90;
+  if (days < 1 || days > 365) return response(request, env, { error: "code_valid_days_must_be_1_to_365" }, 400);
+  const code = randomCode(), codeHash = await sha256(normalizeCode(code));
+  const encrypted = await encryptActivationCode(code, env);
+  const expiresAt = new Date(Date.now() + days * 86400000).toISOString(), id = randomHex(16);
+  await env.DB.batch([
+    env.DB.prepare("UPDATE activation_codes SET revoked_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE license_id=? AND revoked_at IS NULL").bind(licenseId),
+    env.DB.prepare("INSERT INTO activation_codes (id, license_id, code_hash, expires_at, encrypted_code, encryption_iv) VALUES (?, ?, ?, ?, ?, ?)").bind(id, licenseId, codeHash, expiresAt, encrypted.cipher, encrypted.iv),
+  ]);
+  return response(request, env, { success: true, activation_code: code, code_expires_at: expiresAt, code_id: id });
 }
 
 async function adminListDevices(request: Request, env: Env, licenseId: string): Promise<Response> {
