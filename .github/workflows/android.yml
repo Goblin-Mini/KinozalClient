@@ -2,7 +2,7 @@ name: Android CI
 
 on:
   push:
-    branches: [ main, feature/magnet-playback, feature/performance, feature/screen-cache-background-refresh, feature/sidebar-login-status-stable-restore, fix/home-feed-js-extractor-diagnostics ]
+    branches: [ main, feature/magnet-playback, feature/performance, feature/screen-cache-background-refresh, feature/sidebar-login-status-stable-restore, fix/home-feed-js-extractor-diagnostics, fix/cloud-sync-request-throttling ]
   pull_request:
     branches: [ main ]
   workflow_dispatch:
@@ -38,7 +38,7 @@ jobs:
           test -d "$ANDROID_HOME/build-tools/35.0.0"
 
       - name: Build debug APK for pull requests
-        if: github.event_name == 'pull_request' || (github.ref_name == 'feature/magnet-playback' || github.ref_name == 'feature/performance' || github.ref_name == 'feature/screen-cache-background-refresh' || github.ref_name == 'feature/sidebar-login-status-stable-restore' || github.ref_name == 'fix/home-feed-js-extractor-diagnostics')
+        if: github.event_name == 'pull_request' || (github.ref_name == 'feature/magnet-playback' || github.ref_name == 'feature/performance' || github.ref_name == 'feature/screen-cache-background-refresh' || github.ref_name == 'feature/sidebar-login-status-stable-restore' || github.ref_name == 'fix/home-feed-js-extractor-diagnostics' || github.ref_name == 'fix/cloud-sync-request-throttling')
         run: gradle --no-daemon assembleDebug
 
       - name: Upload debug APK
@@ -99,7 +99,7 @@ jobs:
           make_latest: true
 
       - name: Decode release keystore
-        if: github.event_name != 'pull_request' && (github.ref_name != 'feature/magnet-playback' && github.ref_name != 'feature/performance' && github.ref_name != 'feature/screen-cache-background-refresh' && github.ref_name != 'feature/sidebar-login-status-stable-restore' && github.ref_name != 'fix/home-feed-js-extractor-diagnostics')
+        if: github.event_name != 'pull_request' && (github.ref_name != 'feature/magnet-playback' && github.ref_name != 'feature/performance' && github.ref_name != 'feature/screen-cache-background-refresh' && github.ref_name != 'feature/sidebar-login-status-stable-restore' && github.ref_name != 'fix/home-feed-js-extractor-diagnostics' && github.ref_name != 'fix/cloud-sync-request-throttling')
         env:
           KEYSTORE_BASE64: ${{ secrets.KINOZAL_KEYSTORE_BASE64 }}
         shell: bash
