@@ -436,18 +436,26 @@ async function adminListDevices(request: Request, env: Env, licenseId: string): 
      FROM devices WHERE license_id=? ORDER BY created_at DESC`
   ).bind(licenseId).all<any>();
   const codes = await env.DB.prepare(
-    `SELECT id, created_at, expires_at, revoked_at
+    `SELECT id, created_at, expires_at, revoked_at, encrypted_code, encryption_iv
      FROM activation_codes WHERE license_id=? ORDER BY created_at DESC`
   ).bind(licenseId).all<any>();
   const now = Date.now();
-  const activationCodes = (codes.results || []).map((code: any) => ({
-    id: code.id,
-    created_at: code.created_at,
-    expires_at: code.expires_at,
-    revoked_at: code.revoked_at,
-    status: code.revoked_at ? "revoked" :
-      (code.expires_at && new Date(code.expires_at).getTime() <= now ? "expired" : "active"),
-    code_display: "Полный код показывался только при выдаче",
+  const activationCodes = await Promise.all((codes.results || []).map(async (code: any) => {
+    const activationCode = code.encrypted_code && code.encryption_iv
+      ? await decryptActivationCode(code.encrypted_code, code.encryption_iv, env)
+      : null;
+    return {
+      id: code.id,
+      created_at: code.created_at,
+      expires_at: code.expires_at,
+      revoked_at: code.revoked_at,
+      status: code.revoked_at ? "revoked" :
+        (code.expires_at && new Date(code.expires_at).getTime() <= now ? "expired" : "active"),
+      // Compatibility with the current admin panel: show the full key to authenticated admins.
+      code_display: activationCode || "Старый код — недоступен",
+      activation_code: activationCode,
+      recoverable: !!activationCode,
+    };
   }));
   return response(request, env, { license, devices: devices.results, activation_codes: activationCodes });
 }
