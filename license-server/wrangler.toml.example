@@ -10,4 +10,4 @@ database_id = "REPLACE_WITH_D1_DATABASE_ID"
 # Configure ADMIN_TOKEN with:
 #   npx wrangler secret put ADMIN_TOKEN
 # Never commit the real token or put it in the Android APK.
-# Optional: set ALLOWED_ORIGIN as a Worker variable if a web admin page is added.
+# Set ALLOWED_ORIGIN as a plain-text Worker variable to the exact Pages origin.
