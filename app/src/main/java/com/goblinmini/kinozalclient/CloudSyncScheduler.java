@@ -12,7 +12,7 @@ import java.util.concurrent.TimeUnit;
 
 /** Owns the persistent periodic cloud-sync schedule. */
 public final class CloudSyncScheduler {
-    private static final String PERIODIC_WORK_NAME = "kinozal_plus_cloud_sync_6h";
+    private static final String PERIODIC_WORK_NAME = "kinozal_plus_cloud_sync_15m";
 
     private CloudSyncScheduler() { }
 
@@ -39,7 +39,7 @@ public final class CloudSyncScheduler {
 
         WorkManager.getInstance(app).enqueueUniquePeriodicWork(
                 PERIODIC_WORK_NAME,
-                ExistingPeriodicWorkPolicy.KEEP,
+                ExistingPeriodicWorkPolicy.REPLACE,
                 request);
     }
 }
