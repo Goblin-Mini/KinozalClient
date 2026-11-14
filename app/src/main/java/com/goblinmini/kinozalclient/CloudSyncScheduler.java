@@ -12,12 +12,12 @@ import java.util.concurrent.TimeUnit;
 
 /** Owns the persistent periodic cloud-sync schedule. */
 public final class CloudSyncScheduler {
-    private static final String PERIODIC_WORK_NAME = "kinozal_plus_cloud_sync_15m";
+    private static final String PERIODIC_WORK_NAME = "kinozal_plus_cloud_sync_6h";
 
     private CloudSyncScheduler() { }
 
     /**
-     * Schedules a 15-minute periodic sync for activated Plus installations.
+     * Schedules a 6-hour periodic sync for activated Plus installations.
      * WorkManager persists this request across process death and device reboot.
      */
     public static void ensureScheduled(Context context) {
@@ -29,7 +29,7 @@ public final class CloudSyncScheduler {
                 .build();
 
         PeriodicWorkRequest request = new PeriodicWorkRequest.Builder(
-                CloudSyncWorker.class, 15, TimeUnit.MINUTES)
+                CloudSyncWorker.class, 6, TimeUnit.HOURS)
                 .setConstraints(constraints)
                 .setBackoffCriteria(
                         androidx.work.BackoffPolicy.EXPONENTIAL,
