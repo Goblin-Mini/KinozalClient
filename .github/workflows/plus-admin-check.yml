@@ -7,7 +7,7 @@ on:
       - "admin-panel/**"
       - ".github/workflows/plus-admin-check.yml"
   push:
-    branches: [main]
+    branches: [main, fix/home-feed-js-extractor-diagnostics]
     paths:
       - "license-server/**"
       - "admin-panel/**"
