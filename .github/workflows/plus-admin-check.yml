@@ -1,0 +1,40 @@
+name: Plus Admin validation
+
+on:
+  pull_request:
+    paths:
+      - "license-server/**"
+      - "admin-panel/**"
+      - ".github/workflows/plus-admin-check.yml"
+  push:
+    branches: [main]
+    paths:
+      - "license-server/**"
+      - "admin-panel/**"
+      - ".github/workflows/plus-admin-check.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install TypeScript
+        run: npm install --global typescript@5.8.3
+      - name: Build Worker JavaScript
+        run: tsc -p license-server/tsconfig.json
+      - name: Validate admin page
+        run: node admin-panel/validate.mjs
+      - name: Upload dashboard-ready Worker script
+        uses: actions/upload-artifact@v4
+        with:
+          name: kinozal-tv-license-worker
+          path: license-server/dist/index.js
+          if-no-files-found: error
