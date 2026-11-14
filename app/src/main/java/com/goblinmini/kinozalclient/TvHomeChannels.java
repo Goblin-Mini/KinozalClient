@@ -452,21 +452,32 @@ final class TvHomeChannels {
     private static void replacePrograms(Context activity, PreviewChannelHelper helper,
             long channelId, String channelKey, JSONArray items) {
         if (channelId <= 0 || items == null) return;
-        String[] projection = {BaseColumns._ID};
+        // Some Android TV providers (including the device's provider) reject
+        // selection arguments for preview_program. Query without a selection and
+        // filter by channel_id locally; otherwise old launcher cards can never be removed.
+        String[] projection = {BaseColumns._ID, TvContractCompat.PreviewPrograms.COLUMN_CHANNEL_ID};
         List<Long> oldProgramIds = new ArrayList<>();
         try (Cursor cursor = activity.getContentResolver().query(
-                TvContractCompat.PreviewPrograms.CONTENT_URI, projection,
-                TvContractCompat.PreviewPrograms.COLUMN_CHANNEL_ID + "=?",
-                new String[]{String.valueOf(channelId)}, null)) {
-            if (cursor != null) {
-                while (cursor.moveToNext()) oldProgramIds.add(cursor.getLong(0));
+                TvContractCompat.PreviewPrograms.CONTENT_URI, projection, null, null, null)) {
+            if (cursor == null) {
+                diag(activity, "PROGRAM_QUERY_ERROR", channelKey + " provider returned null cursor");
+                return;
+            }
+            int idColumn = cursor.getColumnIndexOrThrow(BaseColumns._ID);
+            int channelColumn = cursor.getColumnIndexOrThrow(TvContractCompat.PreviewPrograms.COLUMN_CHANNEL_ID);
+            while (cursor.moveToNext()) {
+                if (cursor.getLong(channelColumn) == channelId) {
+                    oldProgramIds.add(cursor.getLong(idColumn));
+                }
             }
         } catch (Exception e) {
             diag(activity, "PROGRAM_QUERY_ERROR", channelKey + " " + e.getClass().getSimpleName()
                     + ": " + e.getMessage());
-            Log.w(TAG, "Could not query old programs for " + channelKey, e);
+            Log.w(TAG, "Could not query old programs for " + channelKey + "; replacement aborted", e);
+            return;
         }
         int deletedPrograms = 0;
+        boolean deleteFailed = false;
         for (Long oldId : oldProgramIds) {
             try {
                 helper.deletePreviewProgram(oldId);
@@ -474,11 +485,15 @@ final class TvHomeChannels {
             } catch (Exception e) {
                 diag(activity, "PROGRAM_DELETE_ERROR", channelKey + " id=" + oldId + " "
                         + e.getClass().getSimpleName() + ": " + e.getMessage());
+                deleteFailed = true;
                 Log.w(TAG, "Could not delete old program " + oldId + " for " + channelKey, e);
             }
         }
         diag(activity, "PROGRAMS_CLEARED", channelKey + " found=" + oldProgramIds.size()
-                + " deleted=" + deletedPrograms + " incoming=" + items.length());
+                + " deleted=" + deletedPrograms + " incoming=" + items.length()
+                + " deleteFailed=" + deleteFailed);
+        // Avoid publishing duplicates when the provider refused to delete an old row.
+        if (deleteFailed) return;
 
         int limit = Math.min(items.length(), 20);
         java.util.Set<String> seenTitles = new java.util.HashSet<>();
