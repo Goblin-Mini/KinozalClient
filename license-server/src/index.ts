@@ -100,11 +100,12 @@ async function claimDevice(request: Request, env: Env): Promise<Response> {
 
   const codeHash = await sha256(code);
   const existing = await env.DB.prepare(
-    `SELECT d.id, d.license_id, d.token_hash, l.plan, l.status, l.device_limit
+    `SELECT d.id, d.license_id, d.token_hash, l.plan, l.status, l.device_limit, l.expires_at
      FROM devices d JOIN licenses l ON l.id=d.license_id
      JOIN activation_codes c ON c.license_id=l.id
      WHERE c.code_hash=? AND d.installation_id=? AND d.revoked_at IS NULL
-       AND c.revoked_at IS NULL AND l.status='active'`
+       AND c.revoked_at IS NULL AND l.status='active'
+       AND (l.expires_at IS NULL OR l.expires_at > strftime('%Y-%m-%dT%H:%M:%fZ','now'))`
   ).bind(codeHash, installationId).first<any>();
 
   if (existing) {
@@ -114,10 +115,11 @@ async function claimDevice(request: Request, env: Env): Promise<Response> {
   }
 
   const codeRow = await env.DB.prepare(
-    `SELECT c.id AS code_id, c.license_id, c.expires_at, l.plan, l.status, l.device_limit
+    `SELECT c.id AS code_id, c.license_id, c.expires_at, l.plan, l.status, l.device_limit, l.expires_at AS license_expires_at, l.duration_days
      FROM activation_codes c JOIN licenses l ON l.id=c.license_id
      WHERE c.code_hash=? AND c.revoked_at IS NULL AND l.status='active'
-       AND (c.expires_at IS NULL OR c.expires_at > strftime('%Y-%m-%dT%H:%M:%fZ','now'))`
+       AND (c.expires_at IS NULL OR c.expires_at > strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+       AND (l.expires_at IS NULL OR l.expires_at > strftime('%Y-%m-%dT%H:%M:%fZ','now'))`
   ).bind(codeHash).first<any>();
 
   if (!codeRow) return response(request, env, { error: "invalid_or_expired_code" }, 404);
@@ -128,7 +130,14 @@ async function claimDevice(request: Request, env: Env): Promise<Response> {
 
   // D1 batch is transactional. The INSERT re-checks the active-device count
   // inside the write transaction, so concurrent claims cannot exceed the limit.
-  const inserted = await env.DB.batch([
+  await env.DB.batch([
+    env.DB.prepare(
+      `UPDATE licenses SET expires_at=strftime('%Y-%m-%dT%H:%M:%fZ','now', '+' || duration_days || ' days')
+       WHERE id=? AND status='active' AND duration_days>0 AND expires_at IS NULL
+         AND (SELECT COUNT(*) FROM devices d WHERE d.license_id=licenses.id AND d.revoked_at IS NULL) < device_limit
+         AND EXISTS (SELECT 1 FROM activation_codes c WHERE c.license_id=licenses.id AND c.code_hash=?
+           AND c.revoked_at IS NULL AND (c.expires_at IS NULL OR c.expires_at > strftime('%Y-%m-%dT%H:%M:%fZ','now')))`
+    ).bind(codeRow.license_id, codeHash),
     env.DB.prepare(
       `INSERT INTO devices (id, license_id, installation_id, device_label, token_hash)
        SELECT ?, l.id, ?, ?, ?
@@ -136,6 +145,7 @@ async function claimDevice(request: Request, env: Env): Promise<Response> {
        JOIN activation_codes c ON c.license_id=l.id
        WHERE l.id=? AND l.status='active' AND c.code_hash=? AND c.revoked_at IS NULL
          AND (c.expires_at IS NULL OR c.expires_at > strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+         AND (l.expires_at IS NULL OR l.expires_at > strftime('%Y-%m-%dT%H:%M:%fZ','now'))
          AND (SELECT COUNT(*) FROM devices d WHERE d.license_id=l.id AND d.revoked_at IS NULL) < l.device_limit
        ON CONFLICT(license_id, installation_id) DO NOTHING`
     ).bind(deviceId, installationId, label || null, tokenHash, codeRow.license_id, codeHash),
@@ -170,10 +180,11 @@ async function getLicense(request: Request, env: Env): Promise<Response> {
   const tokenHash = await sha256(token);
   const row = await env.DB.prepare(
     `SELECT d.id AS device_id, d.license_id, d.device_label, l.plan, l.status,
-       l.device_limit, l.created_at,
+       l.device_limit, l.created_at, l.expires_at,
        (SELECT COUNT(*) FROM devices x WHERE x.license_id=l.id AND x.revoked_at IS NULL) AS active_devices
      FROM devices d JOIN licenses l ON l.id=d.license_id
-     WHERE d.token_hash=? AND d.revoked_at IS NULL AND l.status='active'`
+     WHERE d.token_hash=? AND d.revoked_at IS NULL AND l.status='active'
+       AND (l.expires_at IS NULL OR l.expires_at > strftime('%Y-%m-%dT%H:%M:%fZ','now'))`
   ).bind(tokenHash).first<any>();
   if (!row) return response(request, env, { error: "license_not_found" }, 404);
 
@@ -185,6 +196,7 @@ async function getLicense(request: Request, env: Env): Promise<Response> {
     status: row.status,
     active_devices: row.active_devices,
     device_limit: row.device_limit,
+    expires_at: row.expires_at,
     features: FEATURES,
   });
 }
@@ -197,7 +209,8 @@ async function authenticatedDevice(request: Request, env: Env): Promise<any | nu
   return await env.DB.prepare(
     `SELECT d.id AS device_id, d.license_id, l.plan, l.status
      FROM devices d JOIN licenses l ON l.id=d.license_id
-     WHERE d.token_hash=? AND d.revoked_at IS NULL AND l.status='active'`
+     WHERE d.token_hash=? AND d.revoked_at IS NULL AND l.status='active'
+       AND (l.expires_at IS NULL OR l.expires_at > strftime('%Y-%m-%dT%H:%M:%fZ','now'))`
   ).bind(tokenHash).first<any>();
 }
 
@@ -262,20 +275,20 @@ async function adminListLicenses(request: Request, env: Env): Promise<Response> 
     "(SELECT COUNT(*) FROM devices d WHERE d.license_id=l.id AND d.revoked_at IS NULL) AS active_devices, " +
     "(SELECT COUNT(*) FROM devices d WHERE d.license_id=l.id) AS total_devices, " +
     "(SELECT MAX(d.last_seen_at) FROM devices d WHERE d.license_id=l.id AND d.revoked_at IS NULL) AS last_seen_at, " +
-    "(SELECT MAX(c.expires_at) FROM activation_codes c WHERE c.license_id=l.id AND c.revoked_at IS NULL) AS code_expires_at " +
+    "(SELECT MAX(c.expires_at) FROM activation_codes c WHERE c.license_id=l.id AND c.revoked_at IS NULL) AS code_expires_at, l.duration_days, l.expires_at AS license_expires_at " +
     "FROM licenses l ORDER BY l.created_at DESC LIMIT 500"
   ).all<any>();
   const licenses = (rows.results || []).map((row: any) => ({ ...row, active_devices: Number(row.active_devices || 0), total_devices: Number(row.total_devices || 0) }));
   const counts = await env.DB.prepare(
     "SELECT COUNT(*) AS total_licenses, " +
-    "COALESCE(SUM(CASE WHEN status='active' THEN 1 ELSE 0 END),0) AS active_licenses, " +
-    "COALESCE(SUM(CASE WHEN status='active' THEN device_limit ELSE 0 END),0) AS licensed_slots " +
+    "COALESCE(SUM(CASE WHEN status='active' AND (expires_at IS NULL OR expires_at > strftime('%Y-%m-%dT%H:%M:%fZ','now')) THEN 1 ELSE 0 END),0) AS active_licenses, " +
+    "COALESCE(SUM(CASE WHEN status='active' AND (expires_at IS NULL OR expires_at > strftime('%Y-%m-%dT%H:%M:%fZ','now')) THEN device_limit ELSE 0 END),0) AS licensed_slots " +
     "FROM licenses"
   ).first<any>();
   const activeDevices = await env.DB.prepare(
     "SELECT COUNT(*) AS active_devices FROM devices d " +
     "JOIN licenses l ON l.id=d.license_id " +
-    "WHERE d.revoked_at IS NULL AND l.status='active'"
+    "WHERE d.revoked_at IS NULL AND l.status='active' AND (l.expires_at IS NULL OR l.expires_at > strftime('%Y-%m-%dT%H:%M:%fZ','now'))"
   ).first<any>();
   const activeDeviceCount = Number(activeDevices?.active_devices || 0);
   const summary = {
@@ -290,11 +303,12 @@ async function adminCreateLicense(request: Request, env: Env): Promise<Response>
   if (!await requireAdmin(request, env)) return response(request, env, { error: "unauthorized" }, 401);
   const body = await readJson(request);
   const label = typeof body?.customer_label === "string" ? body.customer_label.trim().slice(0, 160) : "";
-  const expiryDays = body?.code_valid_days === 0 || body?.code_valid_days === null
-    ? 0 : Number.isInteger(body?.code_valid_days) ? Number(body?.code_valid_days) : 0;
+  const licenseDays = body?.license_days === 0 || body?.license_days === null
+    ? 0 : Number.isInteger(body?.license_days) ? Number(body?.license_days) : 0;
+  const codeDays = 90;
   const deviceLimit = Number.isInteger(body?.device_limit) ? Number(body?.device_limit) : 3;
-  if (expiryDays !== 0 && (expiryDays < 1 || expiryDays > 365)) {
-    return response(request, env, { error: "code_valid_days_must_be_0_or_1_to_365" }, 400);
+  if (licenseDays !== 0 && ![7, 30, 60, 90, 180, 365].includes(licenseDays)) {
+    return response(request, env, { error: "license_days_must_be_0_7_30_60_90_180_or_365" }, 400);
   }
   if (deviceLimit < 1 || deviceLimit > 10) {
     return response(request, env, { error: "device_limit_must_be_1_to_10" }, 400);
@@ -304,24 +318,26 @@ async function adminCreateLicense(request: Request, env: Env): Promise<Response>
   const activationId = randomHex(16);
   const code = randomCode();
   const codeHash = await sha256(normalizeCode(code));
-  const expiresAt = expiryDays === 0 ? null : new Date(Date.now() + expiryDays * 86400000).toISOString();
+  const codeExpiresAt = new Date(Date.now() + codeDays * 86400000).toISOString();
 
   await env.DB.batch([
     env.DB.prepare(
-      "INSERT INTO licenses (id, customer_label, plan, status, device_limit) VALUES (?, ?, 'plus_lifetime', 'active', ?)"
-    ).bind(licenseId, label || null, deviceLimit),
+      "INSERT INTO licenses (id, customer_label, plan, status, device_limit, duration_days, expires_at) VALUES (?, ?, 'plus_lifetime', 'active', ?, ?, NULL)"
+    ).bind(licenseId, label || null, deviceLimit, licenseDays),
     env.DB.prepare(
       "INSERT INTO activation_codes (id, license_id, code_hash, expires_at) VALUES (?, ?, ?, ?)"
-    ).bind(activationId, licenseId, codeHash, expiresAt),
+    ).bind(activationId, licenseId, codeHash, codeExpiresAt),
   ]);
 
   return response(request, env, {
     license_id: licenseId,
     activation_code: code,
-    code_expires_at: expiresAt,
-    code_valid_days: expiryDays,
+    code_expires_at: codeExpiresAt,
+    code_valid_days: codeDays,
+    license_days: licenseDays,
+    license_expires_at: null,
     device_limit: deviceLimit,
-    plan: "plus_lifetime",
+    plan: licenseDays === 0 ? "plus_lifetime" : "plus_timed",
     note: "Код показывается только один раз. Передайте его покупателю безопасным способом.",
   }, 201);
 }
@@ -329,7 +345,7 @@ async function adminCreateLicense(request: Request, env: Env): Promise<Response>
 async function adminListDevices(request: Request, env: Env, licenseId: string): Promise<Response> {
   if (!await requireAdmin(request, env)) return response(request, env, { error: "unauthorized" }, 401);
   const license = await env.DB.prepare(
-    "SELECT id, customer_label, plan, status, device_limit, created_at FROM licenses WHERE id=?"
+    "SELECT id, customer_label, plan, status, device_limit, duration_days, expires_at, created_at FROM licenses WHERE id=?"
   ).bind(licenseId).first<any>();
   if (!license) return response(request, env, { error: "license_not_found" }, 404);
   const devices = await env.DB.prepare(
