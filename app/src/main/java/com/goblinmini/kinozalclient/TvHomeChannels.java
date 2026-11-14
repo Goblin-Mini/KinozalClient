@@ -469,8 +469,8 @@ final class TvHomeChannels {
         int deletedPrograms = 0;
         for (Long oldId : oldProgramIds) {
             try {
-                if (helper.deletePreviewProgram(oldId)) deletedPrograms++;
-                else diag(activity, "PROGRAM_DELETE_FALSE", channelKey + " id=" + oldId);
+                helper.deletePreviewProgram(oldId);
+                deletedPrograms++;
             } catch (Exception e) {
                 diag(activity, "PROGRAM_DELETE_ERROR", channelKey + " id=" + oldId + " "
                         + e.getClass().getSimpleName() + ": " + e.getMessage());
