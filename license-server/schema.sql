@@ -10,8 +10,6 @@ CREATE TABLE IF NOT EXISTS licenses (
   device_limit INTEGER NOT NULL DEFAULT 3,
   duration_days INTEGER NOT NULL DEFAULT 0 CHECK (duration_days IN (0, 7, 30, 60, 90, 180, 365)),
   expires_at TEXT,
-  encrypted_code TEXT,
-  encryption_iv TEXT,
   created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
   revoked_at TEXT
 );
@@ -21,6 +19,8 @@ CREATE TABLE IF NOT EXISTS activation_codes (
   license_id TEXT NOT NULL REFERENCES licenses(id) ON DELETE CASCADE,
   code_hash TEXT NOT NULL UNIQUE,
   expires_at TEXT,
+  encrypted_code TEXT,
+  encryption_iv TEXT,
   created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
   revoked_at TEXT
 );
