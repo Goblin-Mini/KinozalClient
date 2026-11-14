@@ -17,6 +17,8 @@ CREATE TABLE IF NOT EXISTS activation_codes (
   license_id TEXT NOT NULL REFERENCES licenses(id) ON DELETE CASCADE,
   code_hash TEXT NOT NULL UNIQUE,
   expires_at TEXT,
+  encrypted_code TEXT,
+  encryption_iv TEXT,
   created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
   revoked_at TEXT
 );
