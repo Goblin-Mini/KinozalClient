@@ -3627,6 +3627,7 @@ public class MainActivity extends Activity {
         addSettingsAction(left, "Прокси", () -> showSocks5Settings());
         addSettingsAction(left, "Очистить кэш", () -> confirmClearCache());
 
+        addSettingsAction(right, "Синхронизация", () -> showCloudSyncSettings());
         addSettingsAction(right, "Зеркало", () -> chooseMirror());
         addSettingsAction(right, "Цвет акцента", () -> showAccentPicker());
         addSettingsAction(right, "TorrServe", () -> showTorrServeSettings());
@@ -3710,6 +3711,140 @@ public class MainActivity extends Activity {
         b.setGravity(Gravity.CENTER_VERTICAL | Gravity.LEFT);
         b.setPadding(dp(12), 0, dp(8), 0);
         return b;
+    }
+
+    private void showCloudSyncSettings() {
+        LinearLayout panel = new LinearLayout(this);
+        panel.setOrientation(LinearLayout.VERTICAL);
+        panel.setPadding(dp(18), dp(12), dp(18), dp(10));
+        panel.setBackgroundColor(BG);
+
+        TextView info = text("Синхронизация избранного и истории просмотров между устройствами. Требуется активная лицензия Plus. Локальные данные сохраняются даже без интернета.",
+                14, Color.LTGRAY, false);
+        panel.addView(info);
+
+        EditText endpoint = new EditText(this);
+        endpoint.setSingleLine(true);
+        endpoint.setHint("Адрес Cloudflare Worker");
+        endpoint.setText(CloudSyncManager.endpoint(this));
+        styleSettingsEdit(endpoint);
+        LinearLayout.LayoutParams fieldParams = new LinearLayout.LayoutParams(-1, dp(46));
+        fieldParams.topMargin = dp(10);
+        panel.addView(endpoint, fieldParams);
+
+        EditText code = new EditText(this);
+        code.setSingleLine(true);
+        code.setHint("Код активации Plus");
+        code.setInputType(android.text.InputType.TYPE_CLASS_TEXT
+                | android.text.InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS);
+        styleSettingsEdit(code);
+        LinearLayout.LayoutParams codeParams = new LinearLayout.LayoutParams(-1, dp(46));
+        codeParams.topMargin = dp(8);
+        panel.addView(code, codeParams);
+
+        TextView state = text("Статус: " + CloudSyncManager.status(this), 13, TEAL, false);
+        LinearLayout.LayoutParams stateParams = new LinearLayout.LayoutParams(-1, -2);
+        stateParams.topMargin = dp(10);
+        panel.addView(state, stateParams);
+
+        Button save = settingsPillButton("Сохранить адрес");
+        Button activate = settingsPillButton("Активировать Plus");
+        Button sync = settingsPillButton("Синхронизировать сейчас");
+        for (Button b : new Button[]{save, activate, sync}) {
+            LinearLayout.LayoutParams bp = new LinearLayout.LayoutParams(-1, dp(44));
+            bp.topMargin = dp(8);
+            panel.addView(b, bp);
+        }
+
+        AlertDialog dialog = new AlertDialog.Builder(this).setTitle("Облачная синхронизация")
+                .setView(panel).setNegativeButton("Закрыть", null).create();
+        save.setOnClickListener(v -> {
+            String value = endpoint.getText().toString().trim();
+            if (!value.startsWith("https://")) {
+                showMessage("Укажите HTTPS-адрес Cloudflare Worker");
+                return;
+            }
+            CloudSyncManager.configure(this, value);
+            showMessage("Адрес сервера сохранён");
+        });
+        activate.setOnClickListener(v -> {
+            String value = endpoint.getText().toString().trim();
+            String activationCode = code.getText().toString().trim();
+            if (!value.startsWith("https://") || activationCode.isEmpty()) {
+                showMessage("Укажите адрес сервера и код активации");
+                return;
+            }
+            CloudSyncManager.configure(this, value);
+            activate.setEnabled(false);
+            showMessage("Активируем устройство…");
+            executeSafely(io, () -> {
+                try {
+                    CloudSyncManager.activate(this, activationCode);
+                    runOnUiThread(() -> {
+                        if (dialog.isShowing()) state.setText("Статус: " + CloudSyncManager.status(this));
+                        activate.setEnabled(true);
+                        showMessage("Устройство активировано");
+                        scheduleCloudSync();
+                    });
+                } catch (Exception e) {
+                    String error = safe(e.getMessage());
+                    runOnUiThread(() -> {
+                        activate.setEnabled(true);
+                        state.setText("Статус: ошибка активации");
+                        showMessage("Не удалось активировать: " + error);
+                    });
+                }
+            });
+        });
+        sync.setOnClickListener(v -> {
+            if (!CloudSyncManager.isActivated(this)) {
+                showMessage("Сначала активируйте лицензию Plus");
+                return;
+            }
+            sync.setEnabled(false);
+            showMessage("Синхронизируем данные…");
+            executeSafely(io, () -> {
+                try {
+                    CloudSyncManager.sync(this);
+                    runOnUiThread(() -> {
+                        sync.setEnabled(true);
+                        state.setText("Статус: " + CloudSyncManager.status(this));
+                        if ("local:favorites".equals(currentPath)) showFavorites();
+                        else if ("local:recently-viewed".equals(currentPath)) showRecentlyViewed();
+                        showMessage("Избранное и история синхронизированы");
+                    });
+                } catch (Exception e) {
+                    String error = safe(e.getMessage());
+                    runOnUiThread(() -> {
+                        sync.setEnabled(true);
+                        state.setText("Статус: ошибка синхронизации");
+                        showMessage("Синхронизация не выполнена: " + error);
+                    });
+                }
+            });
+        });
+        dialog.show();
+        if (dialog.getWindow() != null) {
+            dialog.getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(BG));
+            dialog.getWindow().setLayout(Math.min(dp(680),
+                    getResources().getDisplayMetrics().widthPixels - dp(48)), -2);
+        }
+    }
+
+    private void scheduleCloudSync() {
+        if (!CloudSyncManager.isActivated(this)) return;
+        executeSafely(io, () -> {
+            try {
+                CloudSyncManager.sync(this);
+                runOnUiThread(() -> {
+                    if (isFinishing() || isDestroyed()) return;
+                    if ("local:favorites".equals(currentPath)) showFavorites();
+                    else if ("local:recently-viewed".equals(currentPath)) showRecentlyViewed();
+                });
+            } catch (Exception e) {
+                Log.w("KinozalCloudSync", "Cloud sync deferred; local data preserved: " + safe(e.getMessage()));
+            }
+        });
     }
 
     private void showTorrServeSettings() {
@@ -6867,6 +7002,7 @@ public class MainActivity extends Activity {
             } catch (Exception ignored) { }
         }
         getSharedPreferences(PREFS, MODE_PRIVATE).edit().putString(FAVORITES_KEY, array.toString()).apply();
+        scheduleCloudSync();
     }
 
     private boolean isFavorite(Torrent torrent) {
@@ -6962,6 +7098,7 @@ public class MainActivity extends Activity {
         getSharedPreferences(PREFS, MODE_PRIVATE).edit()
                 .putString(RECENTLY_VIEWED_KEY, array.toString()).apply();
         TvHomeChannels.refreshContinue(this);
+        scheduleCloudSync();
     }
 
     private void addHistoryClearButton() {
@@ -7033,6 +7170,7 @@ public class MainActivity extends Activity {
         getSharedPreferences(PREFS, MODE_PRIVATE).edit()
                 .putString(RECENTLY_VIEWED_KEY, array.toString()).apply();
         TvHomeChannels.refreshContinue(this);
+        scheduleCloudSync();
     }
 
     private void showRecentlyViewed() {
@@ -8453,6 +8591,7 @@ public class MainActivity extends Activity {
     @Override public void onBackPressed() { finish(); }
     @Override protected void onStart() {
         super.onStart();
+        scheduleCloudSync();
         if (feedCacheReceiver == null) {
             feedCacheReceiver = new android.content.BroadcastReceiver() {
                 @Override public void onReceive(android.content.Context context, android.content.Intent intent) {
