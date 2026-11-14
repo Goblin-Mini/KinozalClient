@@ -40,9 +40,9 @@ The response contains an activation code. It is stored as AES-GCM ciphertext and
 
 The activation code is valid for 90 days after issuance. The Plus entitlement term is selected separately and starts on the first successful activation. Choose 0 for lifetime, or 7, 30, 60, 90, 180, or 365 days.
 
-## Browser admin panel
+## Separate browser admin site
 
-The administration interface is embedded in the license Worker and served from the same origin at `/admin`. No separate Cloudflare Pages project is required.
+The administration interface is a standalone static site in `admin-panel/`. It is intended to be deployed as its own Cloudflare Pages project, separate from the license Worker and the public landing page.
 
 The Pages site calls the Worker API at `https://YOUR-WORKER.workers.dev`. It supports:
 - live totals for licenses, active licenses, devices and free device slots;
@@ -53,9 +53,17 @@ The Pages site calls the Worker API at `https://YOUR-WORKER.workers.dev`. It sup
 
 The admin page stores the public API URL in browser local storage, but the `ADMIN_TOKEN` is held only in the current tab's memory. It is never written to local storage, the page source, or the repository. Activation codes can be viewed and copied later from each license's «Коды активации» section. Codes created before encrypted storage cannot be recovered; issue a replacement for those licenses.
 
-### Open the admin panel
+### Deploy the separate Pages site from the Cloudflare dashboard
 
-Open `https://YOUR-WORKER.workers.dev/admin`. The page uses the same-origin Worker API; no CORS origin or Pages deployment is needed.
+1. In **Workers & Pages**, choose **Create application → Pages → Connect to Git**.
+2. Select `Goblin-Mini/KinozalClient` and the `main` branch.
+3. Leave the build command empty and set the build output directory to `admin-panel`. The repository root can remain the default.
+4. Name the Pages project `kinozal-tv-plus-admin` (or another available name), then deploy it. Cloudflare will show the exact `https://PROJECT.pages.dev` address.
+5. In the existing license Worker, open **Settings → Variables and Secrets** and add a plain-text variable named `ALLOWED_ORIGIN` with the exact Pages origin, for example `https://kinozal-tv-plus-admin.pages.dev`. Do not include a path or trailing slash.
+6. Deploy the Worker version containing `license-server/src/index.ts`. Keep the existing D1 binding named `DB` and secret `ADMIN_TOKEN`; neither should be recreated.
+7. Open the Pages URL, enter the Worker API URL and the existing `ADMIN_TOKEN`, then connect.
+
+The Worker only adds CORS permission for the exact value in `ALLOWED_ORIGIN`. Do not use a wildcard. If a custom domain is later attached to Pages, update this variable to that exact origin.
 
 ### Payment status
 
@@ -93,7 +101,7 @@ The Android client uses the same per-device token issued by `POST /v1/devices/cl
 - The server applies per-item last-write-wins ordering and keeps tombstones so offline devices receive deletions.
 - The client keeps its local SharedPreferences data and defers synchronization when offline or when the license is unavailable.
 
-For an existing D1 database, apply `license-server/migrations/0003_encrypted_activation_codes.sql` exactly once in the Cloudflare D1 SQL console. Do not rerun it. For a new database, `schema.sql` already includes the encrypted-code columns.
+For an existing D1 database, run `license-server/migrations/0003_encrypted_activation_codes.sql` exactly once in the Cloudflare D1 SQL console. Do not run it again. For a new database, `schema.sql` already includes the encrypted-code columns.
 
 In the app open **Настройки → Синхронизация**, enter the deployed HTTPS Worker URL, save it, and activate each device with the same Plus activation code. Each installation consumes one of the license's three device slots.
 
@@ -123,7 +131,8 @@ curl -X DELETE "https://YOUR-WORKER.workers.dev/admin/licenses/LICENSE_ID" \
 ## Important current limitations
 
 - No customer login/account recovery yet.
-- The admin panel is served by the Worker at `/admin`; `ALLOWED_ORIGIN` is not needed for the same-origin admin UI.
+- Existing D1 databases require the one-time `0003_encrypted_activation_codes.sql` migration before deploying this Worker version.
+- The standalone Pages admin site must be deployed and its exact origin configured as Worker variable `ALLOWED_ORIGIN`.
 - No payment integration, receipt handling, refunds or automatic issuance; issuance is manual after external payment verification.
 - The Android sync client is integrated, but the Worker must be deployed and its D1 schema applied before cloud sync can be used.
 - No OWNER provisioning endpoint yet; owner entitlement remains a separate follow-up.
@@ -135,16 +144,17 @@ curl -X DELETE "https://YOUR-WORKER.workers.dev/admin/licenses/LICENSE_ID" \
 For an existing D1 database, run `license-server/migrations/0002_license_duration.sql` exactly once in the Cloudflare D1 Console. It adds `duration_days` and `expires_at`; existing rows default to lifetime and are not shortened. Do not run this migration a second time. New timed licenses start their countdown on the first successful activation, not when the admin creates the code. The activation code remains redeemable for 90 days from issue. The Worker rejects license checks and sync calls after the entitlement expiry.
 
 
-## Protect the admin panel with Cloudflare Access
+## Protect the separate admin website with Cloudflare Access
 
-The admin panel is served by the Worker. Protect the Worker hostname with Cloudflare Access so only
+The admin website is hosted separately from the Worker API. Protect the Pages hostname
+(for example, `kinozal-tv-plus-admin.pages.dev`) with Cloudflare Access so only
 approved administrator identities can open the dashboard.
 
 1. In Cloudflare Zero Trust, open Access → Applications → Add an application.
 2. Choose **Self-hosted** and enter the exact admin Pages hostname as the application domain.
 3. Add an **Allow** policy for your administrator email address (or a dedicated admin email group).
 4. Use a one-time PIN or your preferred identity provider, then save and test in a private browser window.
-5. Ensure Access policy permits the Android API routes if you protect the Worker hostname; otherwise do not enable Access on the Worker hostname.
+5. Do not protect the Worker API hostname with this Pages-only Access application: the Android app must continue reaching the Worker directly.
 6. Keep the `ADMIN_TOKEN` secret in the Worker. Access protects the dashboard page; the Worker continues to enforce `ADMIN_TOKEN` for every admin API action.
 
 Do not add the Worker hostname to the Pages Access application. If you later add a custom admin domain, update the Worker's `ALLOWED_ORIGIN` variable to that exact HTTPS origin.
