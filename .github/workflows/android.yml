@@ -2,7 +2,7 @@ name: Android CI
 
 on:
   push:
-    branches: [ main, feature/magnet-playback, feature/performance, feature/screen-cache-background-refresh, feature/sidebar-login-status-stable-restore, fix/home-feed-js-extractor-diagnostics ]
+    branches: [ main, feature/magnet-playback, feature/performance, feature/screen-cache-background-refresh, feature/sidebar-login-status-stable-restore, fix/home-feed-js-extractor-diagnostics, fix/cloud-sync-request-throttling ]
   pull_request:
     branches: [ main ]
   workflow_dispatch:
@@ -38,11 +38,11 @@ jobs:
           test -d "$ANDROID_HOME/build-tools/35.0.0"
 
       - name: Build debug APK for pull requests
-        if: github.event_name == 'pull_request' || (github.ref_name == 'feature/magnet-playback' || github.ref_name == 'feature/performance' || github.ref_name == 'feature/screen-cache-background-refresh' || github.ref_name == 'feature/sidebar-login-status-stable-restore' || github.ref_name == 'fix/home-feed-js-extractor-diagnostics')
+        if: github.event_name == 'pull_request' || (github.ref_name == 'feature/magnet-playback' || github.ref_name == 'feature/performance' || github.ref_name == 'feature/screen-cache-background-refresh' || github.ref_name == 'feature/sidebar-login-status-stable-restore' || github.ref_name == 'fix/home-feed-js-extractor-diagnostics' || github.ref_name == 'fix/cloud-sync-request-throttling')
         run: gradle --no-daemon assembleDebug
 
       - name: Upload debug APK
-        if: github.event_name == 'pull_request' || github.ref_name == 'feature/magnet-playback' || github.ref_name == 'feature/performance' || github.ref_name == 'feature/screen-cache-background-refresh' || github.ref_name == 'feature/sidebar-login-status-stable-restore' || github.ref_name == 'fix/home-feed-js-extractor-diagnostics'
+        if: github.event_name == 'pull_request' || github.ref_name == 'feature/magnet-playback' || github.ref_name == 'feature/performance' || github.ref_name == 'feature/screen-cache-background-refresh' || github.ref_name == 'feature/sidebar-login-status-stable-restore' || github.ref_name == 'fix/home-feed-js-extractor-diagnostics' || github.ref_name == 'fix/cloud-sync-request-throttling'
         uses: actions/upload-artifact@v4
         with:
           name: KinozalClient-debug
@@ -51,7 +51,7 @@ jobs:
           retention-days: 14
 
       - name: Build signed update-test APK for installed ru.gm.ktv
-        if: github.ref_name == 'fix/home-feed-js-extractor-diagnostics' && github.event_name == 'push'
+        if: (github.ref_name == 'fix/home-feed-js-extractor-diagnostics' || github.ref_name == 'fix/cloud-sync-request-throttling') && github.event_name == 'push'
         env:
           KEYSTORE_BASE64: ${{ secrets.KINOZAL_KEYSTORE_BASE64 }}
           KINOZAL_STORE_PASSWORD: ${{ secrets.KINOZAL_STORE_PASSWORD }}
@@ -78,7 +78,7 @@ jobs:
           "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging dist/KinozalClient-update-test-v2.apk | head -n 1
 
       - name: Upload signed update-test APK
-        if: github.ref_name == 'fix/home-feed-js-extractor-diagnostics' && github.event_name == 'push'
+        if: (github.ref_name == 'fix/home-feed-js-extractor-diagnostics' || github.ref_name == 'fix/cloud-sync-request-throttling') && github.event_name == 'push'
         uses: actions/upload-artifact@v4
         with:
           name: KinozalClient-update-test-v2
@@ -87,7 +87,7 @@ jobs:
           retention-days: 14
 
       - name: Publish temporary update-test release
-        if: github.ref_name == 'fix/home-feed-js-extractor-diagnostics' && github.event_name == 'push'
+        if: (github.ref_name == 'fix/home-feed-js-extractor-diagnostics' || github.ref_name == 'fix/cloud-sync-request-throttling') && github.event_name == 'push'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: test-update-1.0.4
@@ -99,7 +99,7 @@ jobs:
           make_latest: true
 
       - name: Decode release keystore
-        if: github.event_name != 'pull_request' && (github.ref_name != 'feature/magnet-playback' && github.ref_name != 'feature/performance' && github.ref_name != 'feature/screen-cache-background-refresh' && github.ref_name != 'feature/sidebar-login-status-stable-restore' && github.ref_name != 'fix/home-feed-js-extractor-diagnostics')
+        if: github.event_name != 'pull_request' && (github.ref_name != 'feature/magnet-playback' && github.ref_name != 'feature/performance' && github.ref_name != 'feature/screen-cache-background-refresh' && github.ref_name != 'feature/sidebar-login-status-stable-restore' && github.ref_name != 'fix/home-feed-js-extractor-diagnostics' && github.ref_name != 'fix/cloud-sync-request-throttling')
         env:
           KEYSTORE_BASE64: ${{ secrets.KINOZAL_KEYSTORE_BASE64 }}
         shell: bash
@@ -109,7 +109,7 @@ jobs:
           test -s "$RUNNER_TEMP/kinozal-release.jks"
 
       - name: Build signed release APK
-        if: github.event_name != 'pull_request' && github.ref_name != 'feature/magnet-playback' && github.ref_name != 'feature/performance' && github.ref_name != 'feature/screen-cache-background-refresh' && github.ref_name != 'feature/sidebar-login-status-stable-restore' && github.ref_name != 'fix/home-feed-js-extractor-diagnostics'
+        if: github.event_name != 'pull_request' && github.ref_name != 'feature/magnet-playback' && github.ref_name != 'feature/performance' && github.ref_name != 'feature/screen-cache-background-refresh' && github.ref_name != 'feature/sidebar-login-status-stable-restore' && github.ref_name != 'fix/home-feed-js-extractor-diagnostics' && github.ref_name != 'fix/cloud-sync-request-throttling'
         env:
           KINOZAL_KEYSTORE_FILE: ${{ runner.temp }}/kinozal-release.jks
           KINOZAL_STORE_PASSWORD: ${{ secrets.KINOZAL_STORE_PASSWORD }}
@@ -131,7 +131,7 @@ jobs:
           echo "VERSION_NAME=$VERSION_NAME" >> "$GITHUB_ENV"
 
       - name: Publish GitHub Release
-        if: github.event_name != 'pull_request' && github.ref_name != 'feature/magnet-playback' && github.ref_name != 'feature/performance' && github.ref_name != 'feature/screen-cache-background-refresh' && github.ref_name != 'feature/sidebar-login-status-stable-restore' && github.ref_name != 'fix/home-feed-js-extractor-diagnostics'
+        if: github.event_name != 'pull_request' && github.ref_name != 'feature/magnet-playback' && github.ref_name != 'feature/performance' && github.ref_name != 'feature/screen-cache-background-refresh' && github.ref_name != 'feature/sidebar-login-status-stable-restore' && github.ref_name != 'fix/home-feed-js-extractor-diagnostics' && github.ref_name != 'fix/cloud-sync-request-throttling'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ env.VERSION_CODE }}

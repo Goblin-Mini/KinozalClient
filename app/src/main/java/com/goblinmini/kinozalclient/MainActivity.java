@@ -3833,19 +3833,9 @@ public class MainActivity extends Activity {
     }
 
     private void scheduleCloudSync() {
-        if (!CloudSyncManager.isActivated(this)) return;
-        executeSafely(io, () -> {
-            try {
-                CloudSyncManager.sync(this);
-                runOnUiThread(() -> {
-                    if (isFinishing() || isDestroyed()) return;
-                    if ("local:favorites".equals(currentPath)) showFavorites();
-                    else if ("local:recently-viewed".equals(currentPath)) showRecentlyViewed();
-                });
-            } catch (Exception e) {
-                Log.w("KinozalCloudSync", "Cloud sync deferred; local data preserved: " + safe(e.getMessage()));
-            }
-        });
+        // Local edits and Activity starts are coalesced into one delayed request.
+        // The explicit "Синхронизировать сейчас" button still performs an immediate sync.
+        CloudSyncScheduler.scheduleSoon(this);
     }
 
     private void showTorrServeSettings() {

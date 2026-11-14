@@ -117,14 +117,16 @@ public final class CloudSyncManager {
             if (payloads == null) payloads = new JSONObject();
             String serialized = item.toString();
             long timestamp = section.optLong(key, now);
-            if (!section.has(key) || !serialized.equals(payloads.optString(key, ""))) {
+            boolean changed = !section.has(key)
+                    || !serialized.equals(payloads.optString(key, ""));
+            if (changed) {
                 timestamp = now;
                 section.put(key, timestamp);
                 payloads.put(key, serialized);
+                out.put(new JSONObject().put("type", type).put("key", key)
+                        .put("data", item).put("deleted", false).put("updated_at", timestamp));
             }
             meta.put(type + "_payloads", payloads);
-            out.put(new JSONObject().put("type", type).put("key", key)
-                    .put("data", item).put("deleted", false).put("updated_at", timestamp));
         }
         JSONArray known = meta.optJSONArray(type + "_known");
         if (known != null) for (int i = 0; i < known.length(); i++) {
