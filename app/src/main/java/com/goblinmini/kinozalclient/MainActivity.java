@@ -1683,7 +1683,9 @@ public class MainActivity extends Activity {
                 "[?&]id=(\\d+)", java.util.regex.Pattern.CASE_INSENSITIVE);
         for (HomeSection section : sections) {
             java.util.Set<String> ids = new java.util.HashSet<>();
+            java.util.Set<String> titles = new java.util.HashSet<>();
             java.util.Set<String> links = new java.util.HashSet<>();
+            java.util.Set<String> posterKeys = new java.util.HashSet<>();
             List<HomePoster> unique = new ArrayList<>();
             int duplicateIds = 0;
             int duplicateLinks = 0;
@@ -1699,6 +1701,8 @@ public class MainActivity extends Activity {
                 String href = item.torrent.href == null ? "" : item.torrent.href.trim();
                 java.util.regex.Matcher matcher = idPattern.matcher(href);
                 String id = matcher.find() ? matcher.group(1) : "";
+                String titleKey = normalizeHomeTitle(item.torrent.title);
+                String posterKey = normalizeHomePosterImage(item.imageUrl);
 
                 if (!id.isEmpty() && ids.contains(id)) {
                     duplicateIds++;
@@ -1708,9 +1712,19 @@ public class MainActivity extends Activity {
                     duplicateLinks++;
                     continue;
                 }
+                if (!titleKey.isEmpty() && titles.contains(titleKey)) {
+                    duplicateTitles++;
+                    continue;
+                }
+                if (!posterKey.isEmpty() && posterKeys.contains(posterKey)) {
+                    duplicateTitles++;
+                    continue;
+                }
 
                 if (!id.isEmpty()) ids.add(id);
                 if (!href.isEmpty()) links.add(href);
+                if (!titleKey.isEmpty()) titles.add(titleKey);
+                if (!posterKey.isEmpty()) posterKeys.add(posterKey);
                 unique.add(item);
                 if (unique.size() >= 15) break;
             }
