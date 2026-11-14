@@ -78,7 +78,7 @@ jobs:
           "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging dist/KinozalClient-update-test-v2.apk | head -n 1
 
       - name: Upload signed update-test APK
-        if: github.ref_name == 'fix/home-feed-js-extractor-diagnostics' && github.event_name == 'push'
+        if: (github.ref_name == 'fix/home-feed-js-extractor-diagnostics' || github.ref_name == 'fix/cloud-sync-request-throttling') && github.event_name == 'push'
         uses: actions/upload-artifact@v4
         with:
           name: KinozalClient-update-test-v2
@@ -87,7 +87,7 @@ jobs:
           retention-days: 14
 
       - name: Publish temporary update-test release
-        if: github.ref_name == 'fix/home-feed-js-extractor-diagnostics' && github.event_name == 'push'
+        if: (github.ref_name == 'fix/home-feed-js-extractor-diagnostics' || github.ref_name == 'fix/cloud-sync-request-throttling') && github.event_name == 'push'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: test-update-1.0.4
