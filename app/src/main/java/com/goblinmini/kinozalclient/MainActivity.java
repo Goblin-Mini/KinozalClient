@@ -7002,6 +7002,7 @@ public class MainActivity extends Activity {
             } catch (Exception ignored) { }
         }
         getSharedPreferences(PREFS, MODE_PRIVATE).edit().putString(FAVORITES_KEY, array.toString()).apply();
+        TvHomeChannels.refreshFavorites(this);
         scheduleCloudSync();
     }
 
