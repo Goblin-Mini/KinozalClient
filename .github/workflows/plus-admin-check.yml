@@ -32,6 +32,7 @@ jobs:
         run: tsc -p license-server/tsconfig.json
       - name: Validate admin page
         run: node admin-panel/validate.mjs
+      # This artifact is the compiled entry point for Cloudflare Workers upload.
       - name: Upload dashboard-ready Worker script
         uses: actions/upload-artifact@v4
         with:
