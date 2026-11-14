@@ -1,0 +1,13 @@
+name = "kinozal-tv-license"
+main = "src/index.ts"
+compatibility_date = "2026-11-14"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "kinozal-tv-license"
+database_id = "4204c98d-9255-466f-a82b-c7352f9d8e63"
+
+[vars]
+ALLOWED_ORIGIN = "https://kinozal-tv-plus-admin.pages.dev"
+
+# ADMIN_TOKEN remains a Cloudflare secret and must never be committed here.
