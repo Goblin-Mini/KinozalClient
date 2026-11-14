@@ -38,6 +38,23 @@ The response contains a one-time activation code. Copy it and send it privately 
 
 The default code validity is 90 days (configurable from 1 to 365 days). License lifetime does not expire after activation.
 
+## Web admin panel
+
+The Worker serves a browser-based admin dashboard at:
+
+`https://YOUR-WORKER.workers.dev/admin`
+
+Open this URL, enter the current `ADMIN_TOKEN` secret, and use the dashboard to:
+- issue a lifetime Plus license after manually confirming payment;
+- view licenses and active-device counts;
+- inspect installations attached to a license;
+- revoke an individual device (frees one of the three slots);
+- revoke an entire license.
+
+The dashboard talks to the same-origin Worker API. The admin token is held only in the current browser tab's memory and is not saved to local storage. The activation code is shown only once after creation; copy it and send it privately to the customer. The dashboard does not process payments or verify receipts.
+
+The Worker source is `license-server/src/index.ts`. Deploy the updated Worker before opening `/admin`; the dashboard requires the `GET /admin/licenses` endpoint added with this version. Keep the existing D1 binding named `DB` and the secret `ADMIN_TOKEN`.
+
 ## Android API
 
 ### Claim an installation
