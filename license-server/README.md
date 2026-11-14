@@ -60,6 +60,24 @@ On success the API returns a per-device `device_token`. Store it in app-private 
 
 The response includes `plan`, active device count, limit, and premium feature keys. The client must fail closed for premium features when the server says the license is invalid, while allowing the free catalog and playback to continue.
 
+## Favorites and viewing-history sync
+
+The Android client uses the same per-device token issued by `POST /v1/devices/claim`.
+
+- `GET /v1/sync` returns all favorite/history records for the license, including deletion tombstones.
+- `PUT /v1/sync` accepts `{"items":[...]}` and returns the merged snapshot.
+- Each item has `type` (`favorite` or `history`), `key` (the torrent href), `data`, `deleted`, and `updated_at` (Unix milliseconds).
+- The server applies per-item last-write-wins ordering and keeps tombstones so offline devices receive deletions.
+- The client keeps its local SharedPreferences data and defers synchronization when offline or when the license is unavailable.
+
+For an existing D1 database, apply the updated schema again (all tables/indexes use `IF NOT EXISTS`):
+
+```sh
+npx wrangler d1 execute kinozal-tv-license --file=./schema.sql
+```
+
+In the app open **Настройки → Синхронизация**, enter the deployed HTTPS Worker URL, save it, and activate each device with the same Plus activation code. Each installation consumes one of the license's three device slots.
+
 ## Admin device management
 
 List devices for a license:
@@ -88,6 +106,6 @@ curl -X DELETE "https://YOUR-WORKER.workers.dev/admin/licenses/LICENSE_ID" \
 - No customer login/account recovery yet.
 - No web-based admin panel; admin operations use authenticated API calls.
 - No payment integration, receipts, refunds or automatic issuance.
-- The Android app has not yet been connected to this API.
+- The Android sync client is integrated, but the Worker must be deployed and its D1 schema applied before cloud sync can be used.
 - No OWNER provisioning endpoint yet; owner entitlement remains a separate follow-up.
 - Before production use, test simultaneous activation attempts, expired/revoked codes, device revocation, token loss, and D1 behavior in a Cloudflare test database.
