@@ -453,16 +453,32 @@ final class TvHomeChannels {
             long channelId, String channelKey, JSONArray items) {
         if (channelId <= 0 || items == null) return;
         String[] projection = {BaseColumns._ID};
+        List<Long> oldProgramIds = new ArrayList<>();
         try (Cursor cursor = activity.getContentResolver().query(
                 TvContractCompat.PreviewPrograms.CONTENT_URI, projection,
                 TvContractCompat.PreviewPrograms.COLUMN_CHANNEL_ID + "=?",
                 new String[]{String.valueOf(channelId)}, null)) {
             if (cursor != null) {
-                while (cursor.moveToNext()) helper.deletePreviewProgram(cursor.getLong(0));
+                while (cursor.moveToNext()) oldProgramIds.add(cursor.getLong(0));
             }
         } catch (Exception e) {
-            Log.w(TAG, "Could not clear old programs for " + channelKey, e);
+            diag(activity, "PROGRAM_QUERY_ERROR", channelKey + " " + e.getClass().getSimpleName()
+                    + ": " + e.getMessage());
+            Log.w(TAG, "Could not query old programs for " + channelKey, e);
         }
+        int deletedPrograms = 0;
+        for (Long oldId : oldProgramIds) {
+            try {
+                if (helper.deletePreviewProgram(oldId)) deletedPrograms++;
+                else diag(activity, "PROGRAM_DELETE_FALSE", channelKey + " id=" + oldId);
+            } catch (Exception e) {
+                diag(activity, "PROGRAM_DELETE_ERROR", channelKey + " id=" + oldId + " "
+                        + e.getClass().getSimpleName() + ": " + e.getMessage());
+                Log.w(TAG, "Could not delete old program " + oldId + " for " + channelKey, e);
+            }
+        }
+        diag(activity, "PROGRAMS_CLEARED", channelKey + " found=" + oldProgramIds.size()
+                + " deleted=" + deletedPrograms + " incoming=" + items.length());
 
         int limit = Math.min(items.length(), 20);
         java.util.Set<String> seenTitles = new java.util.HashSet<>();
