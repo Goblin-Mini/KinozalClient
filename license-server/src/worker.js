@@ -31,7 +31,7 @@ function normalizeCode(code) {
   return code.toUpperCase().replace(/[^A-Z0-9]/g, "");
 }
 
-async function sha256(value): Promise<string> {
+async function sha256(value) {
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
   return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
