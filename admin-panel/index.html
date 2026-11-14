@@ -120,7 +120,7 @@ main{max-width:1260px;margin:30px auto;padding:0 22px 60px}.page-title{display:f
    return "<tr><td><div class=\"owner\">"+escapeHtml(x.customer_label||"Без подписи")+"</div><div class=\"id\" title=\""+escapeHtml(x.id)+"\">"+escapeHtml(x.id)+"</div></td>"+
     "<td><span class=\"pill "+(active?"":"off")+"\">"+(active?"Активна":"Отозвана")+"</span></td>"+
     "<td>"+Number(x.active_devices||0)+" / "+Number(x.device_limit||0)+"</td>"+
-    "<td>"+date(x.created_at)+"</td><td>"+(x.code_expires_at?date(x.code_expires_at):"Бессрочно")+"</td>"+
+    "<td>"+date(x.created_at)+"</td><td>"+(Number(x.duration_days||0)===0?"Бессрочно":(x.license_expires_at?("до "+date(x.license_expires_at)):(Number(x.duration_days)+" дней · ожидает активации")))+"</td>"+
     "<td><div class=\"actions\"><button class=\"secondary\" data-devices=\""+escapeHtml(x.id)+"\">Устройства</button>"+(active?"<button class=\"danger\" data-revoke=\""+escapeHtml(x.id)+"\">Отозвать</button>":"")+"</div></td></tr>";
   }).join("")||"<tr><td colspan=\"6\" class=\"empty\">По заданным условиям лицензии не найдены</td></tr>";
   $("listCaption").textContent="Показано "+rows.length+" из "+licenseRows.length+" последних лицензий";
