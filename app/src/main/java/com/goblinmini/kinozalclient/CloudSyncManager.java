@@ -112,8 +112,16 @@ public final class CloudSyncManager {
             String key = item.optString("href", "");
             if (key.isEmpty()) continue;
             current.add(key);
+            JSONObject payloads = meta.optJSONObject(type + "_payloads");
+            if (payloads == null) payloads = new JSONObject();
+            String serialized = item.toString();
             long timestamp = section.optLong(key, now);
-            if (!section.has(key)) section.put(key, timestamp);
+            if (!section.has(key) || !serialized.equals(payloads.optString(key, ""))) {
+                timestamp = now;
+                section.put(key, timestamp);
+                payloads.put(key, serialized);
+            }
+            meta.put(type + "_payloads", payloads);
             out.put(new JSONObject().put("type", type).put("key", key)
                     .put("data", item).put("deleted", false).put("updated_at", timestamp));
         }
@@ -123,6 +131,8 @@ public final class CloudSyncManager {
             if (!key.isEmpty() && !current.contains(key)) {
                 long timestamp = now;
                 section.put(key, timestamp);
+                JSONObject payloads = meta.optJSONObject(type + "_payloads");
+                if (payloads != null) payloads.remove(key);
                 out.put(new JSONObject().put("type", type).put("key", key)
                         .put("data", new JSONObject()).put("deleted", true).put("updated_at", timestamp));
             }
