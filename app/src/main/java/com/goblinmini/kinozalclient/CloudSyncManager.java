@@ -44,6 +44,30 @@ public final class CloudSyncManager {
         return prefs(context).getString("cloud_sync_endpoint", "");
     }
 
+    public static JSONObject licenseInfo(Context context) throws Exception {
+        SharedPreferences p = prefs(context);
+        String base = endpoint(context);
+        String token = p.getString("cloud_sync_token", "");
+        if (base.isEmpty() || token.isEmpty()) throw new IllegalStateException("Устройство не активировано");
+        return request(base + "/v1/license", "GET", token, null);
+    }
+
+    public static JSONArray devices(Context context) throws Exception {
+        SharedPreferences p = prefs(context);
+        String base = endpoint(context);
+        String token = p.getString("cloud_sync_token", "");
+        if (base.isEmpty() || token.isEmpty()) throw new IllegalStateException("Устройство не активировано");
+        return request(base + "/v1/devices", "GET", token, null).optJSONArray("devices");
+    }
+
+    public static void removeDevice(Context context, String deviceId) throws Exception {
+        SharedPreferences p = prefs(context);
+        String base = endpoint(context);
+        String token = p.getString("cloud_sync_token", "");
+        if (base.isEmpty() || token.isEmpty()) throw new IllegalStateException("Устройство не активировано");
+        request(base + "/v1/devices/" + deviceId, "DELETE", token, null);
+    }
+
     public static boolean isActivated(Context context) {
         return !prefs(context).getString("cloud_sync_token", "").isEmpty();
     }
