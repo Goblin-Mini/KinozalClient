@@ -7136,7 +7136,7 @@ public class MainActivity extends Activity {
         }
         org.json.JSONArray array = new org.json.JSONArray();
         java.util.List<Torrent> values = new java.util.ArrayList<>(recent.values());
-        for (int i = 0; i < values.size(); i++) {
+        for (int i = values.size() - 1; i >= 0; i--) {
             Torrent t = values.get(i);
             org.json.JSONObject o = new org.json.JSONObject();
             try {
@@ -7232,13 +7232,14 @@ public class MainActivity extends Activity {
     private void saveRecentlyViewedList(java.util.LinkedHashMap<String, Torrent> recent) {
         org.json.JSONArray array = new org.json.JSONArray();
         java.util.List<Torrent> values = new java.util.ArrayList<>(recent.values());
-        for (int i = values.size() - 1; i >= 0; i--) {
+        for (int i = 0; i < values.size(); i++) {
             Torrent t = values.get(i);
             org.json.JSONObject o = new org.json.JSONObject();
             try {
                 o.put("title", t.title); o.put("href", t.href); o.put("size", t.size);
                 o.put("seeds", t.seeds); o.put("leeches", t.leeches); o.put("uploaded", t.uploaded);
                 o.put("poster", t.poster == null ? "" : t.poster);
+                o.put("viewedAt", t.viewedAt);
                 array.put(o);
             } catch (Exception ignored) { }
         }
