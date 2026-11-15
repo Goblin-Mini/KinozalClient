@@ -246,6 +246,42 @@ async function authenticatedDevice(request: Request, env: Env): Promise<any | nu
   ).bind(tokenHash).first<any>();
 }
 
+async function getDevices(request: Request, env: Env): Promise<Response> {
+  const device = await authenticatedDevice(request, env);
+  if (!device) return response(request, env, { error: "license_required" }, 401);
+  const rows = await env.DB.prepare(
+    `SELECT id, device_label, created_at, last_seen_at, revoked_at
+     FROM devices WHERE license_id=? AND revoked_at IS NULL ORDER BY created_at DESC`
+  ).bind(device.license_id).all<any>();
+  const devices = (rows.results || []).map((row: any) => ({
+    ...row, current: row.id === device.device_id,
+  }));
+  const license = await env.DB.prepare(
+    `SELECT device_limit,
+       (SELECT COUNT(*) FROM devices d WHERE d.license_id=licenses.id AND d.revoked_at IS NULL) AS active_devices
+     FROM licenses WHERE id=?`
+  ).bind(device.license_id).first<any>();
+  return response(request, env, {
+    devices,
+    active_devices: Number(license?.active_devices || 0),
+    device_limit: Number(license?.device_limit || 0),
+  });
+}
+
+async function revokeOwnDevice(request: Request, env: Env, deviceId: string): Promise<Response> {
+  const device = await authenticatedDevice(request, env);
+  if (!device) return response(request, env, { error: "license_required" }, 401);
+  if (deviceId === device.device_id) {
+    return response(request, env, { error: "cannot_revoke_current_device" }, 409);
+  }
+  const result = await env.DB.prepare(
+    `UPDATE devices SET revoked_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')
+     WHERE id=? AND license_id=? AND revoked_at IS NULL`
+  ).bind(deviceId, device.license_id).run();
+  if (!result.meta.changes) return response(request, env, { error: "device_not_found_or_already_revoked" }, 404);
+  return response(request, env, { success: true, device_id: deviceId });
+}
+
 async function getSyncItems(request: Request, env: Env): Promise<Response> {
   const device = await authenticatedDevice(request, env);
   if (!device) return response(request, env, { error: "license_required" }, 401);
@@ -491,6 +527,13 @@ export default {
       }
       if (request.method === "GET" && url.pathname === "/v1/license") {
         return await getLicense(request, env);
+      }
+      if (request.method === "GET" && url.pathname === "/v1/devices") {
+        return await getDevices(request, env);
+      }
+      const ownDeviceMatch = url.pathname.match(/^\/v1\/devices\/([a-f0-9]{32})$/);
+      if (request.method === "DELETE" && ownDeviceMatch) {
+        return await revokeOwnDevice(request, env, ownDeviceMatch[1]);
       }
       if (request.method === "GET" && url.pathname === "/admin/licenses") {
         return await adminListLicenses(request, env);
