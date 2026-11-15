@@ -497,6 +497,41 @@ async function adminRevokeDevice(request: Request, env: Env, deviceId: string): 
   return response(request, env, { success: true, device_id: deviceId });
 }
 
+async function adminDeleteLicense(request: Request, env: Env, licenseId: string): Promise<Response> {
+  if (!await requireAdmin(request, env)) return response(request, env, { error: "unauthorized" }, 401);
+  const exists = await env.DB.prepare("SELECT id FROM licenses WHERE id=?").bind(licenseId).first<any>();
+  if (!exists) return response(request, env, { error: "license_not_found" }, 404);
+  await env.DB.batch([
+    env.DB.prepare("DELETE FROM sync_items WHERE license_id=?").bind(licenseId),
+    env.DB.prepare("DELETE FROM activation_codes WHERE license_id=?").bind(licenseId),
+    env.DB.prepare("DELETE FROM devices WHERE license_id=?").bind(licenseId),
+    env.DB.prepare("DELETE FROM licenses WHERE id=?").bind(licenseId),
+  ]);
+  return response(request, env, { success: true, deleted_license_id: licenseId });
+}
+
+async function adminDeleteAllData(request: Request, env: Env): Promise<Response> {
+  if (!await requireAdmin(request, env)) return response(request, env, { error: "unauthorized" }, 401);
+  const counts = await env.DB.prepare(
+    "SELECT (SELECT COUNT(*) FROM licenses) AS licenses, " +
+    "(SELECT COUNT(*) FROM activation_codes) AS activation_codes, " +
+    "(SELECT COUNT(*) FROM devices) AS devices, " +
+    "(SELECT COUNT(*) FROM sync_items) AS sync_items"
+  ).first<any>();
+  await env.DB.batch([
+    env.DB.prepare("DELETE FROM sync_items"),
+    env.DB.prepare("DELETE FROM activation_codes"),
+    env.DB.prepare("DELETE FROM devices"),
+    env.DB.prepare("DELETE FROM licenses"),
+  ]);
+  return response(request, env, { success: true, deleted: {
+    licenses: Number(counts?.licenses || 0),
+    activation_codes: Number(counts?.activation_codes || 0),
+    devices: Number(counts?.devices || 0),
+    sync_items: Number(counts?.sync_items || 0),
+  } });
+}
+
 async function adminRevokeLicense(request: Request, env: Env, licenseId: string): Promise<Response> {
   if (!await requireAdmin(request, env)) return response(request, env, { error: "unauthorized" }, 401);
   const result = await env.DB.prepare(
@@ -538,8 +573,15 @@ export default {
       if (request.method === "GET" && url.pathname === "/admin/licenses") {
         return await adminListLicenses(request, env);
       }
+      if (request.method === "DELETE" && url.pathname === "/admin/data") {
+        return await adminDeleteAllData(request, env);
+      }
       if (request.method === "POST" && url.pathname === "/admin/licenses") {
         return await adminCreateLicense(request, env);
+      }
+      const deleteLicenseMatch = url.pathname.match(/^\/admin\/licenses\/([a-f0-9]{32})\/delete$/);
+      if (request.method === "DELETE" && deleteLicenseMatch) {
+        return await adminDeleteLicense(request, env, deleteLicenseMatch[1]);
       }
       const codesMatch = url.pathname.match(/^\/admin\/licenses\/([a-f0-9]{32})\/codes$/);
       if (request.method === "GET" && codesMatch) return await adminListCodes(request, env, codesMatch[1]);
