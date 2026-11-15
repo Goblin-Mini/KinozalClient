@@ -897,8 +897,7 @@ public class MainActivity extends Activity {
             org.json.JSONArray feeds = rootJson.optJSONArray("feeds");
             if (feeds == null) return null;
             List<HomeSection> result = new ArrayList<>();
-            for (int i = 0; i < feeds.length(); i++) {
-                org.json.JSONObject feed = feeds.optJSONObject(i);
+            for (int i = 0; i < feeds.length(); i++) {                org.json.JSONObject feed = feeds.optJSONObject(i);
                 if (feed == null) continue;
                 String cachedPath = feed.optString("path");
                 // Drop legacy "new arrivals" sections saved by older builds.
@@ -1797,8 +1796,7 @@ public class MainActivity extends Activity {
     }
 
     private int homeTorrentScore(HomePoster item) {
-        return parseInt(item.torrent.seeds) * 1000000 + parseInt(item.torrent.leeches);
-    }
+        return parseInt(item.torrent.seeds) * 1000000 + parseInt(item.torrent.leeches);    }
 
     private String normalizeHomeTitle(String title) {
         if (title == null) return "";
@@ -2697,8 +2695,7 @@ public class MainActivity extends Activity {
         strip.setOrientation(LinearLayout.HORIZONTAL);
         strip.setGravity(Gravity.CENTER_VERTICAL);
         strip.setClipChildren(false);
-        strip.setClipToPadding(false);
-        // Leave enough headroom for the focus zoom and upward translation.
+        strip.setClipToPadding(false);        // Leave enough headroom for the focus zoom and upward translation.
         strip.setPadding(dp(4), dp(20), dp(12), dp(20));
         horizontal.addView(strip);
         LinearLayout.LayoutParams rowParams = new LinearLayout.LayoutParams(-1, dp(302));
@@ -3094,7 +3091,6 @@ public class MainActivity extends Activity {
         addMenu("◷", "Недавно смотрели", () -> showRecentlyViewed());
         addMenu("⇥", "Авторизация", () -> showLogin());
         addMenu("⚙", "Настройки", () -> showSettings());
-        addMenu("☁", "Активация и синхронизация", () -> showCloudSyncSettings());
         // Keep status available for internal progress updates, but do not show
         // diagnostic counters or connection state in the sidebar.
         status = text("Показано лент: 0", 10, TEAL, false);
@@ -3597,8 +3593,7 @@ public class MainActivity extends Activity {
                 .setTitle("Размер шрифта")
                 .setView(panel)
                 .setPositiveButton("Готово", null)
-                .setNeutralButton("Сбросить", null)
-                .create();
+                .setNeutralButton("Сбросить", null)                .create();
         smaller.setOnClickListener(v -> changeFontSize(-2, value));
         larger.setOnClickListener(v -> changeFontSize(2, value));
         dialog.setOnShowListener(d -> {
@@ -3649,6 +3644,21 @@ public class MainActivity extends Activity {
         heading.setPadding(dp(4), 0, 0, dp(12));
         page.addView(heading);
 
+        // Keep mirror and account actions together in the first settings row.
+        LinearLayout topActions = new LinearLayout(this);
+        topActions.setOrientation(LinearLayout.HORIZONTAL);
+        Button mirrorButton = settingsPillButton("Зеркало");
+        Button activationButton = settingsPillButton("Активация и синхронизация");
+        topActions.addView(mirrorButton, new LinearLayout.LayoutParams(0, dp(48), 1f));
+        LinearLayout.LayoutParams activationParams = new LinearLayout.LayoutParams(0, dp(48), 1f);
+        activationParams.leftMargin = dp(10);
+        topActions.addView(activationButton, activationParams);
+        LinearLayout.LayoutParams topActionsParams = new LinearLayout.LayoutParams(-1, dp(54));
+        topActionsParams.bottomMargin = dp(6);
+        page.addView(topActions, topActionsParams);
+        mirrorButton.setOnClickListener(v -> chooseMirror());
+        activationButton.setOnClickListener(v -> showCloudSyncSettings());
+
         LinearLayout columns = new LinearLayout(this);
         columns.setOrientation(LinearLayout.HORIZONTAL);
         LinearLayout left = new LinearLayout(this);
@@ -3666,7 +3676,6 @@ public class MainActivity extends Activity {
         addSettingsAction(left, "Прокси", () -> showSocks5Settings());
         addSettingsAction(left, "Очистить кэш", () -> confirmClearCache());
 
-        addSettingsAction(right, "Зеркало", () -> chooseMirror());
         addSettingsAction(right, "Цвет акцента", () -> showAccentPicker());
         addSettingsAction(right, "TorrServe", () -> showTorrServeSettings());
         addSettingsAction(right, "Резервная копия", () -> new AlertDialog.Builder(this)
@@ -4497,7 +4506,6 @@ public class MainActivity extends Activity {
                     Math.min(dp(620), getResources().getDisplayMetrics().heightPixels - dp(100)));
         }
     }
-
     private void showFeedDiagnostics() {
         String report = FeedDiagnostics.read(this);
         ScrollView scroll = new ScrollView(this);
@@ -5397,8 +5405,7 @@ public class MainActivity extends Activity {
         web.setWebViewClient(new WebViewClient() {
             private boolean isMirror(Uri uri) {
                 return uri != null && uri.getHost() != null
-                        && uri.getHost().equalsIgnoreCase(Uri.parse(client.getMirror()).getHost());
-            }
+                        && uri.getHost().equalsIgnoreCase(Uri.parse(client.getMirror()).getHost());            }
             @Override public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
                 return request.isForMainFrame() && !isMirror(request.getUrl());
             }
@@ -6297,8 +6304,7 @@ public class MainActivity extends Activity {
             new FilterOption("Вчера", "2"),
             new FilterOption("За 3 дня", "3"),
             new FilterOption("За неделю", "4"),
-            new FilterOption("За месяц", "5"),
-            new FilterOption("Менее 3 ГБ", "6"),
+            new FilterOption("За месяц", "5"),            new FilterOption("Менее 3 ГБ", "6"),
             new FilterOption("3–10 ГБ", "7"),
             new FilterOption("10–50 ГБ", "8"),
             new FilterOption("50–250 ГБ", "9"),
@@ -7197,8 +7203,7 @@ public class MainActivity extends Activity {
                 t.seeds = o.optString("seeds", "—");
                 t.leeches = o.optString("leeches", "—");
                 t.uploaded = o.optString("uploaded", "—");
-                t.poster = o.optString("poster", "");
-                t.viewedAt = o.optLong("viewedAt", 0L);
+                t.poster = o.optString("poster", "");                t.viewedAt = o.optLong("viewedAt", 0L);
                 if (t.viewedAt <= 0L) t.viewedAt = System.currentTimeMillis() - (i * 1000L);
                 if (!t.href.isEmpty()) result.put(t.href, t);
             }
@@ -8097,8 +8102,7 @@ public class MainActivity extends Activity {
                     String message = data.screenshotsLoading ? "Загружаем скриншоты…"
                             : data.screenshotsLoaded || data.screenshotRequestId.isEmpty()
                             || data.screenshotPagesd.isEmpty()
-                            ? "Скриншоты на странице раздачи не найдены."
-                            : "Загружаем скриншоты…";
+                            ? "Скриншоты на странице раздачи не найдены."                            : "Загружаем скриншоты…";
                     detailContent.addView(text(message, 15, Color.LTGRAY, false));
                     if (!data.screenshotsLoaded && !data.screenshotsLoading
                             && !data.screenshotRequestId.isEmpty()
