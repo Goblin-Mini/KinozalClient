@@ -5854,7 +5854,7 @@ public class MainActivity extends Activity {
                     else cmp = dateValue(a.uploaded).compareTo(dateValue(b.uploaded));
                     return localSortDescending ? -cmp : cmp;
                 });
-            } else java.util.Collections.reverse(displayItems);
+            }
         }
         if (recentList) addHistoryClearButton();
         if (favoritesList) addFavoritesClearButton();
@@ -7192,8 +7192,16 @@ public class MainActivity extends Activity {
     }
 
     private void filterActiveLocalList() {
-        if (activeLocalItems == null || activeLocalItems.isEmpty() || list == null) return;
-        renderTorrents(filterLocalItems(activeLocalItems));
+        if (activeLocalItems == null || list == null) return;
+        List<Torrent> filtered = filterLocalItems(activeLocalItems);
+        if (filtered.isEmpty()) {
+            list.removeAllViews();
+            addEmpty(localListSearch != null && localListSearch.length() > 0
+                    ? "По этому запросу ничего не найдено."
+                    : "Список пока пуст.");
+        } else {
+            renderTorrents(filtered);
+        }
     }
 
     private String formatViewedAt(long timestamp) {
