@@ -3812,7 +3812,8 @@ public class MainActivity extends Activity {
         AlertDialog dialog = new AlertDialog.Builder(this).setTitle("Активация и синхронизация")
                 .setView(panel).setNegativeButton("Закрыть", null).create();
 
-        Runnable refreshDevices = () -> {
+        final Runnable[] refreshDevices = new Runnable[1];
+        refreshDevices[0] = () -> {
             if (!CloudSyncManager.isActivated(this)) {
                 devicesState.setText("Устройства: лицензия не активирована");
                 devicesList.removeAllViews();
@@ -3858,7 +3859,7 @@ public class MainActivity extends Activity {
                                                     CloudSyncManager.removeDevice(MainActivity.this, id);
                                                     runOnUiThread(() -> {
                                                         showMessage("Устройство удалено");
-                                                        refreshDevices.run();
+                                                        refreshDevices[0].run();
                                                     });
                                                 } catch (Exception e) {
                                                     String error = safe(e.getMessage());
@@ -3911,7 +3912,7 @@ public class MainActivity extends Activity {
                         showMessage("Устройство активировано");
                         CloudSyncScheduler.ensureScheduled(MainActivity.this);
                         scheduleCloudSync();
-                        refreshDevices.run();
+                        refreshDevices[0].run();
                     });
                 } catch (Exception e) {
                     String error = safe(e.getMessage());
@@ -3939,7 +3940,7 @@ public class MainActivity extends Activity {
                         if ("local:favorites".equals(currentPath)) showFavorites();
                         else if ("local:recently-viewed".equals(currentPath)) showRecentlyViewed();
                         showMessage("Избранное и история синхронизированы");
-                        refreshDevices.run();
+                        refreshDevices[0].run();
                     });
                 } catch (Exception e) {
                     String error = safe(e.getMessage());
@@ -3958,7 +3959,7 @@ public class MainActivity extends Activity {
                     getResources().getDisplayMetrics().widthPixels - dp(48)),
                     Math.min(getResources().getDisplayMetrics().heightPixels - dp(60), dp(620)));
         }
-        if (CloudSyncManager.isActivated(this)) refreshDevices.run();
+        if (CloudSyncManager.isActivated(this)) refreshDevices[0].run();
         else {
             activationState.setText("Статус: " + CloudSyncManager.status(this));
             devicesState.setText("Устройства: требуется активация");
