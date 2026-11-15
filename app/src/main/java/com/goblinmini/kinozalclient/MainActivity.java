@@ -130,7 +130,9 @@ public class MainActivity extends Activity {
     private List<HomeSection> collectionsSectionsMemory = new ArrayList<>();
     private TextView heading, status;
     private ProgressBar progress;
-    private EditText search;
+    private EditText search, localListSearch;
+    private LinearLayout mainSearchBar, localListSearchBar;
+    private List<Torrent> activeLocalItems = new ArrayList<>();
     private View focusedTorrentSource;
     private final List<Torrent> torrents = new ArrayList<>();
     private int page = 0;
@@ -307,6 +309,7 @@ public class MainActivity extends Activity {
 
     private static class Torrent {
         String title, href, size, seeds, leeches, uploaded, poster;
+        long viewedAt = 0L;
         String releaseType = "r0";
     }
 
@@ -3111,7 +3114,37 @@ public class MainActivity extends Activity {
         LinearLayout.LayoutParams headingParams = new LinearLayout.LayoutParams(-1, dp(42));
         headingParams.bottomMargin = dp(4);
         main.addView(heading, headingParams);
-
+        localListSearchBar = new LinearLayout(this);
+        localListSearchBar.setGravity(Gravity.CENTER_VERTICAL);
+        localListSearchBar.setPadding(0, 0, 0, dp(8));
+        localListSearchBar.setVisibility(View.GONE);
+        LinearLayout localSearchField = new LinearLayout(this);
+        localSearchField.setGravity(Gravity.CENTER_VERTICAL);
+        localSearchField.setBackground(shape(PANEL, TEAL));
+        localSearchField.setPadding(dp(10), 0, dp(5), 0);
+        localListSearch = new EditText(this);
+        localListSearch.setSingleLine(true);
+        localListSearch.setTextColor(Color.WHITE);
+        localListSearch.setHintTextColor(TEAL);
+        localListSearch.setHint("Поиск в этом списке");
+        localListSearch.setTextSize(fontSize(16));
+        localListSearch.setImeOptions(EditorInfo.IME_ACTION_SEARCH);
+        localListSearch.setBackgroundColor(Color.TRANSPARENT);
+        localSearchField.addView(localListSearch, new LinearLayout.LayoutParams(0, dp(48), 1f));
+        Button clearLocalSearch = button("×");
+        clearLocalSearch.setVisibility(View.GONE);
+        localSearchField.addView(clearLocalSearch, new LinearLayout.LayoutParams(dp(38), dp(40)));
+        clearLocalSearch.setOnClickListener(v -> localListSearch.setText(""));
+        localListSearch.addTextChangedListener(new android.text.TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) { }
+            @Override public void onTextChanged(CharSequence value, int start, int before, int count) {
+                clearLocalSearch.setVisibility(value.length() > 0 ? View.VISIBLE : View.GONE);
+                filterActiveLocalList();
+            }
+            @Override public void afterTextChanged(android.text.Editable value) { }
+        });
+        localListSearchBar.addView(localSearchField, new LinearLayout.LayoutParams(-1, dp(48)));
+        main.addView(localListSearchBar, new LinearLayout.LayoutParams(-1, dp(56)));
         LinearLayout searchBar = new LinearLayout(this); searchBar.setGravity(Gravity.CENTER_VERTICAL);
         search = new EditText(this);
         search.setSingleLine(true);
@@ -3217,6 +3250,7 @@ public class MainActivity extends Activity {
             return false;
         });
         LinearLayout.LayoutParams sbp = new LinearLayout.LayoutParams(-1, dp(52)); sbp.bottomMargin = dp(8);
+        mainSearchBar = searchBar;
         main.addView(searchBar, sbp);
         progress = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
         progress.setIndeterminate(true);
@@ -3249,6 +3283,8 @@ public class MainActivity extends Activity {
     /** Keep Home and Collections as two distinct live view trees. */
     /** Browse/category pages use their own temporary host and cannot erase feed screens. */
     private void activateBrowseScreen() {
+        if (mainSearchBar != null) mainSearchBar.setVisibility(View.VISIBLE);
+        if (localListSearchBar != null) localListSearchBar.setVisibility(View.GONE);
         if (feedScreenParent == null) return;
         if (browseScrollView == null) {
             browseList = new LinearLayout(this);
@@ -3276,6 +3312,8 @@ public class MainActivity extends Activity {
     }
 
     private void activateFeedScreen(String screen) {
+        if (mainSearchBar != null) mainSearchBar.setVisibility(View.VISIBLE);
+        if (localListSearchBar != null) localListSearchBar.setVisibility(View.GONE);
         if (feedScreenParent == null || homeScrollView == null) return;
         boolean collections = "collections".equals(screen);
         if (collections && collectionsScrollView == null) {
@@ -5700,9 +5738,15 @@ public class MainActivity extends Activity {
             localSortDescending = true;
         }
         if ("local:favorites".equals(currentPath)) {
-            renderTorrents(new ArrayList<>(readFavorites().values()));
+            java.util.List<Torrent> values = new ArrayList<>(readFavorites().values());
+            java.util.Collections.reverse(values);
+            activeLocalItems = new ArrayList<>(values);
+            renderTorrents(filterLocalItems(values));
         } else if ("local:recently-viewed".equals(currentPath)) {
-            renderTorrents(new ArrayList<>(readRecentlyViewed().values()));
+            java.util.List<Torrent> values = new ArrayList<>(readRecentlyViewed().values());
+            java.util.Collections.sort(values, (a, b) -> Long.compare(b.viewedAt, a.viewedAt));
+            activeLocalItems = new ArrayList<>(values);
+            renderTorrents(filterLocalItems(values));
         }
     }
 
@@ -5782,8 +5826,12 @@ public class MainActivity extends Activity {
             Button localSizeButton = button("");
             Button localSeedsButton = button("");
             Button[] localSortButtons = {localDateButton, localSizeButton, localSeedsButton};
-            String[] localSortKeys = {"date", "size", "seeds"};
-            String[] localSortTitles = {"Дата", "Размер", "Сиды"};
+            String[] localSortKeys = recentList
+                    ? new String[]{"viewed", "size", "seeds"}
+                    : new String[]{"date", "size", "seeds"};
+            String[] localSortTitles = recentList
+                    ? new String[]{"Просмотр", "Размер", "Сиды"}
+                    : new String[]{"Дата", "Размер", "Сиды"};
             for (int i = 0; i < localSortButtons.length; i++) {
                 final String key = localSortKeys[i];
                 Button b = localSortButtons[i];
@@ -5795,7 +5843,10 @@ public class MainActivity extends Activity {
                 b.setOnClickListener(v -> setLocalSort(key));
             }
             list.addView(localSortBar);
-            if (!"recent".equals(localSort)) {
+            if (recentList) {
+                java.util.Collections.sort(displayItems, (a, b) -> Long.compare(a.viewedAt, b.viewedAt));
+                if (localSortDescending) java.util.Collections.reverse(displayItems);
+            } else if (!"recent".equals(localSort)) {
                 java.util.Collections.sort(displayItems, (a, b) -> {
                     int cmp;
                     if ("size".equals(localSort)) cmp = Double.compare(sizeValue(a.size), sizeValue(b.size));
@@ -5803,7 +5854,7 @@ public class MainActivity extends Activity {
                     else cmp = dateValue(a.uploaded).compareTo(dateValue(b.uploaded));
                     return localSortDescending ? -cmp : cmp;
                 });
-            }
+            } else java.util.Collections.reverse(displayItems);
         }
         if (recentList) addHistoryClearButton();
         if (favoritesList) addFavoritesClearButton();
@@ -5818,7 +5869,7 @@ public class MainActivity extends Activity {
         TextView sizeHeader = text("РАЗМЕР", 11, TEAL, true);
         sizeHeader.setGravity(Gravity.CENTER);
         header.addView(sizeHeader, new LinearLayout.LayoutParams(dp(85), -2));
-        TextView dateHeader = text("ДАТА", 11, TEAL, true);
+        TextView dateHeader = text(recentList ? "ПРОСМОТРЕНО" : "ДАТА", 11, TEAL, true);
         dateHeader.setGravity(Gravity.CENTER);
         header.addView(dateHeader, new LinearLayout.LayoutParams(dp(96), -2));
         TextView seedsHeader = text("СИДЫ", 11, TEAL, true);
@@ -5842,7 +5893,8 @@ public class MainActivity extends Activity {
             TextView size = text(displayTorrentValue(t.size), 13, GOLD, false);
             size.setGravity(Gravity.CENTER);
             card.addView(size, new LinearLayout.LayoutParams(dp(85), -2));
-            TextView uploaded = text(displayTorrentValue(t.uploaded), 12, Color.rgb(170, 205, 180), false);
+            TextView uploaded = text(recentList ? formatViewedAt(t.viewedAt)
+                    : displayTorrentValue(t.uploaded), 12, Color.rgb(170, 205, 180), false);
             uploaded.setGravity(Gravity.CENTER);
             uploaded.setMaxLines(2);
             card.addView(uploaded, new LinearLayout.LayoutParams(dp(96), -2));
@@ -7015,16 +7067,20 @@ public class MainActivity extends Activity {
     }
 
     private void showFavorites() {
-        // Local lists must use the browse host, never the Home/Collections feed trees.
         activateBrowseScreen();
+        if (mainSearchBar != null) mainSearchBar.setVisibility(View.GONE);
+        if (localListSearchBar != null) localListSearchBar.setVisibility(View.VISIBLE);
+        if (localListSearch != null) localListSearch.setText("");
         currentPath = "local:favorites";
         currentTitle = "Избранное";
         heading.setText(currentTitle);
         java.util.List<Torrent> saved = new java.util.ArrayList<>(readFavorites().values());
+        java.util.Collections.reverse(saved);
+        activeLocalItems = new java.util.ArrayList<>(saved);
         list.removeAllViews();
         setCatalogStatus("Раздач в избранном", saved.size());
         if (saved.isEmpty()) addEmpty("Избранное пока пусто. Добавляйте раздачи из карточки.");
-        else renderTorrents(saved);
+        else renderTorrents(filterLocalItems(saved));
     }
 
 
@@ -7046,6 +7102,8 @@ public class MainActivity extends Activity {
                 t.leeches = o.optString("leeches", "—");
                 t.uploaded = o.optString("uploaded", "—");
                 t.poster = o.optString("poster", "");
+                t.viewedAt = o.optLong("viewedAt", 0L);
+                if (t.viewedAt <= 0L) t.viewedAt = System.currentTimeMillis() - (i * 1000L);
                 if (!t.href.isEmpty()) result.put(t.href, t);
             }
         } catch (Exception ignored) { }
@@ -7070,6 +7128,7 @@ public class MainActivity extends Activity {
         }
         java.util.LinkedHashMap<String, Torrent> recent = readRecentlyViewed();
         recent.remove(torrent.href);
+        torrent.viewedAt = System.currentTimeMillis();
         recent.put(torrent.href, torrent);
         while (recent.size() > 30) {
             String oldest = recent.keySet().iterator().next();
@@ -7077,13 +7136,14 @@ public class MainActivity extends Activity {
         }
         org.json.JSONArray array = new org.json.JSONArray();
         java.util.List<Torrent> values = new java.util.ArrayList<>(recent.values());
-        for (int i = values.size() - 1; i >= 0; i--) {
+        for (int i = 0; i < values.size(); i++) {
             Torrent t = values.get(i);
             org.json.JSONObject o = new org.json.JSONObject();
             try {
                 o.put("title", t.title); o.put("href", t.href); o.put("size", t.size);
                 o.put("seeds", t.seeds); o.put("leeches", t.leeches); o.put("uploaded", t.uploaded);
                 o.put("poster", t.poster == null ? "" : t.poster);
+                o.put("viewedAt", t.viewedAt);
                 array.put(o);
             } catch (Exception ignored) { }
         }
@@ -7117,6 +7177,29 @@ public class MainActivity extends Activity {
         params.topMargin = dp(8);
         params.bottomMargin = dp(8);
         list.addView(clear, params);
+    }
+
+    private List<Torrent> filterLocalItems(List<Torrent> source) {
+        String query = localListSearch == null ? "" : localListSearch.getText().toString().trim()
+                .toLowerCase(java.util.Locale.ROOT);
+        if (query.isEmpty()) return new ArrayList<>(source);
+        List<Torrent> filtered = new ArrayList<>();
+        for (Torrent torrent : source) {
+            String title = torrent.title == null ? "" : torrent.title.toLowerCase(java.util.Locale.ROOT);
+            if (title.contains(query)) filtered.add(torrent);
+        }
+        return filtered;
+    }
+
+    private void filterActiveLocalList() {
+        if (activeLocalItems == null || activeLocalItems.isEmpty() || list == null) return;
+        renderTorrents(filterLocalItems(activeLocalItems));
+    }
+
+    private String formatViewedAt(long timestamp) {
+        if (timestamp <= 0L) return "—";
+        return new java.text.SimpleDateFormat("dd.MM.yy HH:mm", java.util.Locale.getDefault())
+                .format(new java.util.Date(timestamp));
     }
 
     private void removeFavorite(String href) {
@@ -7166,16 +7249,20 @@ public class MainActivity extends Activity {
     }
 
     private void showRecentlyViewed() {
-        // Keep history isolated from the persistent Collections view hierarchy.
         activateBrowseScreen();
+        if (mainSearchBar != null) mainSearchBar.setVisibility(View.GONE);
+        if (localListSearchBar != null) localListSearchBar.setVisibility(View.VISIBLE);
+        if (localListSearch != null) localListSearch.setText("");
         currentPath = "local:recently-viewed";
         currentTitle = "Недавно смотрели";
         heading.setText(currentTitle);
         java.util.List<Torrent> saved = new java.util.ArrayList<>(readRecentlyViewed().values());
+        java.util.Collections.sort(saved, (a, b) -> Long.compare(b.viewedAt, a.viewedAt));
+        activeLocalItems = new java.util.ArrayList<>(saved);
         list.removeAllViews();
         setCatalogStatus("Недавно смотрели", saved.size());
         if (saved.isEmpty()) addEmpty("Здесь появятся открытые вами раздачи.");
-        else renderTorrents(saved);
+        else renderTorrents(filterLocalItems(saved));
     }
 
     private static class TorrentDetails {
