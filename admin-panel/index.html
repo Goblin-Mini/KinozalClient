@@ -44,7 +44,7 @@ main{max-width:1260px;margin:30px auto;padding:0 22px 60px}.page-title{display:f
  </section>
 
  <section id="dashboard" class="hidden">
-  <div class="page-title"><div><h1>Обзор лицензий</h1><p>Состояние подписок Plus, устройств и активаций</p></div><button class="secondary" id="refresh">Обновить данные</button></div>
+  <div class="page-title"><div><h1>Обзор лицензий</h1><p>Состояние подписок Plus, устройств и активаций</p></div><div class="toolbar"><button class="danger" id="deleteAllData">Очистить всю базу</button><button class="secondary" id="refresh">Обновить данные</button></div></div>
   <div class="stats">
    <div class="stat"><div class="caption">Всего лицензий</div><strong id="statTotal">—</strong><div class="sub">Все выданные лицензии</div></div>
    <div class="stat"><div class="caption">Активировано</div><strong id="statActive">—</strong><div class="sub">Лицензии в рабочем статусе</div></div>
@@ -121,7 +121,7 @@ main{max-width:1260px;margin:30px auto;padding:0 22px 60px}.page-title{display:f
     "<td><span class=\"pill "+(active?"":"off")+"\">"+(active?"Активна":"Отозвана")+"</span></td>"+
     "<td>"+Number(x.active_devices||0)+" / "+Number(x.device_limit||0)+"</td>"+
     "<td>"+date(x.created_at)+"</td><td>"+(Number(x.duration_days||0)===0?"Бессрочно":(x.license_expires_at?("до "+date(x.license_expires_at)):(Number(x.duration_days)+" дней · ожидает активации")))+"</td>"+
-    "<td><div class=\"actions\"><button class=\"secondary\" data-devices=\""+escapeHtml(x.id)+"\">Устройства</button>"+(active?"<button class=\"danger\" data-revoke=\""+escapeHtml(x.id)+"\">Отозвать</button>":"")+"</div></td></tr>";
+    "<td><div class=\"actions\"><button class=\"secondary\" data-devices=\""+escapeHtml(x.id)+"\">Устройства</button>"+(active?"<button class=\"danger\" data-revoke=\""+escapeHtml(x.id)+"\">Отозвать</button>":"")+"<button class=\"danger\" data-delete-license=\""+escapeHtml(x.id)+"\">Удалить</button></div></td></tr>";
   }).join("")||"<tr><td colspan=\"6\" class=\"empty\">По заданным условиям лицензии не найдены</td></tr>";
   $("listCaption").textContent="Показано "+rows.length+" из "+licenseRows.length+" последних лицензий";
  }
@@ -152,6 +152,20 @@ main{max-width:1260px;margin:30px auto;padding:0 22px 60px}.page-title{display:f
  });
  $("logout").onclick=function(){showLogin("Сеанс завершён. Секрет удалён из памяти вкладки.");$("token").value=""};
  $("refresh").onclick=load;$("search").oninput=renderLicenses;$("statusFilter").onchange=renderLicenses;
+ $("deleteAllData").onclick=async function(){
+  if(!confirm("ВНИМАНИЕ! Удалить ВСЕ записи из базы? Будут удалены все лицензии, коды активации, устройства и данные облачной синхронизации. Это действие необратимо."))return;
+  const confirmation=prompt('Для подтверждения введи ТОЧНО: УДАЛИТЬ ВСЁ');
+  if(confirmation!=="УДАЛИТЬ ВСЁ")return;
+  this.disabled=true;
+  try{
+   const result=await api("/admin/data",{method:"DELETE"});
+   $("devicePanel").classList.add("hidden");
+   $("listError").className="message success";
+   $("listError").textContent="База очищена. Удалено: лицензий "+result.deleted.licenses+", кодов "+result.deleted.activation_codes+", устройств "+result.deleted.devices+", записей синхронизации "+result.deleted.sync_items+".";
+   await load();
+  }catch(err){$("listError").className="message error";$("listError").textContent="Не удалось очистить базу: "+err.message}
+  finally{this.disabled=false}
+ };
  $("issueForm").addEventListener("submit",async function(e){
   e.preventDefault();$("issueResult").textContent="";$("issueResult").className="message";$("issueButton").disabled=true;
   const body={customer_label:$("customer").value.trim(),device_limit:Number($("deviceLimit").value),license_days:Number($("licenseDays").value)};
@@ -164,7 +178,14 @@ main{max-width:1260px;margin:30px auto;padding:0 22px 60px}.page-title{display:f
   finally{$("issueButton").disabled=false}
  });
  $("licenseRows").addEventListener("click",async function(e){
-  const deviceButton=e.target.closest("[data-devices]"),revokeButton=e.target.closest("[data-revoke]");
+  const deviceButton=e.target.closest("[data-devices]"),revokeButton=e.target.closest("[data-revoke]"),deleteButton=e.target.closest("[data-delete-license]");
+  if(deleteButton){
+   const id=deleteButton.dataset.deleteLicense;
+   if(!confirm("Удалить лицензию безвозвратно? Вместе с ней будут удалены все её коды активации, устройства и данные синхронизации."))return;
+   try{await api("/admin/licenses/"+id+"/delete",{method:"DELETE"});await load();$("devicePanel").classList.add("hidden")}
+   catch(err){$("listError").textContent="Не удалось удалить лицензию: "+err.message}
+   return;
+  }
   if(deviceButton){await showDevices(deviceButton.dataset.devices);return}
   if(revokeButton&&confirm("Отозвать лицензию целиком? Все устройства потеряют доступ к Plus и облачной синхронизации.")){
    try{await api("/admin/licenses/"+revokeButton.dataset.revoke,{method:"DELETE"});await load();$("devicePanel").classList.add("hidden")}
