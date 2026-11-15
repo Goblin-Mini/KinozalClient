@@ -3092,7 +3092,9 @@ public class MainActivity extends Activity {
 
         addMenu("★", "Избранное", () -> showFavorites());
         addMenu("◷", "Недавно смотрели", () -> showRecentlyViewed());
+        addMenu("⇥", "Авторизация", () -> showLogin());
         addMenu("⚙", "Настройки", () -> showSettings());
+        addMenu("☁", "Активация и синхронизация", () -> showCloudSyncSettings());
         // Keep status available for internal progress updates, but do not show
         // diagnostic counters or connection state in the sidebar.
         status = text("Показано лент: 0", 10, TEAL, false);
@@ -3658,14 +3660,12 @@ public class MainActivity extends Activity {
         columns.addView(left, new LinearLayout.LayoutParams(0, -2, 1f));
         columns.addView(right, new LinearLayout.LayoutParams(0, -2, 1f));
 
-        addSettingsAction(left, "Авторизация", () -> showLogin());
         addSettingsAction(left, "Начальный раздел", () -> chooseStartupSource());
         addSettingsAction(left, "Размер шрифта", () -> showFontSizeSettings());
         addSettingsAction(left, "Поиск Jackett", () -> showJackettSettings());
         addSettingsAction(left, "Прокси", () -> showSocks5Settings());
         addSettingsAction(left, "Очистить кэш", () -> confirmClearCache());
 
-        addSettingsAction(right, "Синхронизация", () -> showCloudSyncSettings());
         addSettingsAction(right, "Зеркало", () -> chooseMirror());
         addSettingsAction(right, "Цвет акцента", () -> showAccentPicker());
         addSettingsAction(right, "TorrServe", () -> showTorrServeSettings());
@@ -3757,79 +3757,167 @@ public class MainActivity extends Activity {
         panel.setPadding(dp(18), dp(12), dp(18), dp(10));
         panel.setBackgroundColor(BG);
 
-        TextView info = text("Синхронизация избранного и истории просмотров между устройствами. Требуется активная лицензия Plus. Локальные данные сохраняются даже без интернета.",
-                14, Color.LTGRAY, false);
-        panel.addView(info);
-
-        EditText endpoint = new EditText(this);
-        endpoint.setSingleLine(true);
-        endpoint.setHint("Адрес Cloudflare Worker");
-        endpoint.setText(CloudSyncManager.endpoint(this));
-        styleSettingsEdit(endpoint);
-        LinearLayout.LayoutParams fieldParams = new LinearLayout.LayoutParams(-1, dp(46));
-        fieldParams.topMargin = dp(10);
-        panel.addView(endpoint, fieldParams);
+        TextView intro = text("Введите серийный номер Plus, чтобы активировать устройство и синхронизировать избранное и историю просмотров.", 14, Color.LTGRAY, false);
+        panel.addView(intro);
 
         EditText code = new EditText(this);
         code.setSingleLine(true);
-        code.setHint("Код активации Plus");
+        code.setHint("Серийный номер");
         code.setInputType(android.text.InputType.TYPE_CLASS_TEXT
                 | android.text.InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS);
         styleSettingsEdit(code);
-        LinearLayout.LayoutParams codeParams = new LinearLayout.LayoutParams(-1, dp(46));
-        codeParams.topMargin = dp(8);
+        LinearLayout.LayoutParams codeParams = new LinearLayout.LayoutParams(-1, dp(48));
+        codeParams.topMargin = dp(10);
         panel.addView(code, codeParams);
 
-        TextView state = text("Статус: " + CloudSyncManager.status(this), 13, TEAL, false);
-        LinearLayout.LayoutParams stateParams = new LinearLayout.LayoutParams(-1, -2);
-        stateParams.topMargin = dp(10);
-        panel.addView(state, stateParams);
+        LinearLayout codeActions = new LinearLayout(this);
+        codeActions.setOrientation(LinearLayout.HORIZONTAL);
+        Button paste = settingsPillButton("Вставить из буфера");
+        Button activate = settingsPillButton("Активировать");
+        codeActions.addView(paste, new LinearLayout.LayoutParams(0, dp(44), 1f));
+        LinearLayout.LayoutParams activateParams = new LinearLayout.LayoutParams(0, dp(44), 1f);
+        activateParams.leftMargin = dp(8);
+        codeActions.addView(activate, activateParams);
+        LinearLayout.LayoutParams codeActionsParams = new LinearLayout.LayoutParams(-1, dp(48));
+        codeActionsParams.topMargin = dp(8);
+        panel.addView(codeActions, codeActionsParams);
 
-        Button save = settingsPillButton("Сохранить адрес");
-        Button activate = settingsPillButton("Активировать Plus");
-        Button sync = settingsPillButton("Синхронизировать сейчас");
-        for (Button b : new Button[]{save, activate, sync}) {
-            LinearLayout.LayoutParams bp = new LinearLayout.LayoutParams(-1, dp(44));
-            bp.topMargin = dp(8);
-            panel.addView(b, bp);
-        }
+        TextView activationTitle = text("АКТИВАЦИЯ", 13, GOLD, true);
+        LinearLayout.LayoutParams titleParams = new LinearLayout.LayoutParams(-1, -2);
+        titleParams.topMargin = dp(14);
+        panel.addView(activationTitle, titleParams);
+        TextView activationState = text("Статус: " + CloudSyncManager.status(this), 14, TEAL, false);
+        panel.addView(activationState);
+        TextView devicesState = text("Устройства: загрузка…", 13, Color.LTGRAY, false);
+        LinearLayout.LayoutParams devicesStateParams = new LinearLayout.LayoutParams(-1, -2);
+        devicesStateParams.topMargin = dp(4);
+        panel.addView(devicesState, devicesStateParams);
+        LinearLayout devicesList = new LinearLayout(this);
+        devicesList.setOrientation(LinearLayout.VERTICAL);
+        LinearLayout.LayoutParams devicesListParams = new LinearLayout.LayoutParams(-1, -2);
+        devicesListParams.topMargin = dp(6);
+        panel.addView(devicesList, devicesListParams);
 
-        AlertDialog dialog = new AlertDialog.Builder(this).setTitle("Облачная синхронизация")
+        TextView syncTitle = text("СИНХРОНИЗАЦИЯ", 13, GOLD, true);
+        LinearLayout.LayoutParams syncTitleParams = new LinearLayout.LayoutParams(-1, -2);
+        syncTitleParams.topMargin = dp(16);
+        panel.addView(syncTitle, syncTitleParams);
+        TextView syncState = text("Статус: " + CloudSyncManager.status(this), 14, TEAL, false);
+        panel.addView(syncState);
+        Button sync = settingsPillButton("Синхронизировать");
+        LinearLayout.LayoutParams syncParams = new LinearLayout.LayoutParams(-1, dp(46));
+        syncParams.topMargin = dp(8);
+        panel.addView(sync, syncParams);
+
+        AlertDialog dialog = new AlertDialog.Builder(this).setTitle("Активация и синхронизация")
                 .setView(panel).setNegativeButton("Закрыть", null).create();
-        save.setOnClickListener(v -> {
-            String value = endpoint.getText().toString().trim();
-            if (!value.startsWith("https://")) {
-                showMessage("Укажите HTTPS-адрес Cloudflare Worker");
+
+        Runnable refreshDevices = () -> {
+            if (!CloudSyncManager.isActivated(this)) {
+                devicesState.setText("Устройства: лицензия не активирована");
+                devicesList.removeAllViews();
                 return;
             }
-            CloudSyncManager.configure(this, value);
-            showMessage("Адрес сервера сохранён");
-        });
-        activate.setOnClickListener(v -> {
-            String value = endpoint.getText().toString().trim();
-            String activationCode = code.getText().toString().trim();
-            if (!value.startsWith("https://") || activationCode.isEmpty()) {
-                showMessage("Укажите адрес сервера и код активации");
-                return;
-            }
-            CloudSyncManager.configure(this, value);
-            activate.setEnabled(false);
-            showMessage("Активируем устройство…");
+            devicesState.setText("Устройства: обновление списка…");
             executeSafely(io, () -> {
                 try {
-                    CloudSyncManager.activate(this, activationCode);
+                    org.json.JSONObject info = CloudSyncManager.licenseInfo(this);
+                    org.json.JSONArray devices = CloudSyncManager.devices(this);
                     runOnUiThread(() -> {
-                        if (dialog.isShowing()) state.setText("Статус: " + CloudSyncManager.status(this));
+                        if (isFinishing() || isDestroyed()) return;
+                        activationState.setText("Статус: активна");
+                        int active = info.optInt("active_devices", devices.length());
+                        int limit = info.optInt("device_limit", 0);
+                        devicesState.setText("Доступно устройств: " + active + " из " + limit
+                                + " (свободно: " + Math.max(0, limit - active) + ")");
+                        devicesList.removeAllViews();
+                        for (int i = 0; i < devices.length(); i++) {
+                            org.json.JSONObject device = devices.optJSONObject(i);
+                            if (device == null) continue;
+                            String id = device.optString("id", "");
+                            String label = device.optString("device_label", "Устройство");
+                            boolean current = device.optBoolean("current", false);
+                            LinearLayout row = new LinearLayout(MainActivity.this);
+                            row.setGravity(Gravity.CENTER_VERTICAL);
+                            row.setPadding(dp(8), dp(3), 0, dp(3));
+                            TextView name = text(label + (current ? " (это устройство)" : ""),
+                                    12, current ? GOLD : Color.LTGRAY, current);
+                            row.addView(name, new LinearLayout.LayoutParams(0, -2, 1f));
+                            if (!current && !id.isEmpty()) {
+                                Button remove = settingsPillButton("Удалить");
+                                remove.setTextSize(fontSize(11));
+                                row.addView(remove, new LinearLayout.LayoutParams(dp(88), dp(38)));
+                                remove.setOnClickListener(v -> new AlertDialog.Builder(MainActivity.this)
+                                        .setTitle("Удалить устройство?")
+                                        .setMessage("Устройство «" + label + "» больше не сможет синхронизироваться.")
+                                        .setNegativeButton("Отмена", null)
+                                        .setPositiveButton("Удалить", (d, which) -> {
+                                            remove.setEnabled(false);
+                                            executeSafely(io, () -> {
+                                                try {
+                                                    CloudSyncManager.removeDevice(MainActivity.this, id);
+                                                    runOnUiThread(() -> {
+                                                        showMessage("Устройство удалено");
+                                                        refreshDevices.run();
+                                                    });
+                                                } catch (Exception e) {
+                                                    String error = safe(e.getMessage());
+                                                    runOnUiThread(() -> {
+                                                        remove.setEnabled(true);
+                                                        showMessage("Не удалось удалить устройство: " + error);
+                                                    });
+                                                }
+                                            });
+                                        }).show());
+                            }
+                            devicesList.addView(row);
+                        }
+                    });
+                } catch (Exception e) {
+                    String error = safe(e.getMessage());
+                    runOnUiThread(() -> {
+                        activationState.setText("Статус: не удалось проверить");
+                        devicesState.setText("Не удалось загрузить список устройств: " + error);
+                    });
+                }
+            });
+        };
+
+        paste.setOnClickListener(v -> {
+            android.content.ClipboardManager clipboard =
+                    (android.content.ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
+            if (clipboard != null && clipboard.hasPrimaryClip()
+                    && clipboard.getPrimaryClip().getItemCount() > 0) {
+                CharSequence value = clipboard.getPrimaryClip().getItemAt(0).coerceToText(this);
+                if (value != null) code.setText(value.toString().trim());
+                else showMessage("В буфере обмена нет текста");
+            } else showMessage("Буфер обмена пуст");
+        });
+        activate.setOnClickListener(v -> {
+            String serial = code.getText().toString().trim();
+            if (serial.isEmpty()) {
+                showMessage("Введите серийный номер или вставьте его из буфера");
+                code.requestFocus();
+                return;
+            }
+            activate.setEnabled(false);
+            activationState.setText("Статус: выполняется активация…");
+            executeSafely(io, () -> {
+                try {
+                    CloudSyncManager.activate(this, serial);
+                    runOnUiThread(() -> {
                         activate.setEnabled(true);
+                        activationState.setText("Статус: активирована");
                         showMessage("Устройство активировано");
                         CloudSyncScheduler.ensureScheduled(MainActivity.this);
                         scheduleCloudSync();
+                        refreshDevices.run();
                     });
                 } catch (Exception e) {
                     String error = safe(e.getMessage());
                     runOnUiThread(() -> {
                         activate.setEnabled(true);
-                        state.setText("Статус: ошибка активации");
+                        activationState.setText("Статус: ошибка активации");
                         showMessage("Не удалось активировать: " + error);
                     });
                 }
@@ -3837,26 +3925,27 @@ public class MainActivity extends Activity {
         });
         sync.setOnClickListener(v -> {
             if (!CloudSyncManager.isActivated(this)) {
-                showMessage("Сначала активируйте лицензию Plus");
+                showMessage("Сначала активируйте устройство");
                 return;
             }
             sync.setEnabled(false);
-            showMessage("Синхронизируем данные…");
+            syncState.setText("Статус: синхронизация выполняется…");
             executeSafely(io, () -> {
                 try {
                     CloudSyncManager.sync(this);
                     runOnUiThread(() -> {
                         sync.setEnabled(true);
-                        state.setText("Статус: " + CloudSyncManager.status(this));
+                        syncState.setText("Статус: синхронизировано");
                         if ("local:favorites".equals(currentPath)) showFavorites();
                         else if ("local:recently-viewed".equals(currentPath)) showRecentlyViewed();
                         showMessage("Избранное и история синхронизированы");
+                        refreshDevices.run();
                     });
                 } catch (Exception e) {
                     String error = safe(e.getMessage());
                     runOnUiThread(() -> {
                         sync.setEnabled(true);
-                        state.setText("Статус: ошибка синхронизации");
+                        syncState.setText("Статус: ошибка синхронизации");
                         showMessage("Синхронизация не выполнена: " + error);
                     });
                 }
@@ -3866,7 +3955,13 @@ public class MainActivity extends Activity {
         if (dialog.getWindow() != null) {
             dialog.getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(BG));
             dialog.getWindow().setLayout(Math.min(dp(680),
-                    getResources().getDisplayMetrics().widthPixels - dp(48)), -2);
+                    getResources().getDisplayMetrics().widthPixels - dp(48)),
+                    Math.min(getResources().getDisplayMetrics().heightPixels - dp(60), dp(620)));
+        }
+        if (CloudSyncManager.isActivated(this)) refreshDevices.run();
+        else {
+            activationState.setText("Статус: " + CloudSyncManager.status(this));
+            devicesState.setText("Устройства: требуется активация");
         }
     }
 
