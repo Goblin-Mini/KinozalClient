@@ -45,7 +45,7 @@ final class TvHomeChannels {
         catch (Exception e) { return "Ошибка чтения: " + e.getMessage(); }
     }
     static void refreshNow(Activity a) {
-        if (a == null) return;
+        if (a == null || !PlusAccess.hasFeature(a, "android_tv_channels")) return;
         File model = new File(a.getFilesDir(), "kinozal_home_model_v2.json");
         diag(a, "MANUAL_REFRESH", "modelExists=" + model.isFile());
         sync(a, model);
@@ -88,8 +88,9 @@ final class TvHomeChannels {
         if (activity == null) return;
         Context appContext = activity.getApplicationContext();
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O || modelFile == null) return;
+        if (!PlusAccess.hasFeature(appContext, "android_tv_channels")) return;
         if (!appContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-                .getBoolean("tv_channels_enabled", true)) return;
+                .getBoolean("tv_channels_enabled", false)) return;
         diag(appContext, "SYNC_START", "modelExists=" + modelFile.isFile());
         EXECUTOR.execute(() -> syncInternal(appContext, modelFile, activity));
     }
@@ -98,8 +99,9 @@ final class TvHomeChannels {
     static void syncFromWorker(Context context, File modelFile) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O || context == null || modelFile == null) return;
         Context appContext = context.getApplicationContext();
+        if (!PlusAccess.hasFeature(appContext, "android_tv_channels")) return;
         if (!appContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-                .getBoolean("tv_channels_enabled", true)) return;
+                .getBoolean("tv_channels_enabled", false)) return;
         syncInternal(appContext, modelFile, null);
     }
 
