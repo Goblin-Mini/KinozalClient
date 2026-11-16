@@ -9098,26 +9098,6 @@ public class MainActivity extends Activity {
     }
 
 
-        try {
-            if (bytes == null || bytes.length < 20 || bytes[0] != 'd') {
-                throw new java.io.IOException("Сайт вернул не .torrent-файл. Возможно, сессия истекла или зеркало отклонило запрос.");
-            }
-            String safeTitle = data.title == null ? "kinozal-torrent" : data.title.trim();
-            safeTitle = safeTitle.replaceAll("[/\\\\:*?\\\"<>|]", "_")
-                    .replaceAll("\\s+", " ").trim();
-            if (safeTitle.isEmpty()) safeTitle = "kinozal-torrent";
-            pendingTorrentSaveBytes = bytes;
-            Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
-            intent.addCategory(Intent.CATEGORY_OPENABLE);
-            intent.setType("application/x-bittorrent");
-            intent.putExtra(Intent.EXTRA_TITLE, safeTitle + ".torrent");
-            startActivityForResult(intent, REQUEST_TORRENT_SAVE);
-        } catch (Exception e) {
-            pendingTorrentSaveBytes = null;
-            showMessage("Не удалось подготовить торрент для сохранения: " + safe(e.getMessage()));
-        }
-    }
-
     private void writeTorrentToUri(Uri uri) {
         byte[] bytes = pendingTorrentSaveBytes;
         pendingTorrentSaveBytes = null;
