@@ -33,8 +33,13 @@ public final class CloudSyncManager {
     private static final String FAVORITES = "local_favorites";
     private static final String HISTORY = "recently_viewed";
     private static final int TIMEOUT_MS = 15000;
-    // Default license/synchronization service; keep activation working after clean installs and upgrades.
-    private static final String DEFAULT_ENDPOINT = "https://kinozal-tv-license.goblinmini-4pda.workers.dev";
+    // Obfuscated default endpoint. This deters casual inspection, not determined reverse engineering.
+    private static final byte[] ENDPOINT_DATA = new byte[] { 53, 41, 41, 45, 46, 103, 114, 114, 54, 52, 51, 50, 39, 60, 49, 112, 41, 43, 112, 49, 52, 62, 56, 51, 46, 56, 115, 58, 50, 63, 49, 52, 51, 48, 52, 51, 52, 112, 105, 45, 57, 60, 115, 42, 50, 47, 54, 56, 47, 46, 115, 57, 56, 43 };
+    private static String defaultEndpoint() {
+        byte[] decoded = new byte[ENDPOINT_DATA.length];
+        for (int i = 0; i < ENDPOINT_DATA.length; i++) decoded[i] = (byte) (ENDPOINT_DATA[i] ^ 0x5D);
+        return new String(decoded, StandardCharsets.UTF_8);
+    }
 
     private CloudSyncManager() { }
 
@@ -44,7 +49,7 @@ public final class CloudSyncManager {
 
     public static String endpoint(Context context) {
         String configured = normalizeEndpoint(prefs(context).getString("cloud_sync_endpoint", ""));
-        return configured.isEmpty() ? DEFAULT_ENDPOINT : configured;
+        return configured.isEmpty() ? defaultEndpoint() : configured;
     }
 
     public static JSONObject licenseInfo(Context context) throws Exception {
