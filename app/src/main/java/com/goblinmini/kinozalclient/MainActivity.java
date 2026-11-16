@@ -130,32 +130,45 @@ public class MainActivity extends Activity {
         screen.setBackgroundColor(Color.rgb(16, 19, 23));
         screen.setPadding(32, 24, 32, 24);
 
-        TextView image = new TextView(this);
-        image.setText("🖕");
-        image.setTextSize(150);
-        image.setGravity(Gravity.CENTER);
-        screen.addView(image, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-
         TextView title = new TextView(this);
-        title.setText("Кинозал ТВ временно недоступен");
+        title.setText("Кинозал ТВ");
         title.setTextColor(Color.rgb(251, 226, 173));
-        title.setTextSize(27);
+        title.setTextSize(30);
         title.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
         title.setGravity(Gravity.CENTER);
-        title.setPadding(0, 18, 0, 10);
         screen.addView(title, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
         TextView details = new TextView(this);
-        details.setText("Проводятся технические работы.\\nНажмите «Назад», чтобы закрыть приложение.");
+        details.setText("Приложение временно приостановлено.\\nНовости и информация — на нашем сайте.");
         details.setTextColor(Color.LTGRAY);
         details.setTextSize(18);
         details.setGravity(Gravity.CENTER);
+        details.setPadding(0, 18, 0, 24);
         screen.addView(details, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
+        Button website = new Button(this);
+        website.setText("Перейти на сайт Кинозал ТВ");
+        website.setTextSize(16);
+        website.setTextColor(Color.WHITE);
+        website.setBackgroundTintList(android.content.res.ColorStateList.valueOf(Color.rgb(174, 55, 18)));
+        website.setOnClickListener(v -> startActivity(new Intent(Intent.ACTION_VIEW,
+                Uri.parse("https://kinozal-tv.pages.dev/"))));
+        screen.addView(website, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        TextView close = new TextView(this);
+        close.setText("Нажмите «Назад», чтобы закрыть приложение");
+        close.setTextColor(Color.GRAY);
+        close.setTextSize(14);
+        close.setGravity(Gravity.CENTER);
+        close.setPadding(0, 20, 0, 0);
+        screen.addView(close, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
         setContentView(screen);
+        website.requestFocus();
     }
 
     private void initializeNetwork(String savedBrowserCookies) {
