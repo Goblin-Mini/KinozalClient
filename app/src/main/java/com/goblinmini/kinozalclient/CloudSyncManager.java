@@ -33,6 +33,8 @@ public final class CloudSyncManager {
     private static final String FAVORITES = "local_favorites";
     private static final String HISTORY = "recently_viewed";
     private static final int TIMEOUT_MS = 15000;
+    // Default license/synchronization service; keep activation working after clean installs and upgrades.
+    private static final String DEFAULT_ENDPOINT = "https://kinozal-tv-license.goblinmini-4pda.workers.dev";
 
     private CloudSyncManager() { }
 
@@ -41,7 +43,8 @@ public final class CloudSyncManager {
     }
 
     public static String endpoint(Context context) {
-        return prefs(context).getString("cloud_sync_endpoint", "");
+        String configured = normalizeEndpoint(prefs(context).getString("cloud_sync_endpoint", ""));
+        return configured.isEmpty() ? DEFAULT_ENDPOINT : configured;
     }
 
     public static JSONObject licenseInfo(Context context) throws Exception {
