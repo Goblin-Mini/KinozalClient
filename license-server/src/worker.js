@@ -1,11 +1,19 @@
 const JSON_HEADERS = { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" };
+// Keep this legacy entrypoint in sync with src/index.ts. PlusAccess treats a
+// non-empty server feature list as authoritative, so missing keys here lock
+// otherwise valid Plus features in older deployments.
 const FEATURES = [
-  "proxy",
   "advanced_search",
-  "mirror_selection",
   "favorites",
   "viewing_history",
-  "collections",
+  "backup",
+  "screenshots",
+  "comments",
+  "voice_search",
+  "proxy",
+  "android_tv_channels",
+  "similar",
+  "torrent_download",
 ];
 
 function json(data, status = 200) {
