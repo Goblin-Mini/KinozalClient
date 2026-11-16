@@ -3216,7 +3216,8 @@ public class MainActivity extends Activity {
         searchBar.addView(searchField, searchParams);
         Button filterButton = button("+");
         filterButton.setTextSize(fontSize(24));
-        filterButton.setContentDescription("Фильтр раздач");
+        filterButton.setText("+ $");
+        filterButton.setContentDescription("Расширенный поиск — доступно в Plus");
         filterButton.setMinWidth(0);
         filterButton.setMinimumWidth(0);
         filterButton.setGravity(Gravity.CENTER);
@@ -3695,8 +3696,12 @@ public class MainActivity extends Activity {
         bottomRow.setOrientation(LinearLayout.HORIZONTAL);
         bottomRow.setPadding(0, dp(8), 0, 0);
         Button channelsButton = settingsPillButton("Каналы Android TV  $");
-        boolean channelsOn = getSharedPreferences(PREFS, MODE_PRIVATE)
-                .getBoolean("tv_channels_enabled", false);
+        boolean channelsOn = PlusAccess.hasFeature(this, "android_tv_channels")
+                && getSharedPreferences(PREFS, MODE_PRIVATE).getBoolean("tv_channels_enabled", false);
+        if (!PlusAccess.hasFeature(this, "android_tv_channels")) {
+            getSharedPreferences(PREFS, MODE_PRIVATE).edit().putBoolean("tv_channels_enabled", false).apply();
+            TvHomeChannels.removeAll(this);
+        }
         channelsButton.setText("Каналы Android TV  $: " + (channelsOn ? "Вкл." : "Выкл."));
         bottomRow.addView(channelsButton, new LinearLayout.LayoutParams(0, dp(48), 1f));
         Button aboutButton = settingsPillButton("О приложении");
@@ -3921,6 +3926,7 @@ public class MainActivity extends Activity {
                 try {
                     CloudSyncManager.activate(this, serial);
                     runOnUiThread(() -> {
+                        PlusAccess.refresh(MainActivity.this);
                         activate.setEnabled(true);
                         activationState.setText("Статус: активирована");
                         showMessage("Устройство активировано");
@@ -7232,7 +7238,7 @@ public class MainActivity extends Activity {
     }
 
     private void saveRecentlyViewed(Torrent torrent) {
-        if (!requirePlusFeature("viewing_history")) return;
+        if (!PlusAccess.hasFeature(this, "viewing_history")) return;
         if (torrent == null || torrent.href == null || torrent.href.isEmpty()) return;
         // Home-feed torrents carry their poster separately from the details parser.
         // Preserve it in history so Continue Watching can build complete TV cards.
