@@ -111,6 +111,8 @@ public class MainActivity extends Activity {
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
+        showMaintenanceScreen();
+        return;
         mirror = getSharedPreferences(PREFS, MODE_PRIVATE).getString("mirror", MIRRORS[0]);
         client = new KinozalHttpClient(this, mirror);
         diskCache = new DiskCache(this, 200L * 1024L * 1024L);
@@ -120,6 +122,41 @@ public class MainActivity extends Activity {
         initializeNetwork(savedBrowserCookies);
     }
 
+
+    private void showMaintenanceScreen() {
+        LinearLayout screen = new LinearLayout(this);
+        screen.setOrientation(LinearLayout.VERTICAL);
+        screen.setGravity(Gravity.CENTER);
+        screen.setBackgroundColor(Color.rgb(16, 19, 23));
+        screen.setPadding(32, 24, 32, 24);
+
+        TextView image = new TextView(this);
+        image.setText("🖕");
+        image.setTextSize(150);
+        image.setGravity(Gravity.CENTER);
+        screen.addView(image, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        TextView title = new TextView(this);
+        title.setText("Кинозал ТВ временно недоступен");
+        title.setTextColor(Color.rgb(251, 226, 173));
+        title.setTextSize(27);
+        title.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        title.setGravity(Gravity.CENTER);
+        title.setPadding(0, 18, 0, 10);
+        screen.addView(title, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        TextView details = new TextView(this);
+        details.setText("Проводятся технические работы.\\nНажмите «Назад», чтобы закрыть приложение.");
+        details.setTextColor(Color.LTGRAY);
+        details.setTextSize(18);
+        details.setGravity(Gravity.CENTER);
+        screen.addView(details, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        setContentView(screen);
+    }
 
     private void initializeNetwork(String savedBrowserCookies) {
         Socks5ProxyBridge.Settings config = socks5Bridge.getSettings();
