@@ -3086,8 +3086,9 @@ public class MainActivity extends Activity {
             if (expand) categoryGroup.getChildAt(0).requestFocus();
         });
 
-        addMenu("★", "Избранное", () -> { if (requirePlusFeature("favorites")) showFavorites(); }, true);
-        addMenu("◷", "Недавно смотрели", () -> { if (requirePlusFeature("viewing_history")) showRecentlyViewed(); }, true);
+        // Premium destinations are omitted entirely for accounts without the feature.
+        addMenu("★", "Избранное", this::showFavorites, true);
+        addMenu("◷", "Недавно смотрели", this::showRecentlyViewed, true);
         addMenu("⇥", "Авторизация", () -> showLogin());
         addMenu("⚙", "Настройки", () -> showSettings());
         // Keep status available for internal progress updates, but do not show
@@ -3187,6 +3188,7 @@ public class MainActivity extends Activity {
             }
         };
         voiceSearch.setContentDescription("Голосовой поиск — доступно в Plus");
+        if (!PlusAccess.hasFeature(this, "voice_search")) voiceSearch.setVisibility(View.GONE);
         voiceSearch.setFocusable(true);
         voiceSearch.setFocusableInTouchMode(false);
         voiceSearch.setBackground(shape(PANEL, 0));
@@ -3223,6 +3225,7 @@ public class MainActivity extends Activity {
         LinearLayout.LayoutParams filterButtonParams = new LinearLayout.LayoutParams(dp(48), dp(48));
         filterButtonParams.rightMargin = dp(7);
         searchBar.addView(filterButton, filterButtonParams);
+        if (!PlusAccess.hasFeature(this, "advanced_search")) filterButton.setVisibility(View.GONE);
         filterButton.setOnClickListener(v -> { if (requirePlusFeature("advanced_search")) showTorrentFilter(); });
         Button history = button("История");
         history.setTextSize(fontSize(12));
@@ -3673,35 +3676,42 @@ public class MainActivity extends Activity {
         addSettingsAction(left, "Начальный раздел", () -> chooseStartupSource());
         addSettingsAction(left, "Размер шрифта", () -> showFontSizeSettings());
         addSettingsAction(left, "Поиск Jackett", () -> showJackettSettings());
-        addSettingsAction(left, "Прокси  $", () -> { if (requirePlusFeature("proxy")) showSocks5Settings(); });
+        if (PlusAccess.hasFeature(this, "proxy")) {
+            addSettingsAction(left, "Прокси  $", this::showSocks5Settings);
+        }
         addSettingsAction(left, "Очистить кэш", () -> confirmClearCache());
         addSettingsAction(right, "Сбросить приложение для торрентов", () -> resetTorrentHandlerChoice());
 
         addSettingsAction(right, "Цвет акцента", () -> showAccentPicker());
         addSettingsAction(right, "TorrServe", () -> showTorrServeSettings());
-        addSettingsAction(right, "Резервная копия  $", () -> {
-            if (!requirePlusFeature("backup")) return;
-            new AlertDialog.Builder(this)
-                    .setItems(new String[]{"Создать резервную копию", "Восстановить из копии"},
-                            (dialog, which) -> {
-                                if (which == 0) exportUserBackup();
-                                else importUserBackup();
-                            }).show();
-        });
+        if (PlusAccess.hasFeature(this, "backup")) {
+            addSettingsAction(right, "Резервная копия  $", () ->
+                    new AlertDialog.Builder(this)
+                            .setItems(new String[]{"Создать резервную копию", "Восстановить из копии"},
+                                    (dialog, which) -> {
+                                        if (which == 0) exportUserBackup();
+                                        else importUserBackup();
+                                    }).show());
+        }
         addSettingsAction(right, "Обновления", () -> showUpdateSettings());
         addSettingsAction(right, "Диагностика", () -> showCrashDiagnostics());
 
         LinearLayout bottomRow = new LinearLayout(this);
         bottomRow.setOrientation(LinearLayout.HORIZONTAL);
         bottomRow.setPadding(0, dp(8), 0, 0);
-        Button channelsButton = settingsPillButton("Каналы Android TV  $");
+        boolean hasTvChannelsPlus = PlusAccess.hasFeature(this, "android_tv_channels");
+        Button channelsButton = settingsPillButton(hasTvChannelsPlus
+                ? "Каналы Android TV  $" : "Каналы Android TV — Доступно в Plus");
+        channelsButton.setEnabled(hasTvChannelsPlus);
         boolean channelsOn = PlusAccess.hasFeature(this, "android_tv_channels")
                 && getSharedPreferences(PREFS, MODE_PRIVATE).getBoolean("tv_channels_enabled", false);
         if (!PlusAccess.hasFeature(this, "android_tv_channels")) {
             getSharedPreferences(PREFS, MODE_PRIVATE).edit().putBoolean("tv_channels_enabled", false).apply();
             TvHomeChannels.removeAll(this);
         }
-        channelsButton.setText("Каналы Android TV  $: " + (channelsOn ? "Вкл." : "Выкл."));
+        channelsButton.setText(hasTvChannelsPlus
+                ? "Каналы Android TV  $: " + (channelsOn ? "Вкл." : "Выкл.")
+                : "Каналы Android TV — Доступно в Plus");
         bottomRow.addView(channelsButton, new LinearLayout.LayoutParams(0, dp(48), 1f));
         Button aboutButton = settingsPillButton("О приложении");
         LinearLayout.LayoutParams aboutParams = new LinearLayout.LayoutParams(0, dp(48), 1f);
@@ -5158,6 +5168,11 @@ public class MainActivity extends Activity {
     }
 
     private void addMenu(String icon, String label, Runnable action, boolean premium) {
+        if (premium) {
+            String feature = "Избранное".equals(label) ? "favorites"
+                    : "Недавно смотрели".equals(label) ? "viewing_history" : null;
+            if (feature == null || !PlusAccess.hasFeature(this, feature)) return;
+        }
         String displayLabel = icon + "   " + label + (premium ? "  $" : "");
         Button b = button(displayLabel);
         b.setText(menuIconText(displayLabel));
@@ -8070,7 +8085,9 @@ public class MainActivity extends Activity {
             favorite.setText(saved ? "★" : "☆");
             favorite.setContentDescription(saved ? "Убрать из избранного" : "Добавить в избранное");
         });
-        actionRow.addView(favorite, new LinearLayout.LayoutParams(dp(48), dp(48)));
+        if (PlusAccess.hasFeature(this, "favorites")) {
+            actionRow.addView(favorite, new LinearLayout.LayoutParams(dp(48), dp(48)));
+        }
         posterColumn.addView(actionRow);
 
         String releaseType = normalizeReleaseType(torrent == null ? "r0" : torrent.releaseType);
@@ -8087,7 +8104,9 @@ public class MainActivity extends Activity {
         LinearLayout.LayoutParams downloadParams = new LinearLayout.LayoutParams(-1, dp(42));
         downloadParams.topMargin = dp(8);
         downloadParams.bottomMargin = dp(10);
-        posterColumn.addView(downloadTorrent, downloadParams);
+        if (PlusAccess.hasFeature(this, "torrent_download")) {
+            posterColumn.addView(downloadTorrent, downloadParams);
+        }
 
         ImageView poster = new ImageView(this);
         poster.setScaleType(ImageView.ScaleType.FIT_CENTER);
@@ -8165,9 +8184,13 @@ public class MainActivity extends Activity {
         Button similarTab = button("Подобные  $");
         Button commentsTab = button("Комменты  $");
         Button jackettTab = button("Другие");
+        if (!PlusAccess.hasFeature(this, "screenshots")) screenshotsTab.setVisibility(View.GONE);
+        if (!PlusAccess.hasFeature(this, "similar")) similarTab.setVisibility(View.GONE);
+        if (!PlusAccess.hasFeature(this, "comments")) commentsTab.setVisibility(View.GONE);
         Button[] tabButtons = {descriptionTab, technicalTab, releaseTab, screenshotsTab, similarTab, commentsTab, jackettTab};
         for (int tabIndex = 0; tabIndex < tabButtons.length; tabIndex++) {
             Button tab = tabButtons[tabIndex];
+            if (tab.getVisibility() != View.VISIBLE) continue;
             tab.setId(View.generateViewId());
             tab.setTextSize(fontSize(13));
             tab.setSingleLine(true);
