@@ -3677,6 +3677,7 @@ public class MainActivity extends Activity {
         addSettingsAction(left, "Поиск Jackett", () -> showJackettSettings());
         addSettingsAction(left, "Прокси  $", () -> { if (requirePlusFeature("proxy")) showSocks5Settings(); });
         addSettingsAction(left, "Очистить кэш", () -> confirmClearCache());
+        addSettingsAction(right, "Сбросить приложение для торрентов", () -> resetTorrentHandlerChoice());
 
         addSettingsAction(right, "Цвет акцента", () -> showAccentPicker());
         addSettingsAction(right, "TorrServe", () -> showTorrServeSettings());
@@ -8919,7 +8920,184 @@ public class MainActivity extends Activity {
         });
     }
 
+    private static final String TORRENT_HANDLER_PACKAGE_KEY = "torrent_handler_package";
+    private static final String TORRENT_HANDLER_ACTION_KEY = "torrent_handler_action";
+    private static final String TORRENT_HANDLER_REMEMBER_KEY = "torrent_handler_remember";
+
+    private static class TorrentHandlerOption {
+        final android.content.pm.ResolveInfo resolveInfo;
+        final String action;
+        TorrentHandlerOption(android.content.pm.ResolveInfo info, String action) {
+            this.resolveInfo = info;
+            this.action = action;
+        }
+    }
+
+    private Uri prepareTorrentForExternalApp(TorrentDetails data, byte[] bytes) throws Exception {
+        if (bytes == null || bytes.length < 20 || bytes[0] != 'd') {
+            throw new java.io.IOException("Сайт вернул не .torrent-файл. Возможно, сессия истекла или зеркало отклонило запрос.");
+        }
+        String safeTitle = data.title == null ? "kinozal-torrent" : data.title.trim();
+        safeTitle = safeTitle.replaceAll("[/\\\\:*?\\\"<>|]", "_")
+                .replaceAll("\\s+", " ").trim();
+        if (safeTitle.isEmpty()) safeTitle = "kinozal-torrent";
+        java.io.File file = new java.io.File(getCacheDir(), "kinozal-transfer.torrent");
+        try (java.io.FileOutputStream out = new java.io.FileOutputStream(file, false)) {
+            out.write(bytes);
+            out.flush();
+        }
+        return Uri.parse("content://ru.gm.ktv.torrentprovider/torrent");
+    }
+
+    private List<TorrentHandlerOption> findTorrentHandlers(Uri uri) {
+        android.content.pm.PackageManager pm = getPackageManager();
+        List<TorrentHandlerOption> found = new ArrayList<>();
+        Map<String, TorrentHandlerOption> unique = new java.util.LinkedHashMap<>();
+        String[] types = {"application/x-bittorrent", "application/octet-stream", "*/*"};
+        for (String type : types) {
+            Intent view = new Intent(Intent.ACTION_VIEW);
+            view.setDataAndType(uri, type);
+            view.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            for (android.content.pm.ResolveInfo info : pm.queryIntentActivities(view, 0)) {
+                String key = info.activityInfo.packageName;
+                if (!unique.containsKey(key)) unique.put(key, new TorrentHandlerOption(info, Intent.ACTION_VIEW));
+            }
+            Intent send = new Intent(Intent.ACTION_SEND);
+            send.setType(type);
+            send.putExtra(Intent.EXTRA_STREAM, uri);
+            send.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            for (android.content.pm.ResolveInfo info : pm.queryIntentActivities(send, 0)) {
+                String key = info.activityInfo.packageName;
+                if (!unique.containsKey(key)) unique.put(key, new TorrentHandlerOption(info, Intent.ACTION_SEND));
+            }
+        }
+        found.addAll(unique.values());
+        java.util.Collections.sort(found, (a, b) -> {
+            String an = String.valueOf(a.resolveInfo.loadLabel(pm));
+            String bn = String.valueOf(b.resolveInfo.loadLabel(pm));
+            return an.compareToIgnoreCase(bn);
+        });
+        return found;
+    }
+
+    private void launchTorrentHandler(TorrentHandlerOption option, Uri uri) {
+        try {
+            Intent intent = new Intent(option.action);
+            intent.setClassName(option.resolveInfo.activityInfo.packageName,
+                    option.resolveInfo.activityInfo.name);
+            if (Intent.ACTION_VIEW.equals(option.action)) {
+                intent.setDataAndType(uri, "application/x-bittorrent");
+            } else {
+                intent.setType("application/x-bittorrent");
+                intent.putExtra(Intent.EXTRA_STREAM, uri);
+            }
+            intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            startActivity(intent);
+        } catch (Exception e) {
+            getSharedPreferences(PREFS, MODE_PRIVATE).edit()
+                    .remove(TORRENT_HANDLER_PACKAGE_KEY).remove(TORRENT_HANDLER_ACTION_KEY)
+                    .putBoolean(TORRENT_HANDLER_REMEMBER_KEY, false).apply();
+            showMessage("Не удалось открыть торрент этим приложением. Выберите другое.");
+            showTorrentHandlerChooser(uri);
+        }
+    }
+
+    private void showTorrentHandlerChooser(Uri uri) {
+        List<TorrentHandlerOption> handlers = findTorrentHandlers(uri);
+        if (handlers.isEmpty()) {
+            showMessage("Не найдено приложений для открытия .torrent. Установите торрент-клиент или файловый менеджер.");
+            return;
+        }
+        android.content.SharedPreferences prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
+        String remembered = prefs.getString(TORRENT_HANDLER_PACKAGE_KEY, "");
+        if (prefs.getBoolean(TORRENT_HANDLER_REMEMBER_KEY, false) && !remembered.isEmpty()) {
+            for (TorrentHandlerOption option : handlers) {
+                if (remembered.equals(option.resolveInfo.activityInfo.packageName)) {
+                    launchTorrentHandler(option, uri);
+                    return;
+                }
+            }
+            prefs.edit().remove(TORRENT_HANDLER_PACKAGE_KEY)
+                    .remove(TORRENT_HANDLER_ACTION_KEY)
+                    .putBoolean(TORRENT_HANDLER_REMEMBER_KEY, false).apply();
+        }
+
+        LinearLayout panel = new LinearLayout(this);
+        panel.setOrientation(LinearLayout.VERTICAL);
+        panel.setPadding(dp(20), dp(10), dp(20), dp(8));
+        CheckBox remember = new CheckBox(this);
+        remember.setText("Запомнить мой выбор");
+        remember.setTextColor(Color.WHITE);
+        remember.setTextSize(fontSize(15));
+        panel.addView(remember);
+        android.widget.ListView listView = new android.widget.ListView(this);
+        ArrayList<String> labels = new ArrayList<>();
+        for (TorrentHandlerOption option : handlers) {
+            labels.add(String.valueOf(option.resolveInfo.loadLabel(getPackageManager())));
+        }
+        ArrayAdapter<String> adapter = new ArrayAdapter<String>(this,
+                android.R.layout.simple_list_item_1, labels) {
+            @Override public View getView(int position, View convertView, ViewGroup parent) {
+                TextView row = (TextView) super.getView(position, convertView, parent);
+                row.setTextColor(Color.WHITE);
+                row.setTextSize(fontSize(17));
+                row.setPadding(dp(12), dp(12), dp(12), dp(12));
+                row.setCompoundDrawablePadding(dp(14));
+                android.graphics.drawable.Drawable icon = handlers.get(position).resolveInfo.loadIcon(getPackageManager());
+                if (icon != null) {
+                    icon.setBounds(0, 0, dp(36), dp(36));
+                    row.setCompoundDrawables(icon, null, null, null);
+                }
+                return row;
+            }
+        };
+        listView.setAdapter(adapter);
+        panel.addView(listView, new LinearLayout.LayoutParams(-1, dp(300)));
+        AlertDialog dialog = new AlertDialog.Builder(this)
+                .setTitle("Открыть торрент с помощью")
+                .setView(panel)
+                .setNegativeButton("Отмена", null)
+                .create();
+        listView.setOnItemClickListener((parent, view, position, id) -> {
+            TorrentHandlerOption selected = handlers.get(position);
+            if (remember.isChecked()) {
+                prefs.edit().putString(TORRENT_HANDLER_PACKAGE_KEY,
+                        selected.resolveInfo.activityInfo.packageName)
+                        .putString(TORRENT_HANDLER_ACTION_KEY, selected.action)
+                        .putBoolean(TORRENT_HANDLER_REMEMBER_KEY, true).apply();
+            } else {
+                prefs.edit().remove(TORRENT_HANDLER_PACKAGE_KEY)
+                        .remove(TORRENT_HANDLER_ACTION_KEY)
+                        .putBoolean(TORRENT_HANDLER_REMEMBER_KEY, false).apply();
+            }
+            dialog.dismiss();
+            launchTorrentHandler(selected, uri);
+        });
+        dialog.show();
+        if (dialog.getWindow() != null) {
+            dialog.getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(PANEL));
+            dialog.getWindow().setLayout((int)(getResources().getDisplayMetrics().widthPixels * 0.72f),
+                    ViewGroup.LayoutParams.WRAP_CONTENT);
+        }
+    }
+
+    private void resetTorrentHandlerChoice() {
+        getSharedPreferences(PREFS, MODE_PRIVATE).edit()
+                .remove(TORRENT_HANDLER_PACKAGE_KEY).remove(TORRENT_HANDLER_ACTION_KEY)
+                .putBoolean(TORRENT_HANDLER_REMEMBER_KEY, false).apply();
+        showMessage("Выбор приложения для торрентов сброшен");
+    }
+
     private void deliverTorrentBytes(TorrentDetails data, byte[] bytes) {
+        try {
+            Uri uri = prepareTorrentForExternalApp(data, bytes);
+            showTorrentHandlerChooser(uri);
+        } catch (Exception e) {
+            showMessage("Не удалось подготовить торрент: " + safe(e.getMessage()));
+        }
+    }
+
+
         try {
             if (bytes == null || bytes.length < 20 || bytes[0] != 'd') {
                 throw new java.io.IOException("Сайт вернул не .torrent-файл. Возможно, сессия истекла или зеркало отклонило запрос.");
