@@ -7,12 +7,15 @@ export interface Env {
 const JSON_HEADERS = { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" };
 
 const FEATURES = [
-  "proxy",
   "advanced_search",
-  "mirror_selection",
   "favorites",
   "viewing_history",
-  "collections",
+  "backup",
+  "screenshots",
+  "comments",
+  "voice_search",
+  "proxy",
+  "android_tv_channels",
 ];
 
 function json(data: unknown, status = 200): Response {
