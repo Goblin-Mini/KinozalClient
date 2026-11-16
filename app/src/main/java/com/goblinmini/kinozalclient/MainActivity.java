@@ -313,8 +313,49 @@ public class MainActivity extends Activity {
         String releaseType = "r0";
     }
 
+    private static final boolean MAINTENANCE_MODE = true;
+
+    private void showMaintenanceScreen() {
+        LinearLayout screen = new LinearLayout(this);
+        screen.setOrientation(LinearLayout.VERTICAL);
+        screen.setGravity(Gravity.CENTER);
+        screen.setBackgroundColor(Color.rgb(16, 19, 23));
+        screen.setPadding(32, 24, 32, 24);
+
+        TextView image = new TextView(this);
+        image.setText("🖕");
+        image.setTextSize(150);
+        image.setGravity(Gravity.CENTER);
+        screen.addView(image, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        TextView title = new TextView(this);
+        title.setText("Кинозал ТВ временно недоступен");
+        title.setTextColor(Color.rgb(251, 226, 173));
+        title.setTextSize(27);
+        title.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        title.setGravity(Gravity.CENTER);
+        title.setPadding(0, 18, 0, 10);
+        screen.addView(title, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        TextView details = new TextView(this);
+        details.setText("Проводятся технические работы.\nНажмите «Назад», чтобы закрыть приложение.");
+        details.setTextColor(Color.LTGRAY);
+        details.setTextSize(18);
+        details.setGravity(Gravity.CENTER);
+        screen.addView(details, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        setContentView(screen);
+    }
+
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
+        if (MAINTENANCE_MODE) {
+            showMaintenanceScreen();
+            return;
+        }
         GOLD = getAccentColor(getSharedPreferences(PREFS, MODE_PRIVATE).getString("accent_color", "gold"));
         fontOffsetSp = getSharedPreferences(PREFS, MODE_PRIVATE).getInt(FONT_SIZE_OFFSET_KEY, 0);
         readTvLaunchIntent(getIntent());
