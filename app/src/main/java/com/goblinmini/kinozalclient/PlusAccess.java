@@ -46,8 +46,27 @@ final class PlusAccess {
                 boolean active = "active".equalsIgnoreCase(status)
                         && ("plus_lifetime".equalsIgnoreCase(plan)
                         || "owner".equalsIgnoreCase(plan));
-                JSONArray features = active ? info.optJSONArray("features") : null;
-                if (features == null) features = new JSONArray();
+                JSONArray features = new JSONArray();
+                if (active) {
+                    // The license endpoint may be deployed without the feature list.
+                    // An active lifetime/owner license grants the app's complete Plus feature set.
+                    String[] knownFeatures = {
+                            "advanced_search", "favorites", "viewing_history", "backup",
+                            "screenshots", "comments", "voice_search", "proxy",
+                            "android_tv_channels", "similar", "torrent_download"
+                    };
+                    JSONArray serverFeatures = info.optJSONArray("features");
+                    if (serverFeatures != null && serverFeatures.length() > 0) {
+                        for (int i = 0; i < serverFeatures.length(); i++) {
+                            String feature = serverFeatures.optString(i, "");
+                            if (!feature.isEmpty() && !features.toString().contains("\"" + feature + "\"")) {
+                                features.put(feature);
+                            }
+                        }
+                    } else {
+                        for (String feature : knownFeatures) features.put(feature);
+                    }
+                }
                 app.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
                         .putBoolean(KEY_ACTIVE, active)
                         .putString(KEY_FEATURES, features.toString())
