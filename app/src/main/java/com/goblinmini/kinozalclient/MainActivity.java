@@ -3530,7 +3530,7 @@ public class MainActivity extends Activity {
     }
 
     private float fontSize(float baseSp) {
-        return Math.max(10f, Math.min(30f, baseSp + fontOffsetSp));
+        return Math.max(8f, Math.min(36f, baseSp + fontOffsetSp));
     }
 
     private void applyFontDelta(View view, int deltaSp) {
@@ -3539,7 +3539,7 @@ public class MainActivity extends Activity {
             TextView textView = (TextView) view;
             float scaledDensity = getResources().getDisplayMetrics().scaledDensity;
             float currentSp = textView.getTextSize() / scaledDensity;
-            float nextSp = Math.max(10f, Math.min(30f, currentSp + deltaSp));
+            float nextSp = Math.max(8f, Math.min(36f, currentSp + deltaSp));
             textView.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, nextSp);
         }
         if (view instanceof ViewGroup) {
@@ -3550,7 +3550,7 @@ public class MainActivity extends Activity {
     }
 
     private void changeFontSize(int deltaSp, TextView valueLabel) {
-        int next = Math.max(-6, Math.min(6, fontOffsetSp + deltaSp));
+        int next = Math.max(-12, Math.min(12, fontOffsetSp + deltaSp));
         if (next == fontOffsetSp) return;
         int appliedDelta = next - fontOffsetSp;
         fontOffsetSp = next;
@@ -3587,7 +3587,7 @@ public class MainActivity extends Activity {
         controls.addView(smaller, controlParams);
         controls.addView(larger, new LinearLayout.LayoutParams(0, dp(52), 1f));
         panel.addView(controls);
-        TextView hint = text("Каждое нажатие меняет размер на 2 пункта.", 12, TEAL, false);
+        TextView hint = text("Каждое нажатие меняет размер на 1 sp. Диапазон: −12…+12 sp.", 12, TEAL, false);
         hint.setGravity(Gravity.CENTER);
         hint.setPadding(0, dp(12), 0, 0);
         panel.addView(hint);
@@ -3596,8 +3596,8 @@ public class MainActivity extends Activity {
                 .setView(panel)
                 .setPositiveButton("Готово", null)
                 .setNeutralButton("Сбросить", null)                .create();
-        smaller.setOnClickListener(v -> changeFontSize(-2, value));
-        larger.setOnClickListener(v -> changeFontSize(2, value));
+        smaller.setOnClickListener(v -> changeFontSize(-1, value));
+        larger.setOnClickListener(v -> changeFontSize(1, value));
         dialog.setOnShowListener(d -> {
             dialog.getButton(AlertDialog.BUTTON_POSITIVE).setTextColor(GOLD);
             Button reset = dialog.getButton(AlertDialog.BUTTON_NEUTRAL);
@@ -6383,6 +6383,37 @@ public class MainActivity extends Activity {
         queryParams.bottomMargin = dp(5);
         panel.addView(query, queryParams);
 
+        // Saved search templates are stored locally on this device.
+        android.widget.Spinner presetList = new android.widget.Spinner(this);
+        presetList.setPrompt("Список пресетов");
+        List<String> presetLabels = new ArrayList<>();
+        org.json.JSONArray storedPresets;
+        try {
+            storedPresets = new org.json.JSONArray(getSharedPreferences(PREFS, MODE_PRIVATE)
+                    .getString("advanced_search_presets", "[]"));
+            for (int i = 0; i < storedPresets.length(); i++)
+                presetLabels.add(storedPresets.getJSONObject(i).optString("name", "Пресет " + (i + 1)));
+        } catch (Exception ignored) { storedPresets = new org.json.JSONArray(); }
+        presetLabels.add(0, "Список пресетов");
+        ArrayAdapter<String> presetAdapter = new ArrayAdapter<>(this,
+                android.R.layout.simple_spinner_item, presetLabels);
+        presetAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+        presetList.setAdapter(presetAdapter);
+        presetList.setBackground(shape(PANEL, TEAL));
+        panel.addView(presetList, new LinearLayout.LayoutParams(-1, dp(43)));
+
+        CheckBox remember = new CheckBox(this);
+        remember.setText("Запомнить параметры фильтра");
+        remember.setTextColor(Color.WHITE);
+        remember.setButtonTintList(android.content.res.ColorStateList.valueOf(GOLD));
+        remember.setChecked(getSharedPreferences(PREFS, MODE_PRIVATE)
+                .getBoolean("advanced_search_remember", true));
+        panel.addView(remember);
+
+        Button addPreset = button("+  Добавить пресет");
+        addPreset.setTextSize(fontSize(14));
+        panel.addView(addPreset, new LinearLayout.LayoutParams(-1, dp(42)));
+
         android.widget.Spinner where = addFilterSpinner(panel, "Где искать", searchIn, 0);
         android.widget.Spinner category = addFilterSpinner(panel, "Раздел", categories, 0);
         android.widget.Spinner format = addFilterSpinner(panel, "Формат", formats, 0);
@@ -6390,6 +6421,64 @@ public class MainActivity extends Activity {
         android.widget.Spinner period = addFilterSpinner(panel, "Фильтр поиска", periods, 0);
         android.widget.Spinner sort = addFilterSpinner(panel, "Сортировка результата", sortBy, 0);
         android.widget.Spinner order = addFilterSpinner(panel, "Направление сортировки", direction, 0);
+
+        android.widget.Spinner[] filterSpinners = {where, category, format, year, period, sort, order};
+        FilterOption[][] filterOptions = {searchIn, categories, formats, years, periods, sortBy, direction};
+        java.util.function.Consumer<org.json.JSONObject> restorePreset = preset -> {
+            query.setText(preset.optString("q", ""));
+            String[] keys = {"g", "c", "v", "d", "w", "t", "f"};
+            for (int i = 0; i < keys.length; i++) {
+                String value = preset.optString(keys[i], "0");
+                for (int j = 0; j < filterOptions[i].length; j++) {
+                    if (value.equals(filterOptions[i][j].value)) {
+                        filterSpinners[i].setSelection(j);
+                        break;
+                    }
+                }
+            }
+        };
+        if (remember.isChecked()) {
+            try {
+                String last = getSharedPreferences(PREFS, MODE_PRIVATE)
+                        .getString("advanced_search_last", "");
+                if (!last.isEmpty()) restorePreset.accept(new org.json.JSONObject(last));
+            } catch (Exception ignored) { }
+        }
+        presetList.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener() {
+            @Override public void onNothingSelected(android.widget.AdapterView<?> parent) { }
+            @Override public void onItemSelected(android.widget.AdapterView<?> parent, View view,
+                    int position, long id) {
+                if (position <= 0) return;
+                try { restorePreset.accept(storedPresets.getJSONObject(position - 1)); }
+                catch (Exception e) { showMessage("Не удалось открыть пресет поиска."); }
+            }
+        });
+        addPreset.setOnClickListener(v -> {
+            EditText nameInput = new EditText(this);
+            nameInput.setSingleLine(true);
+            nameInput.setHint("Название пресета");
+            nameInput.setTextColor(Color.WHITE);
+            nameInput.setHintTextColor(TEAL);
+            nameInput.setBackground(shape(PANEL, TEAL));
+            new AlertDialog.Builder(this).setTitle("Новый пресет")
+                    .setView(nameInput).setNegativeButton("Отмена", null)
+                    .setPositiveButton("Сохранить", (d, whichButton) -> {
+                        String name = nameInput.getText().toString().trim();
+                        if (name.isEmpty()) name = "Поиск " + (storedPresets.length() + 1);
+                        try {
+                            org.json.JSONObject preset = new org.json.JSONObject();
+                            preset.put("name", name);
+                            preset.put("q", query.getText().toString().trim());
+                            String[] keys = {"g", "c", "v", "d", "w", "t", "f"};
+                            for (int i = 0; i < keys.length; i++)
+                                preset.put(keys[i], ((FilterOption) filterSpinners[i].getSelectedItem()).value);
+                            storedPresets.put(preset);
+                            getSharedPreferences(PREFS, MODE_PRIVATE).edit()
+                                    .putString("advanced_search_presets", storedPresets.toString()).apply();
+                            showMessage("Пресет «" + name + "» сохранён");
+                        } catch (Exception e) { showMessage("Не удалось сохранить пресет."); }
+                    }).show();
+        });
 
         AlertDialog dialog = new AlertDialog.Builder(this)
                 .setTitle("Фильтр раздач")
@@ -6412,6 +6501,17 @@ public class MainActivity extends Activity {
                     appendFilterParam(path, "w", ((FilterOption) period.getSelectedItem()).value);
                     appendFilterParam(path, "t", ((FilterOption) sort.getSelectedItem()).value);
                     appendFilterParam(path, "f", ((FilterOption) order.getSelectedItem()).value);
+                    getSharedPreferences(PREFS, MODE_PRIVATE).edit()
+                            .putBoolean("advanced_search_remember", remember.isChecked()).apply();
+                    if (remember.isChecked()) {
+                        org.json.JSONObject last = new org.json.JSONObject();
+                        last.put("q", q);
+                        String[] keys = {"g", "c", "v", "d", "w", "t", "f"};
+                        for (int i = 0; i < keys.length; i++)
+                            last.put(keys[i], ((FilterOption) filterSpinners[i].getSelectedItem()).value);
+                        getSharedPreferences(PREFS, MODE_PRIVATE).edit()
+                                .putString("advanced_search_last", last.toString()).apply();
+                    }
                     if (search != null) search.setText(q);
                     page = 0;
                     String title = q.isEmpty() ? "Фильтр раздач" : "Поиск: " + q;
@@ -7973,7 +8073,7 @@ public class MainActivity extends Activity {
 
         String releaseType = normalizeReleaseType(torrent == null ? "r0" : torrent.releaseType);
         int releaseButtonColor = releaseTypeColor(releaseType);
-        Button downloadTorrent = button("↓  Скачать торрент");
+        Button downloadTorrent = button("↓  Скачать торрент  $");
         downloadTorrent.setTextSize(fontSize(14));
         // Keep the original dark button appearance; use the release type only
         // for its label and thin outline instead of filling the whole button.
@@ -8060,7 +8160,7 @@ public class MainActivity extends Activity {
         Button technicalTab = button("Техданные");
         Button releaseTab = button("Релиз");
         Button screenshotsTab = button("Скрины  $");
-        Button similarTab = button("Подобные");
+        Button similarTab = button("Подобные  $");
         Button commentsTab = button("Комменты  $");
         Button jackettTab = button("Другие");
         Button[] tabButtons = {descriptionTab, technicalTab, releaseTab, screenshotsTab, similarTab, commentsTab, jackettTab};
@@ -8314,7 +8414,7 @@ public class MainActivity extends Activity {
         technicalTab.setOnClickListener(v -> { active[0] = 1; render[0].run(); });
         releaseTab.setOnClickListener(v -> { active[0] = 2; render[0].run(); });
         screenshotsTab.setOnClickListener(v -> { if (!requirePlusFeature("screenshots")) return; active[0] = 3; render[0].run(); });
-        similarTab.setOnClickListener(v -> { active[0] = 4; render[0].run(); });
+        similarTab.setOnClickListener(v -> { if (!requirePlusFeature("similar")) return; active[0] = 4; render[0].run(); });
         commentsTab.setOnClickListener(v -> { if (!requirePlusFeature("comments")) return; active[0] = 5; render[0].run(); });
         jackettTab.setOnClickListener(v -> searchJackett(torrent.title, data.poster));
         render[0].run();
@@ -8325,6 +8425,7 @@ public class MainActivity extends Activity {
             playTorrent(data);
         });
         downloadTorrent.setOnClickListener(v -> {
+            if (!requirePlusFeature("torrent_download")) return;
             saveRecentlyViewed(torrent);
             downloadTorrentFile(data);
         });
