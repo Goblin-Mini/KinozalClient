@@ -131,10 +131,10 @@ jobs:
           echo "VERSION_NAME=$VERSION_NAME" >> "$GITHUB_ENV"
 
       - name: Upload signed Plus test APK
-        if: github.event_name != 'pull_request' && github.ref_name == 'feature/plus-premium-feature-gates' || github.ref_name == 'release/maintenance-screen-1.0.5'
+        if: github.event_name != 'pull_request' && (github.ref_name == 'feature/plus-premium-feature-gates' || github.ref_name == 'release/maintenance-screen-1.0.5')
         uses: actions/upload-artifact@v4
         with:
-          name: KinozalClient-plus-signed
+          name: KinozalClient-maintenance-signed
           path: dist/KinozalClient.apk
           if-no-files-found: error
           retention-days: 14
