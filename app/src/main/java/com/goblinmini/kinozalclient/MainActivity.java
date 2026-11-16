@@ -109,7 +109,7 @@ public class MainActivity extends Activity {
         String title, href, size, seeds, leeches, uploaded;
     }
 
-    private static final boolean MAINTENANCE_MODE = true;
+    private static boolean MAINTENANCE_MODE = true;
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
