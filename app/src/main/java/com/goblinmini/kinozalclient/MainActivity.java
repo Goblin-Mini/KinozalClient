@@ -1497,8 +1497,7 @@ public class MainActivity extends Activity {
                     + "return JSON.stringify(out);}catch(e){return '[]';}})()";
             web.evaluateJavascript(currentScript, value -> {
                 List<HomePoster> posters = parseHomePostersJson(value);
-                HomeSection section = new HomeSection(titles[feedIndex], path);
-                section.items.addAll(posters);
+                HomeSection section = new HomeSection(titles[feedIndex], path);                section.items.addAll(posters);
                 if (!section.items.isEmpty()) {
                     loaded.add(section);
                     diskCache.put("home|" + client.getMirror() + "|" + path,
@@ -2997,8 +2996,7 @@ public class MainActivity extends Activity {
         brand.addView(logo, new LinearLayout.LayoutParams(dp(158), dp(58)));
         sidebar.addView(brand, new LinearLayout.LayoutParams(-1, dp(58)));
         ScrollView menuScroll = new ScrollView(this);
-        menuScroll.setFillViewport(false);
-        menuScroll.setVerticalScrollBarEnabled(false);
+        menuScroll.setFillViewport(false);        menuScroll.setVerticalScrollBarEnabled(false);
         menuScroll.setScrollbarFadingEnabled(true);
         menuScroll.setPadding(0, dp(5), 0, 0);
         menuItems = new LinearLayout(this);
@@ -4497,8 +4495,7 @@ public class MainActivity extends Activity {
         content.setTextIsSelectable(true);
         content.setTypeface(android.graphics.Typeface.MONOSPACE);
         content.setPadding(dp(12), dp(10), dp(12), dp(10));
-        scroll.addView(content);
-        AlertDialog dialog = new AlertDialog.Builder(this)
+        scroll.addView(content);        AlertDialog dialog = new AlertDialog.Builder(this)
                 .setTitle("Диагностика каналов Android TV")
                 .setView(scroll)
                 .setPositiveButton("Закрыть", null)
@@ -5997,8 +5994,7 @@ public class MainActivity extends Activity {
         TextView sizeHeader = text("РАЗМЕР", 11, TEAL, true);
         sizeHeader.setGravity(Gravity.CENTER);
         header.addView(sizeHeader, new LinearLayout.LayoutParams(dp(85), -2));
-        TextView dateHeader = text(recentList ? "ПРОСМОТРЕНО" : "ДАТА", 11, TEAL, true);
-        dateHeader.setGravity(Gravity.CENTER);
+        TextView dateHeader = text(recentList ? "ПРОСМОТРЕНО" : "ДАТА", 11, TEAL, true);        dateHeader.setGravity(Gravity.CENTER);
         header.addView(dateHeader, new LinearLayout.LayoutParams(dp(96), -2));
         TextView seedsHeader = text("СИДЫ", 11, TEAL, true);
         seedsHeader.setGravity(Gravity.CENTER);
@@ -6388,13 +6384,18 @@ public class MainActivity extends Activity {
         android.widget.Spinner presetList = new android.widget.Spinner(this);
         presetList.setPrompt("Список пресетов");
         List<String> presetLabels = new ArrayList<>();
-        org.json.JSONArray storedPresets;
+        final org.json.JSONArray storedPresets;
+        org.json.JSONArray loadedPresets;
         try {
-            storedPresets = new org.json.JSONArray(getSharedPreferences(PREFS, MODE_PRIVATE)
+            loadedPresets = new org.json.JSONArray(getSharedPreferences(PREFS, MODE_PRIVATE)
                     .getString("advanced_search_presets", "[]"));
-            for (int i = 0; i < storedPresets.length(); i++)
+        } catch (Exception ignored) { loadedPresets = new org.json.JSONArray(); }
+        storedPresets = loadedPresets;
+        for (int i = 0; i < storedPresets.length(); i++) {
+            try {
                 presetLabels.add(storedPresets.getJSONObject(i).optString("name", "Пресет " + (i + 1)));
-        } catch (Exception ignored) { storedPresets = new org.json.JSONArray(); }
+            } catch (Exception ignored) { }
+        }
         presetLabels.add(0, "Список пресетов");
         ArrayAdapter<String> presetAdapter = new ArrayAdapter<>(this,
                 android.R.layout.simple_spinner_item, presetLabels);
@@ -6464,8 +6465,9 @@ public class MainActivity extends Activity {
             new AlertDialog.Builder(this).setTitle("Новый пресет")
                     .setView(nameInput).setNegativeButton("Отмена", null)
                     .setPositiveButton("Сохранить", (d, whichButton) -> {
-                        String name = nameInput.getText().toString().trim();
-                        if (name.isEmpty()) name = "Поиск " + (storedPresets.length() + 1);
+                        String enteredName = nameInput.getText().toString().trim();
+                        final String name = enteredName.isEmpty()
+                                ? "Поиск " + (storedPresets.length() + 1) : enteredName;
                         try {
                             org.json.JSONObject preset = new org.json.JSONObject();
                             preset.put("name", name);
@@ -7497,8 +7499,7 @@ public class MainActivity extends Activity {
         heading.setText(currentTitle);
         java.util.List<Torrent> saved = new java.util.ArrayList<>(readRecentlyViewed().values());
         java.util.Collections.sort(saved, (a, b) -> Long.compare(b.viewedAt, a.viewedAt));
-        activeLocalItems = new java.util.ArrayList<>(saved);
-        list.removeAllViews();
+        activeLocalItems = new java.util.ArrayList<>(saved);        list.removeAllViews();
         setCatalogStatus("Недавно смотрели", saved.size());
         if (saved.isEmpty()) addEmpty("Здесь появятся открытые вами раздачи.");
         else renderTorrents(filterLocalItems(saved));
@@ -8997,8 +8998,7 @@ public class MainActivity extends Activity {
             getSharedPreferences(PREFS, MODE_PRIVATE).edit()
                     .remove(TORRENT_HANDLER_PACKAGE_KEY).remove(TORRENT_HANDLER_ACTION_KEY)
                     .putBoolean(TORRENT_HANDLER_REMEMBER_KEY, false).apply();
-            showMessage("Не удалось открыть торрент этим приложением. Выберите другое.");
-            showTorrentHandlerChooser(uri);
+            showMessage("Не удалось открыть торрент этим приложением. Выберите другое.");            showTorrentHandlerChooser(uri);
         }
     }
 
