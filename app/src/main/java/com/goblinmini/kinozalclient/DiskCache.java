@@ -111,6 +111,20 @@ public final class DiskCache {
         return count;
     }
 
+    /** Delete every cached page/poster entry and temporary file. */
+    public synchronized int clear() {
+        File[] files = directory.listFiles();
+        if (files == null) return 0;
+        int deleted = 0;
+        for (File file : files) {
+            if (file.isFile() && (file.getName().endsWith(".cache")
+                    || file.getName().endsWith(".tmp"))) {
+                if (file.delete()) deleted++;
+            }
+        }
+        return deleted;
+    }
+
     public long getMaxBytes() {
         return maxBytes;
     }
