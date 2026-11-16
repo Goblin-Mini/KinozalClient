@@ -332,6 +332,7 @@ public class MainActivity extends Activity {
                 return value == null ? 0 : value.getAllocationByteCount();
             }
         };
+        PlusAccess.refresh(this);
         buildShell();
         // Read the last successful home snapshot off the UI thread. This runs
         // alongside proxy/session initialization so a returning user sees
@@ -3087,8 +3088,8 @@ public class MainActivity extends Activity {
             if (expand) categoryGroup.getChildAt(0).requestFocus();
         });
 
-        addMenu("★", "Избранное", () -> showFavorites());
-        addMenu("◷", "Недавно смотрели", () -> showRecentlyViewed());
+        addMenu("★", "Избранное", () -> { if (requirePlusFeature("favorites")) showFavorites(); }, true);
+        addMenu("◷", "Недавно смотрели", () -> { if (requirePlusFeature("viewing_history")) showRecentlyViewed(); }, true);
         addMenu("⇥", "Авторизация", () -> showLogin());
         addMenu("⚙", "Настройки", () -> showSettings());
         // Keep status available for internal progress updates, but do not show
@@ -3187,7 +3188,7 @@ public class MainActivity extends Activity {
                 canvas.restore();
             }
         };
-        voiceSearch.setContentDescription("Голосовой поиск");
+        voiceSearch.setContentDescription("Голосовой поиск — доступно в Plus");
         voiceSearch.setFocusable(true);
         voiceSearch.setFocusableInTouchMode(false);
         voiceSearch.setBackground(shape(PANEL, 0));
@@ -3197,7 +3198,7 @@ public class MainActivity extends Activity {
         LinearLayout.LayoutParams voiceParams = new LinearLayout.LayoutParams(dp(40), dp(40));
         voiceParams.rightMargin = dp(3);
         searchField.addView(voiceSearch, voiceParams);
-        voiceSearch.setOnClickListener(v -> startVoiceSearch());
+        voiceSearch.setOnClickListener(v -> { if (requirePlusFeature("voice_search")) startVoiceSearch(); });
         searchField.addView(search, new LinearLayout.LayoutParams(0, -1, 1f));
         Button clearSearch = button("×");
         clearSearch.setTextSize(fontSize(23));
@@ -3223,7 +3224,7 @@ public class MainActivity extends Activity {
         LinearLayout.LayoutParams filterButtonParams = new LinearLayout.LayoutParams(dp(48), dp(48));
         filterButtonParams.rightMargin = dp(7);
         searchBar.addView(filterButton, filterButtonParams);
-        filterButton.setOnClickListener(v -> showTorrentFilter());
+        filterButton.setOnClickListener(v -> { if (requirePlusFeature("advanced_search")) showTorrentFilter(); });
         Button history = button("История");
         history.setTextSize(fontSize(12));
         history.setMinWidth(0);
@@ -3673,27 +3674,30 @@ public class MainActivity extends Activity {
         addSettingsAction(left, "Начальный раздел", () -> chooseStartupSource());
         addSettingsAction(left, "Размер шрифта", () -> showFontSizeSettings());
         addSettingsAction(left, "Поиск Jackett", () -> showJackettSettings());
-        addSettingsAction(left, "Прокси", () -> showSocks5Settings());
+        addSettingsAction(left, "Прокси  $", () -> { if (requirePlusFeature("proxy")) showSocks5Settings(); });
         addSettingsAction(left, "Очистить кэш", () -> confirmClearCache());
 
         addSettingsAction(right, "Цвет акцента", () -> showAccentPicker());
         addSettingsAction(right, "TorrServe", () -> showTorrServeSettings());
-        addSettingsAction(right, "Резервная копия", () -> new AlertDialog.Builder(this)
-                .setItems(new String[]{"Создать резервную копию", "Восстановить из копии"},
-                        (dialog, which) -> {
-                            if (which == 0) exportUserBackup();
-                            else importUserBackup();
-                        }).show());
+        addSettingsAction(right, "Резервная копия  $", () -> {
+            if (!requirePlusFeature("backup")) return;
+            new AlertDialog.Builder(this)
+                    .setItems(new String[]{"Создать резервную копию", "Восстановить из копии"},
+                            (dialog, which) -> {
+                                if (which == 0) exportUserBackup();
+                                else importUserBackup();
+                            }).show();
+        });
         addSettingsAction(right, "Обновления", () -> showUpdateSettings());
         addSettingsAction(right, "Диагностика", () -> showCrashDiagnostics());
 
         LinearLayout bottomRow = new LinearLayout(this);
         bottomRow.setOrientation(LinearLayout.HORIZONTAL);
         bottomRow.setPadding(0, dp(8), 0, 0);
-        Button channelsButton = settingsPillButton("Каналы Android TV");
+        Button channelsButton = settingsPillButton("Каналы Android TV  $");
         boolean channelsOn = getSharedPreferences(PREFS, MODE_PRIVATE)
-                .getBoolean("tv_channels_enabled", true);
-        channelsButton.setText("Каналы Android TV: " + (channelsOn ? "Вкл." : "Выкл."));
+                .getBoolean("tv_channels_enabled", false);
+        channelsButton.setText("Каналы Android TV  $: " + (channelsOn ? "Вкл." : "Выкл."));
         bottomRow.addView(channelsButton, new LinearLayout.LayoutParams(0, dp(48), 1f));
         Button aboutButton = settingsPillButton("О приложении");
         LinearLayout.LayoutParams aboutParams = new LinearLayout.LayoutParams(0, dp(48), 1f);
@@ -3703,6 +3707,7 @@ public class MainActivity extends Activity {
         page.addView(bottomRow, new LinearLayout.LayoutParams(-1, dp(56)));
 
         channelsButton.setOnClickListener(v -> {
+            if (!requirePlusFeature("android_tv_channels")) return;
             String[] actions = {"Включить", "Отключить", "Обновить", "Очистить данные"};
             new AlertDialog.Builder(this)
                     .setTitle("Каналы Android TV")
@@ -3710,18 +3715,18 @@ public class MainActivity extends Activity {
                         if (which == 0) {
                             getSharedPreferences(PREFS, MODE_PRIVATE).edit()
                                     .putBoolean("tv_channels_enabled", true).apply();
-                            channelsButton.setText("Каналы Android TV: Вкл.");
+                            channelsButton.setText("Каналы Android TV  $: Вкл.");
                             browserHandler.postDelayed(this::loadTvChannelFeedsInBrowser, 150);
                             showMessage("Каналы Android TV включены");
                         } else if (which == 1) {
                             getSharedPreferences(PREFS, MODE_PRIVATE).edit()
                                     .putBoolean("tv_channels_enabled", false).apply();
-                            channelsButton.setText("Каналы Android TV: Выкл.");
+                            channelsButton.setText("Каналы Android TV  $: Выкл.");
                             TvHomeChannels.removeAll(this);
                             showMessage("Каналы Android TV отключены");
                         } else if (which == 2) {
                             boolean enabled = getSharedPreferences(PREFS, MODE_PRIVATE)
-                                    .getBoolean("tv_channels_enabled", true);
+                                    .getBoolean("tv_channels_enabled", false);
                             if (!enabled) {
                                 showMessage("Сначала включите каналы Android TV");
                                 return;
@@ -4216,6 +4221,7 @@ public class MainActivity extends Activity {
     }
 
     private void exportUserBackup() {
+        if (!requirePlusFeature("backup")) return;
         try {
             String json = buildUserBackup().toString(2);
             Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
@@ -4230,6 +4236,7 @@ public class MainActivity extends Activity {
     private String pendingBackupJson;
 
     private void importUserBackup() {
+        if (!requirePlusFeature("backup")) return;
         Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
         intent.addCategory(Intent.CATEGORY_OPENABLE);
         intent.setType("*/*");
@@ -5143,9 +5150,14 @@ public class MainActivity extends Activity {
     }
 
     private void addMenu(String icon, String label, Runnable action) {
-        Button b = button(icon + "   " + label);
-        b.setText(menuIconText(icon + "   " + label));
-        b.setText(menuIconText(icon + "   " + label));
+        addMenu(icon, label, action, false);
+    }
+
+    private void addMenu(String icon, String label, Runnable action, boolean premium) {
+        String displayLabel = icon + "   " + label + (premium ? "  $" : "");
+        Button b = button(displayLabel);
+        b.setText(menuIconText(displayLabel));
+        b.setText(menuIconText(displayLabel));
         b.setGravity(Gravity.CENTER_VERTICAL | Gravity.LEFT);
         b.setTextSize(fontSize(14));
         b.setPadding(dp(14), 0, dp(8), 0);
@@ -5157,6 +5169,12 @@ public class MainActivity extends Activity {
         p.rightMargin = dp(5);
         p.bottomMargin = dp(3);
         menuItems.addView(b, p); b.setOnClickListener(v -> action.run());
+    }
+
+    private boolean requirePlusFeature(String feature) {
+        if (PlusAccess.hasFeature(this, feature)) return true;
+        showMessage("Доступно в Plus");
+        return false;
     }
 
     private void focusSearch() { search.requestFocus(); }
@@ -7156,6 +7174,7 @@ public class MainActivity extends Activity {
     }
 
     private void toggleFavorite(Torrent torrent) {
+        if (!requirePlusFeature("favorites")) return;
         if (torrent == null || torrent.href == null || torrent.href.isEmpty()) return;
         java.util.LinkedHashMap<String, Torrent> favorites = readFavorites();
         if (favorites.containsKey(torrent.href)) {
@@ -7169,6 +7188,7 @@ public class MainActivity extends Activity {
     }
 
     private void showFavorites() {
+        if (!requirePlusFeature("favorites")) return;
         activateBrowseScreen();
         if (mainSearchBar != null) mainSearchBar.setVisibility(View.GONE);
         if (localListSearchBar != null) localListSearchBar.setVisibility(View.VISIBLE);
@@ -7212,6 +7232,7 @@ public class MainActivity extends Activity {
     }
 
     private void saveRecentlyViewed(Torrent torrent) {
+        if (!requirePlusFeature("viewing_history")) return;
         if (torrent == null || torrent.href == null || torrent.href.isEmpty()) return;
         // Home-feed torrents carry their poster separately from the details parser.
         // Preserve it in history so Continue Watching can build complete TV cards.
@@ -7359,6 +7380,7 @@ public class MainActivity extends Activity {
     }
 
     private void showRecentlyViewed() {
+        if (!requirePlusFeature("viewing_history")) return;
         activateBrowseScreen();
         if (mainSearchBar != null) mainSearchBar.setVisibility(View.GONE);
         if (localListSearchBar != null) localListSearchBar.setVisibility(View.VISIBLE);
@@ -8031,9 +8053,9 @@ public class MainActivity extends Activity {
         Button descriptionTab = button("Описание");
         Button technicalTab = button("Техданные");
         Button releaseTab = button("Релиз");
-        Button screenshotsTab = button("Скрины");
+        Button screenshotsTab = button("Скрины  $");
         Button similarTab = button("Подобные");
-        Button commentsTab = button("Комменты");
+        Button commentsTab = button("Комменты  $");
         Button jackettTab = button("Другие");
         Button[] tabButtons = {descriptionTab, technicalTab, releaseTab, screenshotsTab, similarTab, commentsTab, jackettTab};
         for (int tabIndex = 0; tabIndex < tabButtons.length; tabIndex++) {
@@ -8285,9 +8307,9 @@ public class MainActivity extends Activity {
         descriptionTab.setOnClickListener(v -> { active[0] = 0; render[0].run(); });
         technicalTab.setOnClickListener(v -> { active[0] = 1; render[0].run(); });
         releaseTab.setOnClickListener(v -> { active[0] = 2; render[0].run(); });
-        screenshotsTab.setOnClickListener(v -> { active[0] = 3; render[0].run(); });
+        screenshotsTab.setOnClickListener(v -> { if (!requirePlusFeature("screenshots")) return; active[0] = 3; render[0].run(); });
         similarTab.setOnClickListener(v -> { active[0] = 4; render[0].run(); });
-        commentsTab.setOnClickListener(v -> { active[0] = 5; render[0].run(); });
+        commentsTab.setOnClickListener(v -> { if (!requirePlusFeature("comments")) return; active[0] = 5; render[0].run(); });
         jackettTab.setOnClickListener(v -> searchJackett(torrent.title, data.poster));
         render[0].run();
 
