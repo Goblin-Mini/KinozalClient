@@ -109,10 +109,14 @@ public class MainActivity extends Activity {
         String title, href, size, seeds, leeches, uploaded;
     }
 
+    private static final boolean MAINTENANCE_MODE = true;
+
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
-        showMaintenanceScreen();
-        return;
+        if (MAINTENANCE_MODE) {
+            showMaintenanceScreen();
+            return;
+        }
         mirror = getSharedPreferences(PREFS, MODE_PRIVATE).getString("mirror", MIRRORS[0]);
         client = new KinozalHttpClient(this, mirror);
         diskCache = new DiskCache(this, 200L * 1024L * 1024L);
