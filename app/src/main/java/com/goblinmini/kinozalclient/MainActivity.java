@@ -143,6 +143,8 @@ public class MainActivity extends Activity {
     private LinearLayout searchSortBar;
     private Button sortDateButton, sortSizeButton, sortSeedsButton;
     private AlertDialog settingsDialog;
+    private View plusVoiceSearchButton;
+    private Button plusAdvancedSearchButton;
     private static final String FAVORITES_KEY = "local_favorites";
     private volatile String lastHtml = "";
     private WebView sessionWebView;
@@ -332,8 +334,8 @@ public class MainActivity extends Activity {
                 return value == null ? 0 : value.getAllocationByteCount();
             }
         };
-        PlusAccess.refresh(this);
         buildShell();
+        PlusAccess.refresh(this, this::onPlusEntitlementsUpdated);
         // Read the last successful home snapshot off the UI thread. This runs
         // alongside proxy/session initialization so a returning user sees
         // useful content before the sequential WebView refresh begins.
@@ -438,6 +440,7 @@ public class MainActivity extends Activity {
     }
 
     private void showSocks5Settings() {
+        if (!requirePlusFeature("proxy")) return;
         Socks5ProxyBridge.Settings cfg = socks5Bridge.getSettings();
         LinearLayout panel = new LinearLayout(this);
         panel.setOrientation(LinearLayout.VERTICAL);
@@ -3162,7 +3165,7 @@ public class MainActivity extends Activity {
         searchParams.rightMargin = dp(8);
         search.setBackgroundColor(Color.TRANSPARENT);
         search.setPadding(dp(4), 0, dp(4), 0);
-        View voiceSearch = new View(this) {
+        plusVoiceSearchButton = new View(this) {
             private final android.graphics.Paint iconPaint = new android.graphics.Paint(
                     android.graphics.Paint.ANTI_ALIAS_FLAG);
             @Override protected void onDraw(android.graphics.Canvas canvas) {
@@ -3187,18 +3190,18 @@ public class MainActivity extends Activity {
                 canvas.restore();
             }
         };
-        voiceSearch.setContentDescription("Голосовой поиск — доступно в Plus");
-        if (!PlusAccess.hasFeature(this, "voice_search")) voiceSearch.setVisibility(View.GONE);
-        voiceSearch.setFocusable(true);
-        voiceSearch.setFocusableInTouchMode(false);
-        voiceSearch.setBackground(shape(PANEL, 0));
-        voiceSearch.setOnFocusChangeListener((v, focused) ->
+        plusVoiceSearchButton.setContentDescription("Голосовой поиск — доступно в Plus");
+        if (!PlusAccess.hasFeature(this, "voice_search")) plusVoiceSearchButton.setVisibility(View.GONE);
+        plusVoiceSearchButton.setFocusable(true);
+        plusVoiceSearchButton.setFocusableInTouchMode(false);
+        plusVoiceSearchButton.setBackground(shape(PANEL, 0));
+        plusVoiceSearchButton.setOnFocusChangeListener((v, focused) ->
                 v.setBackground(shape(focused ? Color.rgb(65, 72, 73) : PANEL, focused ? GOLD : 0)));
-        voiceSearch.setNextFocusRightId(View.NO_ID);
+        plusVoiceSearchButton.setNextFocusRightId(View.NO_ID);
         LinearLayout.LayoutParams voiceParams = new LinearLayout.LayoutParams(dp(40), dp(40));
         voiceParams.rightMargin = dp(3);
-        searchField.addView(voiceSearch, voiceParams);
-        voiceSearch.setOnClickListener(v -> { if (requirePlusFeature("voice_search")) startVoiceSearch(); });
+        searchField.addView(plusVoiceSearchButton, voiceParams);
+        plusVoiceSearchButton.setOnClickListener(v -> { if (requirePlusFeature("voice_search")) startVoiceSearch(); });
         searchField.addView(search, new LinearLayout.LayoutParams(0, -1, 1f));
         Button clearSearch = button("×");
         clearSearch.setTextSize(fontSize(23));
@@ -3214,19 +3217,19 @@ public class MainActivity extends Activity {
             @Override public void afterTextChanged(android.text.Editable s) { }
         });
         searchBar.addView(searchField, searchParams);
-        Button filterButton = button("+");
-        filterButton.setTextSize(fontSize(24));
-        filterButton.setText("+ $");
-        filterButton.setContentDescription("Расширенный поиск — доступно в Plus");
-        filterButton.setMinWidth(0);
-        filterButton.setMinimumWidth(0);
-        filterButton.setGravity(Gravity.CENTER);
-        filterButton.setPadding(0, 0, 0, 0);
+        plusAdvancedSearchButton = button("+");
+        plusAdvancedSearchButton.setTextSize(fontSize(24));
+        plusAdvancedSearchButton.setText("+ $");
+        plusAdvancedSearchButton.setContentDescription("Расширенный поиск — доступно в Plus");
+        plusAdvancedSearchButton.setMinWidth(0);
+        plusAdvancedSearchButton.setMinimumWidth(0);
+        plusAdvancedSearchButton.setGravity(Gravity.CENTER);
+        plusAdvancedSearchButton.setPadding(0, 0, 0, 0);
         LinearLayout.LayoutParams filterButtonParams = new LinearLayout.LayoutParams(dp(48), dp(48));
         filterButtonParams.rightMargin = dp(7);
-        searchBar.addView(filterButton, filterButtonParams);
-        if (!PlusAccess.hasFeature(this, "advanced_search")) filterButton.setVisibility(View.GONE);
-        filterButton.setOnClickListener(v -> { if (requirePlusFeature("advanced_search")) showTorrentFilter(); });
+        searchBar.addView(plusAdvancedSearchButton, filterButtonParams);
+        if (!PlusAccess.hasFeature(this, "advanced_search")) plusAdvancedSearchButton.setVisibility(View.GONE);
+        plusAdvancedSearchButton.setOnClickListener(v -> { if (requirePlusFeature("advanced_search")) showTorrentFilter(); });
         Button history = button("История");
         history.setTextSize(fontSize(12));
         history.setMinWidth(0);
@@ -5180,6 +5183,7 @@ public class MainActivity extends Activity {
         b.setGravity(Gravity.CENTER_VERTICAL | Gravity.LEFT);
         b.setTextSize(fontSize(14));
         b.setPadding(dp(14), 0, dp(8), 0);
+        if (premium) b.setTag("plus_menu_item");
         b.setMaxLines(1);
         b.setEllipsize(android.text.TextUtils.TruncateAt.END);
         LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(
@@ -5188,6 +5192,26 @@ public class MainActivity extends Activity {
         p.rightMargin = dp(5);
         p.bottomMargin = dp(3);
         menuItems.addView(b, p); b.setOnClickListener(v -> action.run());
+    }
+
+    private void onPlusEntitlementsUpdated() {
+        if (isFinishing() || isDestroyed()) return;
+        boolean hasVoice = PlusAccess.hasFeature(this, "voice_search");
+        boolean hasAdvancedSearch = PlusAccess.hasFeature(this, "advanced_search");
+        if (plusVoiceSearchButton != null) {
+            plusVoiceSearchButton.setVisibility(hasVoice ? View.VISIBLE : View.GONE);
+        }
+        if (plusAdvancedSearchButton != null) {
+            plusAdvancedSearchButton.setVisibility(hasAdvancedSearch ? View.VISIBLE : View.GONE);
+        }
+        if (menuItems != null) {
+            for (int i = menuItems.getChildCount() - 1; i >= 0; i--) {
+                View child = menuItems.getChildAt(i);
+                if ("plus_menu_item".equals(child.getTag())) menuItems.removeViewAt(i);
+            }
+            addMenu("★", "Избранное", this::showFavorites, true);
+            addMenu("◷", "Недавно смотрели", this::showRecentlyViewed, true);
+        }
     }
 
     private boolean requirePlusFeature(String feature) {
