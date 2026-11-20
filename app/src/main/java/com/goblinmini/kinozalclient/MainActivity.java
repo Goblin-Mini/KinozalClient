@@ -144,6 +144,10 @@ public class MainActivity extends Activity {
     private Button sortDateButton, sortSizeButton, sortSeedsButton;
     private AlertDialog settingsDialog;
     private boolean plusSettingsRefreshPending = false;
+    private boolean refreshingTorrentCardForPlus = false;
+    private AlertDialog activeTorrentDetailsDialog;
+    private Torrent activeTorrentDetailsTorrent;
+    private TorrentDetails activeTorrentDetailsData;
     private View plusVoiceSearchButton;
     private Button plusAdvancedSearchButton;
     private static final String FAVORITES_KEY = "local_favorites";
@@ -5224,6 +5228,15 @@ public class MainActivity extends Activity {
             addMenu("★", "Избранное", this::showFavorites, true);
             addMenu("◷", "Недавно смотрели", this::showRecentlyViewed, true);
         }
+        if (activeTorrentDetailsDialog != null && activeTorrentDetailsDialog.isShowing()
+                && activeTorrentDetailsTorrent != null && activeTorrentDetailsData != null) {
+            Torrent torrentToRefresh = activeTorrentDetailsTorrent;
+            TorrentDetails detailsToRefresh = activeTorrentDetailsData;
+            refreshingTorrentCardForPlus = true;
+            activeTorrentDetailsDialog.dismiss();
+            refreshingTorrentCardForPlus = false;
+            showTorrentDetails(torrentToRefresh, detailsToRefresh);
+        }
         if (!plusSettingsRefreshPending && settingsDialog != null && settingsDialog.isShowing()) {
             settingsDialog.dismiss();
             settingsDialog = null;
@@ -8501,7 +8514,16 @@ public class MainActivity extends Activity {
                 .setView(root)
                 .create();
         dialog.show();
+        activeTorrentDetailsDialog = dialog;
+        activeTorrentDetailsTorrent = torrent;
+        activeTorrentDetailsData = data;
         dialog.setOnDismissListener(ignored -> {
+            if (activeTorrentDetailsDialog == dialog) {
+                activeTorrentDetailsDialog = null;
+                activeTorrentDetailsTorrent = null;
+                activeTorrentDetailsData = null;
+            }
+            if (refreshingTorrentCardForPlus) return;
             View returnFocus = focusedTorrentSource;
             focusedTorrentSource = null;
             if (returnFocus != null) {
