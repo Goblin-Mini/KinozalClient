@@ -716,6 +716,7 @@ public class MainActivity extends Activity {
     }
 
     private void loadCollections() {
+        if (!requirePlusFeature("collections")) return;
         if (deferBrowserNavigationIfBusy(this::loadCollections)) return;
         activateFeedScreen("collections");
         currentPath = "collections";
@@ -3012,7 +3013,7 @@ public class MainActivity extends Activity {
         menuScroll.addView(menuItems, new ScrollView.LayoutParams(-1, -2));
         sidebar.addView(menuScroll, new LinearLayout.LayoutParams(-1, 0, 1));
         addMenu("⌂", "Главная", () -> loadInitialCatalog());
-        addMenu("▤", "Подборки", () -> loadCollections());
+        addMenu("▤", "Подборки", () -> loadCollections(), true);
         addMenu("⇩", "Все раздачи", () -> load("browse.php", "Все раздачи"));
 
         Button categoriesButton = button("▦   Категории  ▾");
@@ -3658,7 +3659,8 @@ public class MainActivity extends Activity {
         // Keep mirror and account actions together in the first settings row.
         LinearLayout topActions = new LinearLayout(this);
         topActions.setOrientation(LinearLayout.HORIZONTAL);
-        Button mirrorButton = settingsPillButton("Зеркало");
+        Button mirrorButton = settingsPillButton(PlusAccess.hasFeature(this, "mirror_selection")
+                ? "Зеркало  $" : "Зеркало — Доступно в Plus");
         Button activationButton = settingsPillButton("Активация и синхронизация");
         topActions.addView(mirrorButton, new LinearLayout.LayoutParams(0, dp(48), 1f));
         LinearLayout.LayoutParams activationParams = new LinearLayout.LayoutParams(0, dp(48), 1f);
@@ -3667,7 +3669,7 @@ public class MainActivity extends Activity {
         LinearLayout.LayoutParams topActionsParams = new LinearLayout.LayoutParams(-1, dp(54));
         topActionsParams.bottomMargin = dp(6);
         page.addView(topActions, topActionsParams);
-        mirrorButton.setOnClickListener(v -> chooseMirror());
+        mirrorButton.setOnClickListener(v -> { if (requirePlusFeature("mirror_selection")) chooseMirror(); });
         activationButton.setOnClickListener(v -> showCloudSyncSettings());
 
         LinearLayout columns = new LinearLayout(this);
@@ -5207,7 +5209,8 @@ public class MainActivity extends Activity {
     private void addMenu(String icon, String label, Runnable action, boolean premium) {
         if (premium) {
             String feature = "Избранное".equals(label) ? "favorites"
-                    : "Недавно смотрели".equals(label) ? "viewing_history" : null;
+                    : "Недавно смотрели".equals(label) ? "viewing_history"
+                    : "Подборки".equals(label) ? "collections" : null;
             if (feature == null || !PlusAccess.hasFeature(this, feature)) return;
         }
         String displayLabel = icon + "   " + label + (premium ? "  $" : "");
@@ -5245,6 +5248,7 @@ public class MainActivity extends Activity {
             }
             addMenu("★", "Избранное", this::showFavorites, true);
             addMenu("◷", "Недавно смотрели", this::showRecentlyViewed, true);
+            addMenu("▤", "Подборки", this::loadCollections, true);
         }
         // Do not destroy and recreate an open torrent dialog from an asynchronous
         // entitlement callback. The card reads Plus gates when it is next opened;
@@ -7281,6 +7285,7 @@ public class MainActivity extends Activity {
     }
 
     private void chooseMirror() {
+        if (!requirePlusFeature("mirror_selection")) return;
         String[] labels = {"Kinozal Me", "Kinozal Guru", "Kinozal Jumpingcrab"};
         new AlertDialog.Builder(this).setTitle("Зеркало").setItems(labels, (d, which) -> {
             applyMirror(MIRRORS[which]);
