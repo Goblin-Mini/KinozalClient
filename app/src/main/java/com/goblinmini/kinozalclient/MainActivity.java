@@ -5219,10 +5219,10 @@ public class MainActivity extends Activity {
         b.setGravity(Gravity.CENTER_VERTICAL | Gravity.LEFT);
         b.setTextSize(fontSize(14));
         b.setPadding(dp(14), 0, dp(8), 0);
+        final String feature = "Избранное".equals(label) ? "favorites"
+                : "Недавно смотрели".equals(label) ? "viewing_history" : null;
         if (premium) {
             b.setTag("plus_menu_item");
-            String feature = "Избранное".equals(label) ? "favorites"
-                    : "Недавно смотрели".equals(label) ? "viewing_history" : null;
             if (feature != null) registerPlusFeatureControl(b, feature);
         }
         b.setMaxLines(1);
@@ -5232,7 +5232,11 @@ public class MainActivity extends Activity {
         // Make the focused button frame 5dp narrower on the scrollbar side.
         p.rightMargin = dp(5);
         p.bottomMargin = dp(3);
-        menuItems.addView(b, p); b.setOnClickListener(v -> action.run());
+        menuItems.addView(b, p);
+        b.setOnClickListener(v -> {
+            if (feature != null && !requirePlusFeature(feature)) return;
+            action.run();
+        });
     }
 
     private void onPlusEntitlementsUpdated() {
@@ -5257,9 +5261,11 @@ public class MainActivity extends Activity {
 
     private void updatePlusFeatureControl(View view, String feature) {
         boolean enabled = PlusAccess.hasFeature(this, feature);
-        view.setEnabled(enabled);
+        // Keep Plus controls reachable with the TV remote even when locked.
+        // Their click handlers enforce the entitlement and show the upgrade message.
+        view.setEnabled(true);
         view.setAlpha(enabled ? 1.0f : 0.42f);
-        view.setFocusable(enabled);
+        view.setFocusable(true);
         view.setFocusableInTouchMode(false);
     }
 
@@ -6935,7 +6941,7 @@ public class MainActivity extends Activity {
                         + "return /выход|выйти|logout|logoff/.test(t+' '+h);});"
                         + "var body=(document.body&&document.body.innerText||'').toLowerCase();"
                         + "if(!logout&&/личный кабинет|мой профиль|редактировать профиль/.test(body))logout=true;"
-                        + "return logout?'AUTHENTICATED':'NO_AUTH_MARKER';})()",
+                        + "return logout?'AUTHENTICATED':'NO_LOGIN_FORM';})()",
                         verification -> {
                     String result = verification == null ? "" : verification.replace("\"", "");
                     if (result.contains("AUTHENTICATED")) {
@@ -7101,9 +7107,11 @@ public class MainActivity extends Activity {
                     + "return /выход|выйти|logout|logoff/.test(t+' '+h);});"
                     + "var body=(document.body&&document.body.innerText||'').toLowerCase();"
                     + "if(!logout&&/личный кабинет|мой профиль|редактировать профиль/.test(body))logout=true;"
-                    + "return logout?'AUTHENTICATED':'NO_AUTH_MARKER';})()", result -> {
+                    + "return logout?'AUTHENTICATED':'NO_LOGIN_FORM';})()", result -> {
                 String verification = result == null ? "" : result.replace("\"", "");
-                if (!verification.contains("AUTHENTICATED")) {
+                // Some Kinozal mirrors do not expose a visible logout/profile link.
+                // A page without the login form is still a valid post-login state.
+                if (verification.contains("LOGIN_REQUIRED") || verification.isEmpty()) {
                     loginVerified[0] = false;
                     done.setEnabled(true);
                     String reason = verification.contains("LOGIN_REQUIRED")
@@ -7726,47 +7734,67 @@ public class MainActivity extends Activity {
             if (href.equals(pendingDetailPrefetchHref)) return;
         }
 
-        java.util.function.Consumer<String> onFreshHtml = html -> runOnUiThread(() -> {
+        java.util.function.Consumer<String> onFreshHtml = html -> {
             if (html == null || html.trim().isEmpty()) {
-                if (!hasCachedDetails && href.equals(activeTorrentDetailsHref)) {
-                    progress.setVisibility(View.GONE);
-                    showMessage("Не удалось загрузить карточку через браузерную сессию.");
-                }
-                return;
-            }
-            try {
-                Document doc = Jsoup.parse(html, href);
-                TorrentDetails details = parseTorrentDetails(doc, t);
-                // Do not let a challenge/login/empty document replace a good entry.
-                boolean validDetails = !details.title.trim().isEmpty()
-                        && (doc.selectFirst("#main .content") != null
-                        || doc.selectFirst("a[href*=download.php]") != null);
-                if (!validDetails) {
+                runOnUiThread(() -> {
                     if (!hasCachedDetails && href.equals(activeTorrentDetailsHref)) {
                         progress.setVisibility(View.GONE);
-                        showMessage("Сайт вернул неполную страницу раздачи.");
+                        showMessage("Не удалось загрузить карточку через браузерную сессию.");
                     }
-                    return;
-                }
-                synchronized (pageCache) { pageCache.put(cacheKey, html); }
-                putCachedDetailData(cacheKey, details);
-                diskCache.put(cacheKey, html.getBytes(StandardCharsets.UTF_8));
-                t.poster = details.poster;
-                // Do not wait for the secondary screenshot request before
-                // presenting the already parsed release details.
-                if (href.equals(activeTorrentDetailsHref) && !hasCachedDetails) {
-                    progress.setVisibility(View.GONE);
-                    showTorrentDetails(t, details);
-                }
-                // If a cached card is already open, keep it and its DPAD focus
-                // intact; the fresh HTML is saved for the next visit instead
-                // of rebuilding the dialog underneath the user.
-            } catch (Exception e) {
-                if (!hasCachedDetails && href.equals(activeTorrentDetailsHref)) {
-                    progress.setVisibility(View.GONE);
-                    showMessage("Не удалось разобрать карточку: " + safe(e.getMessage()));
-                }
+                });
+                return;
             }
+
+            // Jsoup parsing of a full release page (including comments and related
+            // torrents) must never run on the Android UI thread. On TV boxes this
+            // could freeze the entire launcher while a card was opening.
+            executeSafely(io, () -> {
+                TorrentDetails parsedDetails = null;
+                boolean parsedValid = false;
+                String parsedError = null;
+                try {
+                    Document doc = Jsoup.parse(html, href);
+                    parsedDetails = parseTorrentDetails(doc, t);
+                    parsedValid = !parsedDetails.title.trim().isEmpty()
+                            && (doc.selectFirst("#main .content") != null
+                            || doc.selectFirst("a[href*=download.php]") != null);
+                } catch (Exception e) {
+                    parsedError = safe(e.getMessage());
+                }
+                final TorrentDetails details = parsedDetails;
+                final boolean validDetails = parsedValid;
+                final String parseError = parsedError;
+
+                runOnUiThread(() -> {
+                    if (parseError != null) {
+                        if (!hasCachedDetails && href.equals(activeTorrentDetailsHref)) {
+                            progress.setVisibility(View.GONE);
+                            showMessage("Не удалось разобрать карточку: " + parseError);
+                        }
+                        return;
+                    }
+                    // Do not let a challenge/login/empty document replace a good entry.
+                    if (!validDetails || details == null) {
+                        if (!hasCachedDetails && href.equals(activeTorrentDetailsHref)) {
+                            progress.setVisibility(View.GONE);
+                            showMessage("Сайт вернул неполную страницу раздачи.");
+                        }
+                        return;
+                    }
+                    synchronized (pageCache) { pageCache.put(cacheKey, html); }
+                    putCachedDetailData(cacheKey, details);
+                    diskCache.put(cacheKey, html.getBytes(StandardCharsets.UTF_8));
+                    t.poster = details.poster;
+                    // Do not wait for secondary screenshot/hash requests before
+                    // presenting the already parsed release details.
+                    if (href.equals(activeTorrentDetailsHref) && !hasCachedDetails) {
+                        progress.setVisibility(View.GONE);
+                        showTorrentDetails(t, details);
+                    }
+                    // If a cached card is already open, keep it and its DPAD focus
+                    // intact; the fresh HTML is saved for the next visit instead.
+                });
+            });
         });
 
         if (sessionWebView != null) {
@@ -8206,6 +8234,7 @@ public class MainActivity extends Activity {
         favorite.setOnFocusChangeListener((v, focused) ->
                 v.setBackground(shape(focused ? Color.rgb(65, 72, 73) : PANEL, focused ? GOLD : 0)));
         favorite.setOnClickListener(v -> {
+            if (!requirePlusFeature("favorites")) return;
             toggleFavorite(torrent);
             boolean saved = isFavorite(torrent);
             favorite.setText(saved ? "★" : "☆");
