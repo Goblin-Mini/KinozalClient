@@ -3938,7 +3938,7 @@ public class MainActivity extends Activity {
                 try {
                     CloudSyncManager.activate(this, serial);
                     runOnUiThread(() -> {
-                        PlusAccess.refresh(MainActivity.this);
+                        PlusAccess.refresh(MainActivity.this, MainActivity.this::onPlusEntitlementsUpdated);
                         activate.setEnabled(true);
                         activationState.setText("Статус: активирована");
                         showMessage("Устройство активировано");
