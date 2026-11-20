@@ -5229,15 +5229,10 @@ public class MainActivity extends Activity {
             addMenu("★", "Избранное", this::showFavorites, true);
             addMenu("◷", "Недавно смотрели", this::showRecentlyViewed, true);
         }
-        if (activeTorrentDetailsDialog != null && activeTorrentDetailsDialog.isShowing()
-                && activeTorrentDetailsTorrent != null && activeTorrentDetailsData != null) {
-            Torrent torrentToRefresh = activeTorrentDetailsTorrent;
-            TorrentDetails detailsToRefresh = activeTorrentDetailsData;
-            refreshingTorrentCardForPlus = true;
-            activeTorrentDetailsDialog.dismiss();
-            refreshingTorrentCardForPlus = false;
-            showTorrentDetails(torrentToRefresh, detailsToRefresh);
-        }
+        // Do not destroy and recreate an open torrent dialog from an asynchronous
+        // entitlement callback. The card reads Plus gates when it is next opened;
+        // rebuilding a live dialog can race its window attachment, DPAD focus,
+        // poster loading and WebView prefetch callbacks.
         if (!plusSettingsRefreshPending && settingsDialog != null && settingsDialog.isShowing()) {
             settingsDialog.dismiss();
             settingsDialog = null;
