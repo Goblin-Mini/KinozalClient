@@ -15,10 +15,10 @@
 |---|---:|---:|
 | `proxy` — proxy settings/use | no | yes |
 | `advanced_search` — advanced search | no | yes |
-| `mirror_selection` — mirror selection | no | yes |
+| Mirror selection | yes | no |
 | `favorites` — favorites | no | yes |
 | `viewing_history` — viewing history | no | yes |
-| `collections` — curated collections | no | yes |
+| Curated collections | yes | no |
 | `backup` — backup/restore | no | yes |
 | `voice_search` — voice search | no | yes |
 | `android_tv_channels` — Android TV channels | no | yes |
