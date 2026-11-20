@@ -8519,11 +8519,13 @@ public class MainActivity extends Activity {
         activeTorrentDetailsTorrent = torrent;
         activeTorrentDetailsData = data;
         dialog.setOnDismissListener(ignored -> {
-            if (activeTorrentDetailsDialog == dialog) {
-                activeTorrentDetailsDialog = null;
-                activeTorrentDetailsTorrent = null;
-                activeTorrentDetailsData = null;
-            }
+            // A Plus entitlement refresh can replace this dialog with a new card.
+            // The old dialog's dismiss callback may arrive after the replacement is
+            // already visible; never move DPAD focus back to the catalogue in that case.
+            if (activeTorrentDetailsDialog != dialog) return;
+            activeTorrentDetailsDialog = null;
+            activeTorrentDetailsTorrent = null;
+            activeTorrentDetailsData = null;
             if (refreshingTorrentCardForPlus) return;
             View returnFocus = focusedTorrentSource;
             focusedTorrentSource = null;
