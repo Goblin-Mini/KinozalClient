@@ -148,9 +148,25 @@ async function claimDevice(request: Request, env: Env): Promise<Response> {
   ).bind(codeHash, installationId).first<any>();
 
   if (existing) {
-    // The device token is intentionally never recoverable from its stored hash.
-    // A repeat claim must not silently replace credentials; ask the user to contact support.
-    return response(request, env, { error: "device_already_activated", message: "Это устройство уже активировано. Обратитесь в поддержку, если нужно восстановить доступ." }, 409);
+    // The raw token cannot be recovered from its hash. If the same installation
+    // presents the valid activation code again, rotate the token so a device can
+    // recover after its local token is lost or the server database is restored.
+    const deviceToken = randomHex(32);
+    const tokenHash = await sha256(deviceToken);
+    await env.DB.prepare(
+      "UPDATE devices SET token_hash=?, last_seen_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=? AND revoked_at IS NULL"
+    ).bind(tokenHash, existing.id).run();
+    const count = await env.DB.prepare(
+      "SELECT COUNT(*) AS n FROM devices WHERE license_id=? AND revoked_at IS NULL"
+    ).bind(existing.license_id).first<any>();
+    return response(request, env, {
+      device_token: deviceToken,
+      plan: existing.plan,
+      active_devices: Number(count?.n || 1),
+      device_limit: existing.device_limit,
+      features: FEATURES,
+      recovered: true,
+    }, 200);
   }
 
   const codeRow = await env.DB.prepare(
