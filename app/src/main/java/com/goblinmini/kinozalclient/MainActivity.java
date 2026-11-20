@@ -3889,23 +3889,35 @@ public class MainActivity extends Activity {
                             TextView name = text(label + (current ? " (это устройство)" : ""),
                                     12, current ? GOLD : Color.LTGRAY, current);
                             row.addView(name, new LinearLayout.LayoutParams(0, -2, 1f));
-                            if (!current && !id.isEmpty()) {
-                                Button remove = settingsPillButton("Удалить");
-                                remove.setTextSize(fontSize(11));
-                                row.addView(remove, new LinearLayout.LayoutParams(dp(88), dp(38)));
+                            if (!id.isEmpty()) {
+                                Button remove = settingsPillButton(current ? "Удалить это" : "Удалить");
+                                remove.setTextSize(fontSize(10));
+                                row.addView(remove, new LinearLayout.LayoutParams(dp(current ? 104 : 88), dp(38)));
                                 remove.setOnClickListener(v -> new AlertDialog.Builder(MainActivity.this)
-                                        .setTitle("Удалить устройство?")
-                                        .setMessage("Устройство «" + label + "» больше не сможет синхронизироваться.")
+                                        .setTitle(current ? "Отключить это устройство?" : "Удалить устройство?")
+                                        .setMessage(current
+                                                ? "Это устройство будет удалено из лицензии, синхронизация отключится, а Plus на этом устройстве перестанет действовать. Локальные избранное и история останутся на устройстве."
+                                                : "Устройство «" + label + "» больше не сможет синхронизироваться.")
                                         .setNegativeButton("Отмена", null)
-                                        .setPositiveButton("Удалить", (d, which) -> {
+                                        .setPositiveButton(current ? "Отключить" : "Удалить", (d, which) -> {
                                             remove.setEnabled(false);
                                             executeSafely(io, () -> {
                                                 try {
-                                                    CloudSyncManager.removeDevice(MainActivity.this, id);
-                                                    runOnUiThread(() -> {
-                                                        showMessage("Устройство удалено");
-                                                        refreshDevices[0].run();
-                                                    });
+                                                    if (current) {
+                                                        CloudSyncManager.deactivateCurrentDevice(MainActivity.this, id);
+                                                        runOnUiThread(() -> {
+                                                            PlusAccess.refresh(MainActivity.this, () -> onPlusEntitlementsUpdated());
+                                                            syncState.setText("Статус: синхронизация отключена");
+                                                            showMessage("Это устройство удалено из лицензии");
+                                                            refreshDevices[0].run();
+                                                        });
+                                                    } else {
+                                                        CloudSyncManager.removeDevice(MainActivity.this, id);
+                                                        runOnUiThread(() -> {
+                                                            showMessage("Устройство удалено");
+                                                            refreshDevices[0].run();
+                                                        });
+                                                    }
                                                 } catch (Exception e) {
                                                     String error = safe(e.getMessage());
                                                     runOnUiThread(() -> {
