@@ -716,7 +716,6 @@ public class MainActivity extends Activity {
     }
 
     private void loadCollections() {
-        if (!requirePlusFeature("collections")) return;
         if (deferBrowserNavigationIfBusy(this::loadCollections)) return;
         activateFeedScreen("collections");
         currentPath = "collections";
@@ -3013,7 +3012,7 @@ public class MainActivity extends Activity {
         menuScroll.addView(menuItems, new ScrollView.LayoutParams(-1, -2));
         sidebar.addView(menuScroll, new LinearLayout.LayoutParams(-1, 0, 1));
         addMenu("⌂", "Главная", () -> loadInitialCatalog());
-        addMenu("▤", "Подборки", () -> loadCollections(), true);
+        addMenu("▤", "Подборки", () -> loadCollections());
         addMenu("⇩", "Все раздачи", () -> load("browse.php", "Все раздачи"));
 
         Button categoriesButton = button("▦   Категории  ▾");
@@ -3197,7 +3196,6 @@ public class MainActivity extends Activity {
             }
         };
         plusVoiceSearchButton.setContentDescription("Голосовой поиск — доступно в Plus");
-        if (!PlusAccess.hasFeature(this, "voice_search")) plusVoiceSearchButton.setVisibility(View.GONE);
         plusVoiceSearchButton.setFocusable(true);
         plusVoiceSearchButton.setFocusableInTouchMode(false);
         plusVoiceSearchButton.setBackground(shape(PANEL, 0));
@@ -3234,7 +3232,6 @@ public class MainActivity extends Activity {
         LinearLayout.LayoutParams filterButtonParams = new LinearLayout.LayoutParams(dp(48), dp(48));
         filterButtonParams.rightMargin = dp(7);
         searchBar.addView(plusAdvancedSearchButton, filterButtonParams);
-        if (!PlusAccess.hasFeature(this, "advanced_search")) plusAdvancedSearchButton.setVisibility(View.GONE);
         plusAdvancedSearchButton.setOnClickListener(v -> { if (requirePlusFeature("advanced_search")) showTorrentFilter(); });
         Button history = button("История");
         history.setTextSize(fontSize(12));
@@ -3659,8 +3656,7 @@ public class MainActivity extends Activity {
         // Keep mirror and account actions together in the first settings row.
         LinearLayout topActions = new LinearLayout(this);
         topActions.setOrientation(LinearLayout.HORIZONTAL);
-        Button mirrorButton = settingsPillButton(PlusAccess.hasFeature(this, "mirror_selection")
-                ? "Зеркало  $" : "Зеркало — Доступно в Plus");
+        Button mirrorButton = settingsPillButton("Зеркало");
         Button activationButton = settingsPillButton("Активация и синхронизация");
         topActions.addView(mirrorButton, new LinearLayout.LayoutParams(0, dp(48), 1f));
         LinearLayout.LayoutParams activationParams = new LinearLayout.LayoutParams(0, dp(48), 1f);
@@ -3669,7 +3665,7 @@ public class MainActivity extends Activity {
         LinearLayout.LayoutParams topActionsParams = new LinearLayout.LayoutParams(-1, dp(54));
         topActionsParams.bottomMargin = dp(6);
         page.addView(topActions, topActionsParams);
-        mirrorButton.setOnClickListener(v -> { if (requirePlusFeature("mirror_selection")) chooseMirror(); });
+        mirrorButton.setOnClickListener(v -> chooseMirror());
         activationButton.setOnClickListener(v -> showCloudSyncSettings());
 
         LinearLayout columns = new LinearLayout(this);
@@ -3686,23 +3682,21 @@ public class MainActivity extends Activity {
         addSettingsAction(left, "Начальный раздел", () -> chooseStartupSource());
         addSettingsAction(left, "Размер шрифта", () -> showFontSizeSettings());
         addSettingsAction(left, "Поиск Jackett", () -> showJackettSettings());
-        if (PlusAccess.hasFeature(this, "proxy")) {
-            addSettingsAction(left, "Прокси  $", this::showSocks5Settings);
-        }
+        addSettingsAction(left, "Прокси  $", this::showSocks5Settings);
         addSettingsAction(left, "Очистить кэш", () -> confirmClearCache());
         addSettingsAction(right, "Сбросить приложение для торрентов", () -> resetTorrentHandlerChoice());
 
         addSettingsAction(right, "Цвет акцента", () -> showAccentPicker());
         addSettingsAction(right, "TorrServe", () -> showTorrServeSettings());
-        if (PlusAccess.hasFeature(this, "backup")) {
-            addSettingsAction(right, "Резервная копия  $", () ->
-                    new AlertDialog.Builder(this)
-                            .setItems(new String[]{"Создать резервную копию", "Восстановить из копии"},
-                                    (dialog, which) -> {
-                                        if (which == 0) exportUserBackup();
-                                        else importUserBackup();
-                                    }).show());
-        }
+        addSettingsAction(right, "Резервная копия  $", () -> {
+            if (!requirePlusFeature("backup")) return;
+            new AlertDialog.Builder(this)
+                    .setItems(new String[]{"Создать резервную копию", "Восстановить из копии"},
+                            (dialog, which) -> {
+                                if (which == 0) exportUserBackup();
+                                else importUserBackup();
+                            }).show();
+        });
         addSettingsAction(right, "Обновления", () -> showUpdateSettings());
         addSettingsAction(right, "Диагностика", () -> showCrashDiagnostics());
 
@@ -5212,12 +5206,7 @@ public class MainActivity extends Activity {
     }
 
     private void addMenu(String icon, String label, Runnable action, boolean premium) {
-        if (premium) {
-            String feature = "Избранное".equals(label) ? "favorites"
-                    : "Недавно смотрели".equals(label) ? "viewing_history"
-                    : "Подборки".equals(label) ? "collections" : null;
-            if (feature == null || !PlusAccess.hasFeature(this, feature)) return;
-        }
+
         String displayLabel = icon + "   " + label + (premium ? "  $" : "");
         Button b = button(displayLabel);
         b.setText(menuIconText(displayLabel));
@@ -5253,7 +5242,7 @@ public class MainActivity extends Activity {
             }
             addMenu("★", "Избранное", this::showFavorites, true);
             addMenu("◷", "Недавно смотрели", this::showRecentlyViewed, true);
-            addMenu("▤", "Подборки", this::loadCollections, true);
+            addMenu("▤", "Подборки", this::loadCollections);
         }
         // Do not destroy and recreate an open torrent dialog from an asynchronous
         // entitlement callback. The card reads Plus gates when it is next opened;
@@ -7290,7 +7279,6 @@ public class MainActivity extends Activity {
     }
 
     private void chooseMirror() {
-        if (!requirePlusFeature("mirror_selection")) return;
         String[] labels = {"Kinozal Me", "Kinozal Guru", "Kinozal Jumpingcrab"};
         new AlertDialog.Builder(this).setTitle("Зеркало").setItems(labels, (d, which) -> {
             applyMirror(MIRRORS[which]);
