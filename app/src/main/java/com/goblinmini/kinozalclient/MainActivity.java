@@ -3923,9 +3923,14 @@ public class MainActivity extends Activity {
                     });
                 } catch (Exception e) {
                     String error = safe(e.getMessage());
+                    boolean tokenInvalid = "license_not_found".equalsIgnoreCase(error);
                     runOnUiThread(() -> {
-                        activationState.setText("Статус: устройство активировано, сервер недоступен");
-                        devicesState.setText("Не удалось загрузить список устройств: " + error);
+                        activationState.setText(tokenInvalid
+                                ? "Статус: требуется восстановить токен устройства"
+                                : "Статус: устройство активировано, сервер недоступен");
+                        devicesState.setText(tokenInvalid
+                                ? "Введите тот же серийный номер и нажмите «Активировать» — доступ будет восстановлен"
+                                : "Не удалось загрузить список устройств: " + error);
                     });
                 }
             });
