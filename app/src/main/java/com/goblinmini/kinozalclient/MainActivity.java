@@ -6841,6 +6841,8 @@ public class MainActivity extends Activity {
         final boolean[] textEntryOpen = {false};
         final String[] submittedLogin = {null};
         final String[] submittedPassword = {null};
+        final boolean[] loginVerified = {false};
+        final String[] loginVerificationDetail = {"Ожидается подтверждение входа на Kinozal."};
 
         String[] saved = client.getSavedCredentials();
         EditText loginField = new EditText(this);
@@ -6923,13 +6925,30 @@ public class MainActivity extends Activity {
                         + "var f=document.querySelector('iframe[title*=Widget],iframe[title*=challenge],#challenge-form iframe');"
                         + "if(f){f.setAttribute('tabindex','0');f.focus();}"
                         + "})();", null);
-                String cookie = browserCookies.getCookie(base);
-                if (cookie != null && !cookie.isEmpty()) {
-                    try {
-                        client.importBrowserCookies(cookie);
-                        client.saveBrowserCookies(cookie);
-                    } catch (Exception ignored) { }
-                }
+                view.evaluateJavascript("(function(){"
+                        + "var u=(location.href||'').toLowerCase();"
+                        + "var p=!!document.querySelector('form input[type=password]');"
+                        + "if(p||u.indexOf('login.php')>=0||u.indexOf('takelogin.php')>=0)return 'LOGIN_REQUIRED';"
+                        + "var links=[].slice.call(document.querySelectorAll('a'));"
+                        + "var logout=links.some(function(a){var t=(a.innerText||a.textContent||'').trim().toLowerCase();"
+                        + "var h=(a.getAttribute('href')||'').toLowerCase();"
+                        + "return /выход|выйти|logout|logoff/.test(t+' '+h);});"
+                        + "var body=(document.body&&document.body.innerText||'').toLowerCase();"
+                        + "if(!logout&&/личный кабинет|мой профиль|редактировать профиль/.test(body))logout=true;"
+                        + "return logout?'AUTHENTICATED':'NO_AUTH_MARKER';})()",
+                        verification -> {
+                    String result = verification == null ? "" : verification.replace("\\"", "");
+                    if (result.contains("AUTHENTICATED")) {
+                        loginVerified[0] = true;
+                        loginVerificationDetail[0] = "Аккаунт подтверждён сайтом Kinozal.";
+                    } else if (result.contains("LOGIN_REQUIRED")) {
+                        loginVerified[0] = false;
+                        loginVerificationDetail[0] = "Kinozal всё ещё показывает форму входа.";
+                    } else {
+                        loginVerified[0] = false;
+                        loginVerificationDetail[0] = "Не найден признак авторизованного аккаунта. Проверьте, завершился ли вход.";
+                    }
+                });
             }
         });
 
@@ -7034,8 +7053,6 @@ public class MainActivity extends Activity {
                 else {
                     submittedLogin[0] = username;
                     submittedPassword[0] = password;
-                    try { client.saveCredentials(username, password); }
-                    catch (Exception e) { showMessage("Не удалось сохранить данные входа: " + safe(e.getMessage())); }
                 }
             });
         });
@@ -7067,14 +7084,43 @@ public class MainActivity extends Activity {
                     showMessage("Не удалось определить поля или кнопку входа на странице.");
                     return;
                 }
-                try { client.saveCredentials(username, password); }
-                catch (Exception e) { showMessage("Не удалось сохранить данные входа: " + safe(e.getMessage())); }
+                submittedLogin[0] = username;
+                submittedPassword[0] = password;
+                showMessage("Запрос входа отправлен. Дождитесь ответа Kinozal, затем нажмите «Готово».");
             });
         });
         done.setOnClickListener(v -> {
-            browserCookies.flush();
-            String cookie = browserCookies.getCookie(base);
-            if (cookie != null && !cookie.isEmpty()) {
+            done.setEnabled(false);
+            web.evaluateJavascript("(function(){"
+                    + "var u=(location.href||'').toLowerCase();"
+                    + "var p=!!document.querySelector('form input[type=password]');"
+                    + "if(p||u.indexOf('login.php')>=0||u.indexOf('takelogin.php')>=0)return 'LOGIN_REQUIRED';"
+                    + "var links=[].slice.call(document.querySelectorAll('a'));"
+                    + "var logout=links.some(function(a){var t=(a.innerText||a.textContent||'').trim().toLowerCase();"
+                    + "var h=(a.getAttribute('href')||'').toLowerCase();"
+                    + "return /выход|выйти|logout|logoff/.test(t+' '+h);});"
+                    + "var body=(document.body&&document.body.innerText||'').toLowerCase();"
+                    + "if(!logout&&/личный кабинет|мой профиль|редактировать профиль/.test(body))logout=true;"
+                    + "return logout?'AUTHENTICATED':'NO_AUTH_MARKER';})()", result -> {
+                String verification = result == null ? "" : result.replace("\\"", "");
+                if (!verification.contains("AUTHENTICATED")) {
+                    loginVerified[0] = false;
+                    done.setEnabled(true);
+                    String reason = verification.contains("LOGIN_REQUIRED")
+                            ? "Kinozal всё ещё показывает форму входа. Проверьте логин, пароль и капчу."
+                            : "Не удалось подтвердить вход: на странице не найден признак авторизованного аккаунта. Окно оставлено открытым.";
+                    loginVerificationDetail[0] = reason;
+                    showMessage(reason);
+                    return;
+                }
+                loginVerified[0] = true;
+                browserCookies.flush();
+                String cookie = browserCookies.getCookie(base);
+                if (cookie == null || cookie.trim().isEmpty()) {
+                    done.setEnabled(true);
+                    showMessage("Аккаунт подтверждён, но сайт не выдал cookies сессии. Окно оставлено открытым.");
+                    return;
+                }
                 try {
                     client.importBrowserCookies(cookie);
                     client.saveBrowserCookies(cookie);
@@ -7083,21 +7129,23 @@ public class MainActivity extends Activity {
                         client.saveCredentials(submittedLogin[0], submittedPassword[0]);
                     }
                 } catch (Exception e) {
-                    showMessage("Не удалось сохранить сессию: " + safe(e.getMessage()));
+                    done.setEnabled(true);
+                    showMessage("Не удалось сохранить подтверждённую сессию: " + safe(e.getMessage()));
                     return;
                 }
-            }
-            boolean wasFirstLaunchAuthorization = firstLaunchAuthorizationShown;
-            firstLaunchAuthorizationShown = false;
-            detachWeb.run();
-            dialog.dismiss();
-            showMessage("Браузерная сессия сохранена. Загружаю каталог через WebView.");
-            status.setText("Браузерная сессия активна");
-            if (wasFirstLaunchAuthorization) {
-                markStartupCatalogReady();
-            } else {
-                load("browse.php", "Все раздачи");
-            }
+                boolean wasFirstLaunchAuthorization = firstLaunchAuthorizationShown;
+                firstLaunchAuthorizationShown = false;
+                detachWeb.run();
+                dialog.dismiss();
+                showMessage("Вход в Kinozal подтверждён. Загружаю каталог.");
+                status.setText("Вход в Kinozal выполнен");
+                updateSidebarLoginStatus(true);
+                if (wasFirstLaunchAuthorization) {
+                    markStartupCatalogReady();
+                } else {
+                    load("browse.php", "Все раздачи");
+                }
+            });
         });
         dialog.setOnDismissListener(d -> {
             if (web.getParent() == panel) {
