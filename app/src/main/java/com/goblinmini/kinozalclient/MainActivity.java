@@ -3822,7 +3822,8 @@ public class MainActivity extends Activity {
         LinearLayout.LayoutParams titleParams = new LinearLayout.LayoutParams(-1, -2);
         titleParams.topMargin = dp(14);
         panel.addView(activationTitle, titleParams);
-        TextView activationState = text("Статус: " + CloudSyncManager.status(this), 14, TEAL, false);
+        TextView activationState = text("Статус: " + (CloudSyncManager.isActivated(this)
+                ? "проверяем лицензию…" : "не активировано"), 14, TEAL, false);
         panel.addView(activationState);
         TextView devicesState = text("Устройства: загрузка…", 13, Color.LTGRAY, false);
         LinearLayout.LayoutParams devicesStateParams = new LinearLayout.LayoutParams(-1, -2);
@@ -3851,6 +3852,7 @@ public class MainActivity extends Activity {
         final Runnable[] refreshDevices = new Runnable[1];
         refreshDevices[0] = () -> {
             if (!CloudSyncManager.isActivated(this)) {
+                activationState.setText("Статус: не активировано");
                 devicesState.setText("Устройства: лицензия не активирована");
                 devicesList.removeAllViews();
                 return;
@@ -3862,7 +3864,14 @@ public class MainActivity extends Activity {
                     org.json.JSONArray devices = CloudSyncManager.devices(this);
                     runOnUiThread(() -> {
                         if (isFinishing() || isDestroyed()) return;
-                        activationState.setText("Статус: активна");
+                        String licenseStatus = info.optString("status", "");
+                        String licensePlan = info.optString("plan", "");
+                        boolean plusActive = "active".equalsIgnoreCase(licenseStatus)
+                                && ("plus_lifetime".equalsIgnoreCase(licensePlan)
+                                || "owner".equalsIgnoreCase(licensePlan));
+                        activationState.setText(plusActive
+                                ? "Статус: Plus активен"
+                                : "Статус: устройство активировано, Plus не активен");
                         int active = info.optInt("active_devices", devices.length());
                         int limit = info.optInt("device_limit", 0);
                         devicesState.setText("Доступно устройств: " + active + " из " + limit
@@ -3913,7 +3922,7 @@ public class MainActivity extends Activity {
                 } catch (Exception e) {
                     String error = safe(e.getMessage());
                     runOnUiThread(() -> {
-                        activationState.setText("Статус: не удалось проверить");
+                        activationState.setText("Статус: устройство активировано, сервер недоступен");
                         devicesState.setText("Не удалось загрузить список устройств: " + error);
                     });
                 }
@@ -4010,9 +4019,17 @@ public class MainActivity extends Activity {
         }
         if (CloudSyncManager.isActivated(this)) refreshDevices[0].run();
         else {
-            activationState.setText("Статус: " + CloudSyncManager.status(this));
+            activationState.setText("Статус: не активировано");
             devicesState.setText("Устройства: требуется активация");
         }
+        // Revalidate cached Plus rights whenever this screen is opened. If the
+        // device has no activation token, PlusAccess clears stale local rights;
+        // if the server is temporarily unreachable, its bounded offline grace
+        // policy remains in effect.
+        PlusAccess.refresh(this, () -> {
+            plusSettingsRefreshPending = dialog.isShowing();
+            onPlusEntitlementsUpdated();
+        });
     }
 
     private void scheduleCloudSync() {
