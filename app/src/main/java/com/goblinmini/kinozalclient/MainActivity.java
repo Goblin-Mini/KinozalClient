@@ -150,6 +150,7 @@ public class MainActivity extends Activity {
     private TorrentDetails activeTorrentDetailsData;
     private View plusVoiceSearchButton;
     private Button plusAdvancedSearchButton;
+    private final java.util.Map<View, String> plusFeatureControls = new java.util.LinkedHashMap<>();
     private static final String FAVORITES_KEY = "local_favorites";
     private volatile String lastHtml = "";
     private WebView sessionWebView;
@@ -3195,7 +3196,8 @@ public class MainActivity extends Activity {
                 canvas.restore();
             }
         };
-        plusVoiceSearchButton.setContentDescription("Голосовой поиск — доступно в Plus");
+        plusVoiceSearchButton.setContentDescription("Голосовой поиск — Plus");
+        registerPlusFeatureControl(plusVoiceSearchButton, "voice_search");
         plusVoiceSearchButton.setFocusable(true);
         plusVoiceSearchButton.setFocusableInTouchMode(false);
         plusVoiceSearchButton.setBackground(shape(PANEL, 0));
@@ -3224,7 +3226,8 @@ public class MainActivity extends Activity {
         plusAdvancedSearchButton = button("+");
         plusAdvancedSearchButton.setTextSize(fontSize(24));
         plusAdvancedSearchButton.setText("+ $");
-        plusAdvancedSearchButton.setContentDescription("Расширенный поиск — доступно в Plus");
+        plusAdvancedSearchButton.setContentDescription("Расширенный поиск — Plus");
+        registerPlusFeatureControl(plusAdvancedSearchButton, "advanced_search");
         plusAdvancedSearchButton.setMinWidth(0);
         plusAdvancedSearchButton.setMinimumWidth(0);
         plusAdvancedSearchButton.setGravity(Gravity.CENTER);
@@ -3682,13 +3685,14 @@ public class MainActivity extends Activity {
         addSettingsAction(left, "Начальный раздел", () -> chooseStartupSource());
         addSettingsAction(left, "Размер шрифта", () -> showFontSizeSettings());
         addSettingsAction(left, "Поиск Jackett", () -> showJackettSettings());
-        addSettingsAction(left, "Прокси  $", this::showSocks5Settings);
+        Button proxyAction = addSettingsAction(left, "Прокси  $", this::showSocks5Settings);
+        registerPlusFeatureControl(proxyAction, "proxy");
         addSettingsAction(left, "Очистить кэш", () -> confirmClearCache());
         addSettingsAction(right, "Сбросить приложение для торрентов", () -> resetTorrentHandlerChoice());
 
         addSettingsAction(right, "Цвет акцента", () -> showAccentPicker());
         addSettingsAction(right, "TorrServe", () -> showTorrServeSettings());
-        addSettingsAction(right, "Резервная копия  $", () -> {
+        Button backupAction = addSettingsAction(right, "Резервная копия  $", () -> {
             if (!requirePlusFeature("backup")) return;
             new AlertDialog.Builder(this)
                     .setItems(new String[]{"Создать резервную копию", "Восстановить из копии"},
@@ -3697,6 +3701,7 @@ public class MainActivity extends Activity {
                                 else importUserBackup();
                             }).show();
         });
+        registerPlusFeatureControl(backupAction, "backup");
         addSettingsAction(right, "Обновления", () -> showUpdateSettings());
         addSettingsAction(right, "Диагностика", () -> showCrashDiagnostics());
 
@@ -3704,9 +3709,8 @@ public class MainActivity extends Activity {
         bottomRow.setOrientation(LinearLayout.HORIZONTAL);
         bottomRow.setPadding(0, dp(8), 0, 0);
         boolean hasTvChannelsPlus = PlusAccess.hasFeature(this, "android_tv_channels");
-        Button channelsButton = settingsPillButton(hasTvChannelsPlus
-                ? "Каналы Android TV  $" : "Каналы Android TV — Доступно в Plus");
-        channelsButton.setEnabled(hasTvChannelsPlus);
+        Button channelsButton = settingsPillButton("Каналы Android TV  $");
+        registerPlusFeatureControl(channelsButton, "android_tv_channels");
         boolean channelsOn = PlusAccess.hasFeature(this, "android_tv_channels")
                 && getSharedPreferences(PREFS, MODE_PRIVATE).getBoolean("tv_channels_enabled", false);
         if (!PlusAccess.hasFeature(this, "android_tv_channels")) {
@@ -4210,7 +4214,7 @@ public class MainActivity extends Activity {
         parent.addView(line, new LinearLayout.LayoutParams(-1, dp(1)));
     }
 
-    private void addSettingsAction(LinearLayout parent, String title, Runnable action) {
+    private Button addSettingsAction(LinearLayout parent, String title, Runnable action) {
         Button button = button(title);
         button.setTextSize(fontSize(13));
         button.setGravity(Gravity.CENTER_VERTICAL | Gravity.LEFT);
@@ -4219,6 +4223,7 @@ public class MainActivity extends Activity {
         params.topMargin = dp(5);
         parent.addView(button, params);
         button.setOnClickListener(v -> action.run());
+        return b;
     }
 
     private void styleSettingsEdit(EditText field) {
@@ -5214,7 +5219,12 @@ public class MainActivity extends Activity {
         b.setGravity(Gravity.CENTER_VERTICAL | Gravity.LEFT);
         b.setTextSize(fontSize(14));
         b.setPadding(dp(14), 0, dp(8), 0);
-        if (premium) b.setTag("plus_menu_item");
+        if (premium) {
+            b.setTag("plus_menu_item");
+            String feature = "Избранное".equals(label) ? "favorites"
+                    : "Недавно смотрели".equals(label) ? "viewing_history" : null;
+            if (feature != null) registerPlusFeatureControl(b, feature);
+        }
         b.setMaxLines(1);
         b.setEllipsize(android.text.TextUtils.TruncateAt.END);
         LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(
@@ -5227,7 +5237,7 @@ public class MainActivity extends Activity {
 
     private void onPlusEntitlementsUpdated() {
         if (isFinishing() || isDestroyed()) return;
-        // Plus controls remain visible; their actions are checked at entry points.
+        refreshPlusFeatureControls();
         // Do not destroy and recreate an open torrent dialog from an asynchronous
         // entitlement callback. The card reads Plus gates when it is next opened;
         // rebuilding a live dialog can race its window attachment, DPAD focus,
@@ -5236,6 +5246,30 @@ public class MainActivity extends Activity {
             settingsDialog.dismiss();
             settingsDialog = null;
             showSettings();
+        }
+    }
+
+    private void registerPlusFeatureControl(View view, String feature) {
+        if (view == null || feature == null) return;
+        plusFeatureControls.put(view, feature);
+        updatePlusFeatureControl(view, feature);
+    }
+
+    private void updatePlusFeatureControl(View view, String feature) {
+        boolean enabled = PlusAccess.hasFeature(this, feature);
+        view.setEnabled(enabled);
+        view.setAlpha(enabled ? 1.0f : 0.42f);
+        view.setFocusable(enabled);
+        view.setFocusableInTouchMode(false);
+    }
+
+    private void refreshPlusFeatureControls() {
+        java.util.Iterator<java.util.Map.Entry<View, String>> iterator = plusFeatureControls.entrySet().iterator();
+        while (iterator.hasNext()) {
+            java.util.Map.Entry<View, String> entry = iterator.next();
+            View view = entry.getKey();
+            if (view == null || view.getParent() == null) { iterator.remove(); continue; }
+            updatePlusFeatureControl(view, entry.getValue());
         }
     }
 
@@ -8129,9 +8163,8 @@ public class MainActivity extends Activity {
             favorite.setText(saved ? "★" : "☆");
             favorite.setContentDescription(saved ? "Убрать из избранного" : "Добавить в избранное");
         });
-        if (PlusAccess.hasFeature(this, "favorites")) {
-            actionRow.addView(favorite, new LinearLayout.LayoutParams(dp(48), dp(48)));
-        }
+        registerPlusFeatureControl(favorite, "favorites");
+        actionRow.addView(favorite, new LinearLayout.LayoutParams(dp(48), dp(48)));
         posterColumn.addView(actionRow);
 
         String releaseType = normalizeReleaseType(torrent == null ? "r0" : torrent.releaseType);
@@ -8148,9 +8181,8 @@ public class MainActivity extends Activity {
         LinearLayout.LayoutParams downloadParams = new LinearLayout.LayoutParams(-1, dp(42));
         downloadParams.topMargin = dp(8);
         downloadParams.bottomMargin = dp(10);
-        if (PlusAccess.hasFeature(this, "torrent_download")) {
-            posterColumn.addView(downloadTorrent, downloadParams);
-        }
+        registerPlusFeatureControl(downloadTorrent, "torrent_download");
+        posterColumn.addView(downloadTorrent, downloadParams);
 
         ImageView poster = new ImageView(this);
         poster.setScaleType(ImageView.ScaleType.FIT_CENTER);
@@ -8228,9 +8260,9 @@ public class MainActivity extends Activity {
         Button similarTab = button("Подобные  $");
         Button commentsTab = button("Комменты  $");
         Button jackettTab = button("Другие");
-        if (!PlusAccess.hasFeature(this, "screenshots")) screenshotsTab.setVisibility(View.GONE);
-        if (!PlusAccess.hasFeature(this, "similar")) similarTab.setVisibility(View.GONE);
-        if (!PlusAccess.hasFeature(this, "comments")) commentsTab.setVisibility(View.GONE);
+        registerPlusFeatureControl(screenshotsTab, "screenshots");
+        registerPlusFeatureControl(similarTab, "similar");
+        registerPlusFeatureControl(commentsTab, "comments");
         Button[] tabButtons = {descriptionTab, technicalTab, releaseTab, screenshotsTab, similarTab, commentsTab, jackettTab};
         for (int tabIndex = 0; tabIndex < tabButtons.length; tabIndex++) {
             Button tab = tabButtons[tabIndex];
