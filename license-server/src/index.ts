@@ -293,11 +293,12 @@ async function getDevices(request: Request, env: Env): Promise<Response> {
 async function revokeOwnDevice(request: Request, env: Env, deviceId: string): Promise<Response> {
   const device = await authenticatedDevice(request, env);
   if (!device) return response(request, env, { error: "license_required" }, 401);
-  if (deviceId === device.device_id) {
-    return response(request, env, { error: "cannot_revoke_current_device" }, 409);
-  }
+  // A device may revoke itself. Free its installation_id so the same app
+  // installation can be enrolled again later with a valid activation code.
   const result = await env.DB.prepare(
-    `UPDATE devices SET revoked_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')
+    `UPDATE devices
+     SET revoked_at=strftime('%Y-%m-%dT%H:%M:%fZ','now'),
+         installation_id=installation_id || ':revoked:' || id
      WHERE id=? AND license_id=? AND revoked_at IS NULL`
   ).bind(deviceId, device.license_id).run();
   if (!result.meta.changes) return response(request, env, { error: "device_not_found_or_already_revoked" }, 404);
