@@ -39,6 +39,11 @@ final class PlusAccess {
         if (context == null) return;
         final Context app = context.getApplicationContext();
         if (!CloudSyncManager.isActivated(app)) {
+            app.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+                    .putBoolean(KEY_ACTIVE, false)
+                    .putString(KEY_FEATURES, "[]")
+                    .putLong(KEY_CHECKED, System.currentTimeMillis())
+                    .apply();
             postCompletion(onComplete);
             return;
         }
