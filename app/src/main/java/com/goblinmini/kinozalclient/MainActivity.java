@@ -7809,7 +7809,7 @@ public class MainActivity extends Activity {
                     // intact; the fresh HTML is saved for the next visit instead.
                 });
             });
-        });
+        };
 
         if (sessionWebView != null) {
             // A single authenticated WebView request avoids the known HTTP 403
