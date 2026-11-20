@@ -6937,7 +6937,7 @@ public class MainActivity extends Activity {
                         + "if(!logout&&/личный кабинет|мой профиль|редактировать профиль/.test(body))logout=true;"
                         + "return logout?'AUTHENTICATED':'NO_AUTH_MARKER';})()",
                         verification -> {
-                    String result = verification == null ? "" : verification.replace("\\"", "");
+                    String result = verification == null ? "" : verification.replace("\"", "");
                     if (result.contains("AUTHENTICATED")) {
                         loginVerified[0] = true;
                         loginVerificationDetail[0] = "Аккаунт подтверждён сайтом Kinozal.";
@@ -7102,7 +7102,7 @@ public class MainActivity extends Activity {
                     + "var body=(document.body&&document.body.innerText||'').toLowerCase();"
                     + "if(!logout&&/личный кабинет|мой профиль|редактировать профиль/.test(body))logout=true;"
                     + "return logout?'AUTHENTICATED':'NO_AUTH_MARKER';})()", result -> {
-                String verification = result == null ? "" : result.replace("\\"", "");
+                String verification = result == null ? "" : result.replace("\"", "");
                 if (!verification.contains("AUTHENTICATED")) {
                     loginVerified[0] = false;
                     done.setEnabled(true);
