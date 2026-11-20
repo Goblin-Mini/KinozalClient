@@ -3921,8 +3921,9 @@ public class MainActivity extends Activity {
         };
 
         dialog.setOnDismissListener(ignored -> {
-            if (plusSettingsRefreshPending && settingsDialog != null && settingsDialog.isShowing()) {
-                plusSettingsRefreshPending = false;
+            if (!plusSettingsRefreshPending) return;
+            plusSettingsRefreshPending = false;
+            if (settingsDialog != null && settingsDialog.isShowing()) {
                 settingsDialog.dismiss();
                 settingsDialog = null;
                 showSettings();
