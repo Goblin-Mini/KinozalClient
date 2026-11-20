@@ -20,6 +20,14 @@ public final class CloudSyncScheduler {
 
     private static final String ONE_TIME_WORK_NAME = "kinozal_plus_cloud_sync_debounced";
 
+    /** Removes pending and periodic sync after this installation is revoked. */
+    public static void cancelScheduled(Context context) {
+        WorkManager work = WorkManager.getInstance(context.getApplicationContext());
+        work.cancelUniqueWork(ONE_TIME_WORK_NAME);
+        work.cancelUniqueWork(PERIODIC_WORK_NAME);
+    }
+
+
     /**
      * Debounces automatic sync requests so a burst of local edits results in one
      * network request after the app has been quiet for 30 seconds.
