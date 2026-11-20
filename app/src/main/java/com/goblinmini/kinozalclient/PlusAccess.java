@@ -35,9 +35,13 @@ final class PlusAccess {
         return false;
     }
 
-    static void refresh(Context context) {
-        if (context == null || !CloudSyncManager.isActivated(context)) return;
+    static void refresh(Context context, Runnable onComplete) {
+        if (context == null) return;
         final Context app = context.getApplicationContext();
+        if (!CloudSyncManager.isActivated(app)) {
+            postCompletion(onComplete);
+            return;
+        }
         EXECUTOR.execute(() -> {
             try {
                 JSONObject info = CloudSyncManager.licenseInfo(app);
@@ -48,23 +52,23 @@ final class PlusAccess {
                         || "owner".equalsIgnoreCase(plan));
                 JSONArray features = new JSONArray();
                 if (active) {
-                    // The license endpoint may be deployed without the feature list.
-                    // An active lifetime/owner license grants the app's complete Plus feature set.
+                    // plus_lifetime and owner plans grant the complete Plus package.
+                    // Keep the client feature list complete even if an older Worker
+                    // responds with a partial list of feature keys.
                     String[] knownFeatures = {
                             "advanced_search", "favorites", "viewing_history", "backup",
                             "screenshots", "comments", "voice_search", "proxy",
                             "android_tv_channels", "similar", "torrent_download"
                     };
+                    for (String feature : knownFeatures) features.put(feature);
                     JSONArray serverFeatures = info.optJSONArray("features");
-                    if (serverFeatures != null && serverFeatures.length() > 0) {
+                    if (serverFeatures != null) {
                         for (int i = 0; i < serverFeatures.length(); i++) {
                             String feature = serverFeatures.optString(i, "");
-                            if (!feature.isEmpty() && !features.toString().contains("\"" + feature + "\"")) {
+                            if (!feature.isEmpty() && !features.toString().contains("\\"" + feature + "\\"")) {
                                 features.put(feature);
                             }
                         }
-                    } else {
-                        for (String feature : knownFeatures) features.put(feature);
                     }
                 }
                 app.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
@@ -74,7 +78,13 @@ final class PlusAccess {
                         .apply();
             } catch (Exception ignored) {
                 // Keep the last server-verified entitlement only within the grace window.
+            } finally {
+                postCompletion(onComplete);
             }
         });
     }
-}
+
+    private static void postCompletion(Runnable callback) {
+        if (callback == null) return;
+        new android.os.Handler(android.os.Looper.getMainLooper()).post(callback);
+    }}
