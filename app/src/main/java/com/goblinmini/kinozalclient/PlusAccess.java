@@ -61,15 +61,7 @@ final class PlusAccess {
                             "android_tv_channels", "similar", "torrent_download"
                     };
                     for (String feature : knownFeatures) features.put(feature);
-                    JSONArray serverFeatures = info.optJSONArray("features");
-                    if (serverFeatures != null) {
-                        for (int i = 0; i < serverFeatures.length(); i++) {
-                            String feature = serverFeatures.optString(i, "");
-                            if (!feature.isEmpty() && !features.toString().contains("\\"" + feature + "\\"")) {
-                                features.put(feature);
-                            }
-                        }
-                    }
+
                 }
                 app.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
                         .putBoolean(KEY_ACTIVE, active)
@@ -87,4 +79,5 @@ final class PlusAccess {
     private static void postCompletion(Runnable callback) {
         if (callback == null) return;
         new android.os.Handler(android.os.Looper.getMainLooper()).post(callback);
-    }}
+    }
+}
