@@ -64,7 +64,6 @@ final class PlusAccess {
                             "advanced_search", "favorites", "viewing_history", "backup",
                             "screenshots", "comments", "voice_search", "proxy",
                             "android_tv_channels", "similar", "torrent_download",
-                            "mirror_selection", "collections"
                     };
                     for (String feature : knownFeatures) features.put(feature);
 
