@@ -74,8 +74,20 @@ final class PlusAccess {
                         .putString(KEY_FEATURES, features.toString())
                         .putLong(KEY_CHECKED, System.currentTimeMillis())
                         .apply();
-            } catch (Exception ignored) {
-                // Keep the last server-verified entitlement only within the grace window.
+            } catch (Exception error) {
+                // A definitive server response that the device license no longer exists
+                // must revoke cached Plus immediately. Offline grace is only for transport
+                // failures (timeouts, DNS, connection errors), never for HTTP 401/404.
+                String message = error.getMessage();
+                if (message != null && (message.contains("license_not_found")
+                        || message.contains("unauthorized")
+                        || message.contains("invalid_or_expired_code"))) {
+                    app.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+                            .putBoolean(KEY_ACTIVE, false)
+                            .putString(KEY_FEATURES, "[]")
+                            .putLong(KEY_CHECKED, System.currentTimeMillis())
+                            .apply();
+                }
             } finally {
                 postCompletion(onComplete);
             }
