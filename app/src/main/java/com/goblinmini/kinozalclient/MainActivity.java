@@ -143,6 +143,7 @@ public class MainActivity extends Activity {
     private LinearLayout searchSortBar;
     private Button sortDateButton, sortSizeButton, sortSeedsButton;
     private AlertDialog settingsDialog;
+    private boolean plusSettingsRefreshPending = false;
     private View plusVoiceSearchButton;
     private Button plusAdvancedSearchButton;
     private static final String FAVORITES_KEY = "local_favorites";
@@ -3915,6 +3916,14 @@ public class MainActivity extends Activity {
             });
         };
 
+        dialog.setOnDismissListener(ignored -> {
+            if (plusSettingsRefreshPending && settingsDialog != null && settingsDialog.isShowing()) {
+                plusSettingsRefreshPending = false;
+                settingsDialog.dismiss();
+                settingsDialog = null;
+                showSettings();
+            }
+        });
         paste.setOnClickListener(v -> {
             android.content.ClipboardManager clipboard =
                     (android.content.ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
@@ -3938,7 +3947,10 @@ public class MainActivity extends Activity {
                 try {
                     CloudSyncManager.activate(this, serial);
                     runOnUiThread(() -> {
-                        PlusAccess.refresh(MainActivity.this, MainActivity.this::onPlusEntitlementsUpdated);
+                        PlusAccess.refresh(MainActivity.this, () -> {
+                            plusSettingsRefreshPending = true;
+                            onPlusEntitlementsUpdated();
+                        });
                         activate.setEnabled(true);
                         activationState.setText("Статус: активирована");
                         showMessage("Устройство активировано");
@@ -5211,6 +5223,11 @@ public class MainActivity extends Activity {
             }
             addMenu("★", "Избранное", this::showFavorites, true);
             addMenu("◷", "Недавно смотрели", this::showRecentlyViewed, true);
+        }
+        if (!plusSettingsRefreshPending && settingsDialog != null && settingsDialog.isShowing()) {
+            settingsDialog.dismiss();
+            settingsDialog = null;
+            showSettings();
         }
     }
 
