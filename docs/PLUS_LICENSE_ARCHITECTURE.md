@@ -13,14 +13,21 @@
 
 | Feature key | Free | Plus |
 |---|---:|---:|
-| proxy settings/use | no | yes |
-| advanced search | no | yes |
-| mirror selection | no | yes |
-| favorites | no | yes |
-| viewing history | no | yes |
-| collections | no | yes |
+| `proxy` — proxy settings/use | no | yes |
+| `advanced_search` — advanced search | no | yes |
+| `mirror_selection` — mirror selection | no | yes |
+| `favorites` — favorites | no | yes |
+| `viewing_history` — viewing history | no | yes |
+| `collections` — curated collections | no | yes |
+| `backup` — backup/restore | no | yes |
+| `voice_search` — voice search | no | yes |
+| `android_tv_channels` — Android TV channels | no | yes |
+| `screenshots` — release screenshots tab | no | yes |
+| `comments` — release comments tab | no | yes |
+| `similar` — similar releases tab | no | yes |
+| `torrent_download` — torrent-file download | no | yes |
 
-Basic catalog browsing, torrent details and ordinary playback remain free.
+Basic catalog browsing, standard categories, torrent descriptions and ordinary playback remain free.
 
 ## Components
 
@@ -70,7 +77,7 @@ Set `OWNER_ACCOUNT_ID` as a Cloudflare Worker secret after the owner account has
 1. Confirm the merchant can legally accept payments for digital access and that Robokassa enables the required payment methods for the seller's country.
 2. Deploy D1 schema and Worker in test mode.
 3. Test payment creation, valid/invalid callbacks, replayed callbacks, wrong amount, refunds and activation-code replay.
-4. Add Android license client and Plus screen; gate only the six premium features.
+4. Keep the Android client, both Worker entrypoints and this feature table in sync; gate every premium entry point with the matching feature key.
 5. Add owner provisioning and device management.
 6. Release a test APK; do not switch on real payments until a live test payment and receipt/tax requirements are verified.
 
