@@ -18,8 +18,7 @@ const FEATURES = [
   "android_tv_channels",
   "similar",
   "torrent_download",
-  "mirror_selection",
-  "collections",
+
 ];
 
 function json(data: unknown, status = 200): Response {
