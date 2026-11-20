@@ -4223,7 +4223,7 @@ public class MainActivity extends Activity {
         params.topMargin = dp(5);
         parent.addView(button, params);
         button.setOnClickListener(v -> action.run());
-        return b;
+        return button;
     }
 
     private void styleSettingsEdit(EditText field) {
