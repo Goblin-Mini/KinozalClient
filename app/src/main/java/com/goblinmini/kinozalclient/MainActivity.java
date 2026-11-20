@@ -3953,7 +3953,7 @@ public class MainActivity extends Activity {
                     CloudSyncManager.activate(this, serial);
                     runOnUiThread(() -> {
                         PlusAccess.refresh(MainActivity.this, () -> {
-                            plusSettingsRefreshPending = true;
+                            plusSettingsRefreshPending = dialog.isShowing();
                             onPlusEntitlementsUpdated();
                         });
                         activate.setEnabled(true);
