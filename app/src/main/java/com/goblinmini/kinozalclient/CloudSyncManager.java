@@ -76,6 +76,17 @@ public final class CloudSyncManager {
         request(base + "/v1/devices/" + deviceId, "DELETE", token, null);
     }
 
+    /** Revokes this installation and immediately drops its local cloud/Plus credentials. */
+    public static void deactivateCurrentDevice(Context context, String deviceId) throws Exception {
+        removeDevice(context, deviceId);
+        prefs(context).edit()
+                .remove("cloud_sync_token")
+                .putString("cloud_sync_status", "Устройство не активировано")
+                .remove("cloud_sync_last_success")
+                .apply();
+        CloudSyncScheduler.cancelScheduled(context);
+    }
+
     public static boolean isActivated(Context context) {
         return !prefs(context).getString("cloud_sync_token", "").isEmpty();
     }
