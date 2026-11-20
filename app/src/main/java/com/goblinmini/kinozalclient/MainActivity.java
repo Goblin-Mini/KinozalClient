@@ -8087,13 +8087,8 @@ public class MainActivity extends Activity {
         root.setOrientation(LinearLayout.VERTICAL);
         root.setPadding(dp(12), dp(8), dp(12), dp(10));
         root.setBackgroundColor(BG);
-        // Start slightly smaller and lower; animate the native card into place.
-        root.setAlpha(0f);
-        root.setScaleX(0.94f);
-        root.setScaleY(0.94f);
-        root.setTranslationY(dp(32));
-        root.setPivotX(getResources().getDisplayMetrics().widthPixels / 2f);
-        root.setPivotY(getResources().getDisplayMetrics().heightPixels / 2f);
+        // Keep the card immediately visible; defer the heavier details layout
+        // until after the dialog gets its first frame on screen.
 
         TextView title = text(data.title, 20, GOLD, true);
         title.setMaxLines(2);
@@ -8492,7 +8487,7 @@ public class MainActivity extends Activity {
         similarTab.setOnClickListener(v -> { if (!requirePlusFeature("similar")) return; active[0] = 4; render[0].run(); });
         commentsTab.setOnClickListener(v -> { if (!requirePlusFeature("comments")) return; active[0] = 5; render[0].run(); });
         jackettTab.setOnClickListener(v -> searchJackett(torrent.title, data.poster));
-        render[0].run();
+        // Initial details rendering is deferred until the dialog is attached.
 
         // Add a release to "Недавно смотрели" only after an explicit user action.
         watch.setOnClickListener(v -> {
@@ -8546,19 +8541,14 @@ public class MainActivity extends Activity {
             window.setAttributes(windowParams);
             window.setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT);
         }
-        // Wait until the dialog has been attached and had a chance to draw
-        // its initial state; otherwise the first animation frame can be skipped.
-        root.post(() -> root.postOnAnimation(() -> {
-            if (root.getParent() == null) return;
-            root.animate()
-                    .alpha(1f)
-                    .scaleX(1f)
-                    .scaleY(1f)
-                    .translationY(0f)
-                    .setDuration(320L)
-                    .setInterpolator(new android.view.animation.DecelerateInterpolator())
-                    .start();
-        }));
+        // Let Android display the dialog shell first, then populate the
+        // details column. This avoids building all detail rows before the
+        // first visible frame and removes the artificial 320 ms entrance delay.
+        root.postOnAnimation(() -> {
+            if (root.getParent() == null || dialog.isShowing()) {
+                if (root.getParent() != null) render[0].run();
+            }
+        });
         if (data.poster != null && !data.poster.isEmpty()) loadImageIntoView(data.poster, poster);
         watch.requestFocus();
         prefetchInfoHash(data);
