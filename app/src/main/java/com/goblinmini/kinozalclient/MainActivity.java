@@ -7710,13 +7710,27 @@ public class MainActivity extends Activity {
                 }
             }
             if (cachedHtml != null) {
-                try {
-                    Document cachedDoc = Jsoup.parse(cachedHtml, href);
-                    cachedDetails = parseTorrentDetails(cachedDoc, t);
-                    putCachedDetailData(cacheKey, cachedDetails);
-                } catch (Exception ignored) {
-                    cachedHtml = null;
-                }
+                final String htmlFromCache = cachedHtml;
+                // Disk/memory cache entries can be large. Parse them away from
+                // the UI thread just like fresh detail pages.
+                executeSafely(io, () -> {
+                    try {
+                        Document cachedDoc = Jsoup.parse(htmlFromCache, href);
+                        TorrentDetails parsed = parseTorrentDetails(cachedDoc, t);
+                        boolean valid = !parsed.title.trim().isEmpty()
+                                && (cachedDoc.selectFirst("#main .content") != null
+                                || cachedDoc.selectFirst("a[href*=download.php]") != null);
+                        if (!valid) return;
+                        putCachedDetailData(cacheKey, parsed);
+                        runOnUiThread(() -> {
+                            if (href.equals(activeTorrentDetailsHref)
+                                    && activeTorrentDetailsDialog == null) {
+                                t.poster = parsed.poster;
+                                showTorrentDetails(t, parsed);
+                            }
+                        });
+                    } catch (Exception ignored) { }
+                });
             }
         }
 
