@@ -5227,23 +5227,7 @@ public class MainActivity extends Activity {
 
     private void onPlusEntitlementsUpdated() {
         if (isFinishing() || isDestroyed()) return;
-        boolean hasVoice = PlusAccess.hasFeature(this, "voice_search");
-        boolean hasAdvancedSearch = PlusAccess.hasFeature(this, "advanced_search");
-        if (plusVoiceSearchButton != null) {
-            plusVoiceSearchButton.setVisibility(hasVoice ? View.VISIBLE : View.GONE);
-        }
-        if (plusAdvancedSearchButton != null) {
-            plusAdvancedSearchButton.setVisibility(hasAdvancedSearch ? View.VISIBLE : View.GONE);
-        }
-        if (menuItems != null) {
-            for (int i = menuItems.getChildCount() - 1; i >= 0; i--) {
-                View child = menuItems.getChildAt(i);
-                if ("plus_menu_item".equals(child.getTag())) menuItems.removeViewAt(i);
-            }
-            addMenu("★", "Избранное", this::showFavorites, true);
-            addMenu("◷", "Недавно смотрели", this::showRecentlyViewed, true);
-            addMenu("▤", "Подборки", this::loadCollections);
-        }
+        // Plus controls remain visible; their actions are checked at entry points.
         // Do not destroy and recreate an open torrent dialog from an asynchronous
         // entitlement callback. The card reads Plus gates when it is next opened;
         // rebuilding a live dialog can race its window attachment, DPAD focus,
