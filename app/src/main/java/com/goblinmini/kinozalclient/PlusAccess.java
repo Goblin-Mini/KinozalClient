@@ -15,7 +15,8 @@ final class PlusAccess {
     private static final String KEY_ACTIVE = "plus_entitlement_active";
     private static final String KEY_FEATURES = "plus_entitlement_features";
     private static final String KEY_CHECKED = "plus_entitlement_checked_at";
-    private static final long OFFLINE_GRACE_MS = 48L * 60L * 60L * 1000L;
+    // A revoked device should lose cached Plus access promptly when offline.
+    private static final long OFFLINE_GRACE_MS = 6L * 60L * 60L * 1000L;
     private static final ExecutorService EXECUTOR = Executors.newSingleThreadExecutor();
 
     private PlusAccess() { }
@@ -55,18 +56,29 @@ final class PlusAccess {
                 boolean active = "active".equalsIgnoreCase(status)
                         && ("plus_lifetime".equalsIgnoreCase(plan)
                         || "owner".equalsIgnoreCase(plan));
+                // The server is the authority for the entitlement list.
+                // Never manufacture Plus permissions locally from the plan name.
                 JSONArray features = new JSONArray();
-                if (active) {
-                    // plus_lifetime and owner plans grant the complete Plus package.
-                    // Keep the client feature list complete even if an older Worker
-                    // responds with a partial list of feature keys.
-                    String[] knownFeatures = {
+                JSONArray serverFeatures = info.optJSONArray("features");
+                if (active && serverFeatures != null) {
+                    String[] supportedFeatures = {
                             "advanced_search", "favorites", "viewing_history", "backup",
                             "screenshots", "comments", "voice_search", "proxy",
                             "android_tv_channels", "similar", "torrent_download",
                     };
-                    for (String feature : knownFeatures) features.put(feature);
-
+                    java.util.HashSet<String> supported =
+                            new java.util.HashSet<>(java.util.Arrays.asList(supportedFeatures));
+                    for (int i = 0; i < serverFeatures.length(); i++) {
+                        String feature = serverFeatures.optString(i, "");
+                        if (supported.contains(feature) && !features.toString().contains(
+                                "\\"" + feature + "\\"")) {
+                            features.put(feature);
+                        }
+                    }
+                    // A valid Plus response with no recognized permissions is not an entitlement.
+                    active = features.length() > 0;
+                } else {
+                    active = false;
                 }
                 app.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
                         .putBoolean(KEY_ACTIVE, active)
