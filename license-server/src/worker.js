@@ -219,6 +219,40 @@ async function authenticatedDevice(request, env) {
   ).bind(tokenHash).first();
 }
 
+async function getDevices(request, env) {
+  const device = await authenticatedDevice(request, env);
+  if (!device) return response(request, env, { error: "license_required" }, 401);
+  const rows = await env.DB.prepare(
+    `SELECT id, device_label, created_at, last_seen_at
+     FROM devices
+     WHERE license_id=? AND revoked_at IS NULL
+     ORDER BY created_at DESC`
+  ).bind(device.license_id).all();
+  const devices = (rows.results || []).map((row) => ({
+    ...row,
+    current: row.id === device.device_id,
+  }));
+  return response(request, env, { devices });
+}
+
+async function revokeDevice(request, env, deviceId) {
+  const device = await authenticatedDevice(request, env);
+  if (!device) return response(request, env, { error: "license_required" }, 401);
+  // Only devices belonging to the authenticated license can be revoked.
+  // This intentionally permits self-revocation as well as removing another
+  // installation from the same license.
+  const result = await env.DB.prepare(
+    `UPDATE devices
+     SET revoked_at=strftime('%Y-%m-%dT%H:%M:%fZ','now'),
+         installation_id=installation_id || ':revoked:' || id
+     WHERE id=? AND license_id=? AND revoked_at IS NULL`
+  ).bind(deviceId, device.license_id).run();
+  if (!result.meta.changes) {
+    return response(request, env, { error: "device_not_found_or_already_revoked" }, 404);
+  }
+  return response(request, env, { success: true, device_id: deviceId });
+}
+
 async function getSyncItems(request, env) {
   const device = await authenticatedDevice(request, env);
   if (!device) return response(request, env, { error: "license_required" }, 401);
@@ -359,6 +393,13 @@ export default {
       }
       if (request.method === "GET" && url.pathname === "/v1/license") {
         return await getLicense(request, env);
+      }
+      if (request.method === "GET" && url.pathname === "/v1/devices") {
+        return await getDevices(request, env);
+      }
+      const ownDeviceMatch = url.pathname.match(/^\\/v1\\/devices\\/([a-f0-9]{32})$/);
+      if (request.method === "DELETE" && ownDeviceMatch) {
+        return await revokeDevice(request, env, ownDeviceMatch[1]);
       }
       if (request.method === "POST" && url.pathname === "/admin/licenses") {
         return await adminCreateLicense(request, env);
