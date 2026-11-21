@@ -118,7 +118,7 @@ public final class CloudSyncManager {
         if (secureMigrationDone) return;
         SharedPreferences p = prefs(context);
         if (!p.getBoolean("secure_credentials_migrated_v1", false)) {
-            String token = p.getString("cloud_sync_token", "");
+            String token = PlusSecureStore.getString(context, "cloud_sync_token", "");
             String installId = p.getString("cloud_sync_installation_id", "");
             if (!token.isEmpty()) PlusSecureStore.putString(context, "cloud_sync_token", token);
             if (!installId.isEmpty()) PlusSecureStore.putString(context, "cloud_sync_installation_id", installId);
