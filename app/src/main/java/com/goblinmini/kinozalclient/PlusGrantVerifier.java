@@ -21,7 +21,7 @@ final class PlusGrantVerifier {
 
     private PlusGrantVerifier() { }
 
-    static JSONObject verify(Context context, String compactGrant) throws Exception {
+    static JSONObject verify(Context context, String compactGrant, String expectedDeviceId) throws Exception {
         try {
         if (context == null || compactGrant == null) throw new SecurityException("missing_plus_grant");
         String[] parts = compactGrant.split("\\.", -1);
@@ -54,7 +54,13 @@ final class PlusGrantVerifier {
         if (!"plus_lifetime".equalsIgnoreCase(plan) && !"owner".equalsIgnoreCase(plan)) {
             throw new SecurityException("invalid_plus_plan");
         }
-        if (claims.optString("sub", "").isEmpty()) throw new SecurityException("missing_device_binding");
+        String subjectDeviceId = claims.optString("sub", "");
+        if (expectedDeviceId == null || expectedDeviceId.isEmpty() ||
+                !constantTimeEquals(subjectDeviceId, expectedDeviceId)) {
+            throw new SecurityException("plus_device_id_mismatch");
+        }
+        String grantId = claims.optString("jti", "");
+        if (!grantId.matches("[a-f0-9]{32}")) throw new SecurityException("missing_plus_grant_id");
 
         long issuedAt = claims.optLong("iat", 0L);
         long expiresAt = claims.optLong("exp", 0L);
