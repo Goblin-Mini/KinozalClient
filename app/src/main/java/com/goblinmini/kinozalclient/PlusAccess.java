@@ -1,7 +1,6 @@
 package com.goblinmini.kinozalclient;
 
 import android.content.Context;
-import android.content.SharedPreferences;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -24,15 +23,15 @@ final class PlusAccess {
     static boolean hasFeature(Context context, String feature) {
         if (context == null || feature == null || feature.isEmpty()) return false;
         if (!NativeAppGuard.isTrusted(context)) return false;
-        SharedPreferences prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
-        if (!prefs.getBoolean(KEY_ACTIVE, false)) return false;
-        long checkedAt = prefs.getLong(KEY_CHECKED, 0L);
+        try { CloudSyncManager.ensureSecureStorage(context); } catch (Exception error) { return false; }
+        if (!PlusSecureStore.getBoolean(context, KEY_ACTIVE, false)) return false;
+        long checkedAt = PlusSecureStore.getLong(context, KEY_CHECKED, 0L);
         long now = System.currentTimeMillis();
-        long expiresAt = prefs.getLong(KEY_EXPIRES, 0L);
+        long expiresAt = PlusSecureStore.getLong(context, KEY_EXPIRES, 0L);
         if (checkedAt <= 0L || now < checkedAt || now - checkedAt > OFFLINE_GRACE_MS
                 || expiresAt <= now) return false;
         try {
-            JSONArray features = new JSONArray(prefs.getString(KEY_FEATURES, "[]"));
+            JSONArray features = new JSONArray(PlusSecureStore.getString(context, KEY_FEATURES, "[]"));
             for (int i = 0; i < features.length(); i++) {
                 if (feature.equals(features.optString(i))) return true;
             }
@@ -64,12 +63,10 @@ final class PlusAccess {
                 if (verifiedFeatures == null || expiresAt <= System.currentTimeMillis()) {
                     throw new SecurityException("invalid_plus_expiry");
                 }
-                app.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
-                        .putBoolean(KEY_ACTIVE, true)
-                        .putString(KEY_FEATURES, verifiedFeatures.toString())
-                        .putLong(KEY_CHECKED, System.currentTimeMillis())
-                        .putLong(KEY_EXPIRES, expiresAt)
-                        .apply();
+                PlusSecureStore.putBoolean(app, KEY_ACTIVE, true);
+                PlusSecureStore.putString(app, KEY_FEATURES, verifiedFeatures.toString());
+                PlusSecureStore.putLong(app, KEY_CHECKED, System.currentTimeMillis());
+                PlusSecureStore.putLong(app, KEY_EXPIRES, expiresAt);
             } catch (SecurityException invalidGrant) {
                 // A bad signature, wrong device binding, wrong audience or expired
                 // grant is a definitive failure, never an offline-grace condition.
@@ -91,13 +88,13 @@ final class PlusAccess {
         });
     }
 
-    private static void clearEntitlement(Context context) {
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
-                .putBoolean(KEY_ACTIVE, false)
-                .putString(KEY_FEATURES, "[]")
-                .putLong(KEY_CHECKED, System.currentTimeMillis())
-                .putLong(KEY_EXPIRES, 0L)
-                .apply();
+    static void clearEntitlement(Context context) {
+        try {
+            PlusSecureStore.putBoolean(context, KEY_ACTIVE, false);
+            PlusSecureStore.putString(context, KEY_FEATURES, "[]");
+            PlusSecureStore.putLong(context, KEY_CHECKED, System.currentTimeMillis());
+            PlusSecureStore.putLong(context, KEY_EXPIRES, 0L);
+        } catch (Exception ignored) { PlusSecureStore.clear(context); }
     }
 
     private static void postCompletion(Runnable callback) {

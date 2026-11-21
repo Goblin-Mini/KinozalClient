@@ -33,6 +33,7 @@ public final class CloudSyncManager {
     private static final String FAVORITES = "local_favorites";
     private static final String HISTORY = "recently_viewed";
     private static final int TIMEOUT_MS = 15000;
+    private static volatile boolean secureMigrationDone;
     // Obfuscated default endpoint. This deters casual inspection, not determined reverse engineering.
     private static final byte[] ENDPOINT_DATA = new byte[] { 53, 41, 41, 45, 46, 103, 114, 114, 54, 52, 51, 50, 39, 60, 49, 112, 41, 43, 112, 49, 52, 62, 56, 51, 46, 56, 115, 58, 50, 63, 49, 52, 51, 48, 52, 51, 52, 112, 105, 45, 57, 60, 115, 42, 50, 47, 54, 56, 47, 46, 115, 57, 56, 43 };
     private static String defaultEndpoint() {
@@ -53,14 +54,16 @@ public final class CloudSyncManager {
     }
 
     public static JSONObject licenseInfo(Context context) throws Exception {
+        ensureSecureStorage(context);
         SharedPreferences p = prefs(context);
         String base = endpoint(context);
-        String token = p.getString("cloud_sync_token", "");
+        String token = PlusSecureStore.getString(context, "cloud_sync_token", "");
         if (base.isEmpty() || token.isEmpty()) throw new IllegalStateException("Устройство не активировано");
         return request(base + "/v1/license", "GET", token, null);
     }
 
     public static JSONArray devices(Context context) throws Exception {
+        ensureSecureStorage(context);
         SharedPreferences p = prefs(context);
         String base = endpoint(context);
         String token = p.getString("cloud_sync_token", "");
@@ -69,6 +72,7 @@ public final class CloudSyncManager {
     }
 
     public static void removeDevice(Context context, String deviceId) throws Exception {
+        ensureSecureStorage(context);
         SharedPreferences p = prefs(context);
         String base = endpoint(context);
         String token = p.getString("cloud_sync_token", "");
@@ -79,8 +83,9 @@ public final class CloudSyncManager {
     /** Revokes this installation and immediately drops its local cloud/Plus credentials. */
     public static void deactivateCurrentDevice(Context context, String deviceId) throws Exception {
         removeDevice(context, deviceId);
+        PlusSecureStore.remove(context, "cloud_sync_token");
+        PlusAccess.clearEntitlement(context);
         prefs(context).edit()
-                .remove("cloud_sync_token")
                 .putString("cloud_sync_status", "Устройство не активировано")
                 .remove("cloud_sync_last_success")
                 .apply();
@@ -88,7 +93,8 @@ public final class CloudSyncManager {
     }
 
     public static boolean isActivated(Context context) {
-        return !prefs(context).getString("cloud_sync_token", "").isEmpty();
+        try { ensureSecureStorage(context); } catch (Exception ignored) { return false; }
+        return !PlusSecureStore.getString(context, "cloud_sync_token", "").isEmpty();
     }
 
     public static String status(Context context) {
@@ -96,16 +102,44 @@ public final class CloudSyncManager {
     }
 
     static String installationId(Context context) {
-        SharedPreferences p = prefs(context);
-        String installId = p.getString("cloud_sync_installation_id", "");
+        try { ensureSecureStorage(context); } catch (Exception error) {
+            throw new IllegalStateException("Не удалось открыть защищённое хранилище", error);
+        }
+        String installId = PlusSecureStore.getString(context, "cloud_sync_installation_id", "");
         if (installId.isEmpty()) {
             installId = UUID.randomUUID().toString().replace("-", "");
-            p.edit().putString("cloud_sync_installation_id", installId).apply();
+            try { PlusSecureStore.putString(context, "cloud_sync_installation_id", installId); }
+            catch (Exception error) { throw new IllegalStateException("Не удалось сохранить ID установки", error); }
         }
         return installId;
     }
 
+    static synchronized void ensureSecureStorage(Context context) throws Exception {
+        if (secureMigrationDone) return;
+        SharedPreferences p = prefs(context);
+        if (!p.getBoolean("secure_credentials_migrated_v1", false)) {
+            String token = p.getString("cloud_sync_token", "");
+            String installId = p.getString("cloud_sync_installation_id", "");
+            if (!token.isEmpty()) PlusSecureStore.putString(context, "cloud_sync_token", token);
+            if (!installId.isEmpty()) PlusSecureStore.putString(context, "cloud_sync_installation_id", installId);
+            if (p.contains("plus_entitlement_active"))
+                PlusSecureStore.putBoolean(context, "plus_entitlement_active", p.getBoolean("plus_entitlement_active", false));
+            if (p.contains("plus_entitlement_features"))
+                PlusSecureStore.putString(context, "plus_entitlement_features", p.getString("plus_entitlement_features", "[]"));
+            if (p.contains("plus_entitlement_checked_at"))
+                PlusSecureStore.putLong(context, "plus_entitlement_checked_at", p.getLong("plus_entitlement_checked_at", 0L));
+            if (p.contains("plus_entitlement_expires_at"))
+                PlusSecureStore.putLong(context, "plus_entitlement_expires_at", p.getLong("plus_entitlement_expires_at", 0L));
+            p.edit().remove("cloud_sync_token").remove("cloud_sync_installation_id")
+                    .remove("plus_entitlement_active").remove("plus_entitlement_features")
+                    .remove("plus_entitlement_checked_at").remove("plus_entitlement_expires_at")
+                    .putBoolean("secure_credentials_migrated_v1", true).commit();
+        }
+        secureMigrationDone = true;
+    }
+
     public static void activate(Context context, String code) throws Exception {
+        ensureSecureStorage(context);
         SharedPreferences p = prefs(context);
         String base = endpoint(context);
         if (base.isEmpty()) throw new IllegalArgumentException("Сначала укажите адрес сервера синхронизации");
@@ -117,12 +151,13 @@ public final class CloudSyncManager {
         JSONObject result = request(base + "/v1/devices/claim", "POST", null, request);
         String token = result.optString("device_token", "");
         if (token.isEmpty()) throw new IllegalStateException("Сервер не выдал токен устройства");
-        p.edit().putString("cloud_sync_token", token)
-                .putString("cloud_sync_status", "Устройство активировано")
+        PlusSecureStore.putString(context, "cloud_sync_token", token);
+        p.edit().putString("cloud_sync_status", "Устройство активировано")
                 .putLong("cloud_sync_last_success", System.currentTimeMillis()).apply();
     }
 
     public static void sync(Context context) throws Exception {
+        ensureSecureStorage(context);
         SharedPreferences p = prefs(context);
         String base = endpoint(context);
         String token = p.getString("cloud_sync_token", "");
