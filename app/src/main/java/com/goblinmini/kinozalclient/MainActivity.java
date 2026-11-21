@@ -4278,8 +4278,9 @@ public class MainActivity extends Activity {
         org.json.JSONObject app = new org.json.JSONObject();
         android.content.SharedPreferences prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
         String[] keys = {FAVORITES_KEY, RECENTLY_VIEWED_KEY, SEARCH_HISTORY_KEY,
-                "mirror", "startup_source", "torrserve_url", "advanced_search_presets"};
+                "mirror", "startup_source", "torrserve_url"};
         for (String key : keys) if (prefs.contains(key)) app.put(key, prefs.getAll().get(key));
+        app.put("advanced_search_presets", loadAdvancedSearchPresets().toString());
         root.put("app", app);
         org.json.JSONObject jackett = new org.json.JSONObject();
         for (java.util.Map.Entry<String, ?> entry :
@@ -4343,12 +4344,20 @@ public class MainActivity extends Activity {
             if (app != null) {
                 android.content.SharedPreferences.Editor editor = getSharedPreferences(PREFS, MODE_PRIVATE).edit();
                 String[] keys = {FAVORITES_KEY, RECENTLY_VIEWED_KEY, SEARCH_HISTORY_KEY,
-                        "mirror", "startup_source", "torrserve_url", "advanced_search_presets"};
+                        "mirror", "startup_source", "torrserve_url"};
                 for (String key : keys) if (app.has(key)) {
                     Object value = app.get(key);
                     if (value instanceof String) editor.putString(key, (String)value);
                 }
                 editor.commit();
+                if (app.has("advanced_search_presets")) {
+                    Object savedPresets = app.get("advanced_search_presets");
+                    org.json.JSONArray importedPresets = savedPresets instanceof org.json.JSONArray
+                            ? (org.json.JSONArray) savedPresets
+                            : new org.json.JSONArray(String.valueOf(savedPresets));
+                    if (!saveAdvancedSearchPresets(importedPresets))
+                        throw new java.io.IOException("Не удалось восстановить пресеты");
+                }
                 mirror = getSharedPreferences(PREFS, MODE_PRIVATE).getString("mirror", MIRRORS[0]);
                 client.setMirror(mirror);
             }
@@ -6512,13 +6521,7 @@ public class MainActivity extends Activity {
         presetList.setPrompt("Список пресетов");
         List<String> presetLabels = new ArrayList<>();
         List<Integer> presetIndexes = new ArrayList<>();
-        final org.json.JSONArray storedPresets;
-        org.json.JSONArray loadedPresets;
-        try {
-            loadedPresets = new org.json.JSONArray(getSharedPreferences(PREFS, MODE_PRIVATE)
-                    .getString("advanced_search_presets", "[]"));
-        } catch (Exception ignored) { loadedPresets = new org.json.JSONArray(); }
-        storedPresets = loadedPresets;
+        final org.json.JSONArray storedPresets = loadAdvancedSearchPresets();
         for (int i = 0; i < storedPresets.length(); i++) {
             try {
                 presetLabels.add(storedPresets.getJSONObject(i).optString("name", "Пресет " + (i + 1)));
@@ -6615,8 +6618,8 @@ public class MainActivity extends Activity {
                             presetIndexes.add(storedPresets.length() - 1);
                             presetAdapter.add(name);
                             presetAdapter.notifyDataSetChanged();
-                            getSharedPreferences(PREFS, MODE_PRIVATE).edit()
-                                    .putString("advanced_search_presets", storedPresets.toString()).apply();
+                            if (!saveAdvancedSearchPresets(storedPresets))
+                                throw new IllegalStateException("Не удалось записать пресеты на диск");
                             presetList.setSelection(presetAdapter.getCount() - 1);
                             showMessage("Пресет «" + name + "» сохранён");
                         } catch (Exception e) { showMessage("Не удалось сохранить пресет."); }
@@ -6645,8 +6648,8 @@ public class MainActivity extends Activity {
                                 presetIndexes.add(i);
                             }
                             presetAdapter.notifyDataSetChanged();
-                            getSharedPreferences(PREFS, MODE_PRIVATE).edit()
-                                    .putString("advanced_search_presets", storedPresets.toString()).apply();
+                            if (!saveAdvancedSearchPresets(storedPresets))
+                                throw new IllegalStateException("Не удалось записать пресеты на диск");
                             presetList.setSelection(0);
                             showMessage("Пресет удалён");
                         } catch (Exception e) { showMessage("Не удалось удалить пресет."); }
@@ -6701,6 +6704,37 @@ public class MainActivity extends Activity {
             });
         });
         dialog.show();
+    }
+
+    private org.json.JSONArray loadAdvancedSearchPresets() {
+        android.content.SharedPreferences presetPrefs =
+                getSharedPreferences("kinozal_search_presets", MODE_PRIVATE);
+        String raw = presetPrefs.getString("presets", null);
+        if (raw == null) {
+            // One-time migration from the original settings file used by earlier builds.
+            raw = getSharedPreferences(PREFS, MODE_PRIVATE)
+                    .getString("advanced_search_presets", "[]");
+            try {
+                org.json.JSONArray migrated = new org.json.JSONArray(raw);
+                presetPrefs.edit().putString("presets", migrated.toString()).commit();
+                return migrated;
+            } catch (Exception e) {
+                android.util.Log.w("KinozalPresets", "Legacy presets could not be parsed", e);
+                return new org.json.JSONArray();
+            }
+        }
+        try {
+            return new org.json.JSONArray(raw);
+        } catch (Exception e) {
+            android.util.Log.e("KinozalPresets", "Saved presets could not be parsed", e);
+            return new org.json.JSONArray();
+        }
+    }
+
+    private boolean saveAdvancedSearchPresets(org.json.JSONArray presets) {
+        if (presets == null) return false;
+        return getSharedPreferences("kinozal_search_presets", MODE_PRIVATE).edit()
+                .putString("presets", presets.toString()).commit();
     }
 
     private void appendFilterParam(StringBuilder path, String key, String value) throws Exception {
