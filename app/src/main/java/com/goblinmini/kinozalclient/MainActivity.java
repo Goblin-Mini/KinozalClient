@@ -434,8 +434,11 @@ public class MainActivity extends Activity {
             firstLaunchAuthorizationPending = true;
             return;
         }
-        if (savedBrowserCookies != null) restoreBrowserSession(savedBrowserCookies);
-        else markStartupCatalogReady();
+        // Always keep the authenticated WebView transport available, even when
+        // the saved cookie snapshot is empty or expired. This lets feed/category
+        // requests use the same credential-based session recovery path instead
+        // of silently falling back to native HTTP without automatic re-login.
+        restoreBrowserSession(savedBrowserCookies == null ? "" : savedBrowserCookies);
     }
 
     private void applyWebViewProxy(boolean enabled, Runnable callback) {
@@ -3851,8 +3854,16 @@ public class MainActivity extends Activity {
         syncParams.topMargin = dp(8);
         panel.addView(sync, syncParams);
 
+        // The device list can grow beyond the visible dialog height. Keep the
+        // entire activation flow scrollable so DPAD users can reach Sync.
+        ScrollView activationScroll = new ScrollView(this);
+        activationScroll.setFillViewport(false);
+        activationScroll.setClipToPadding(false);
+        activationScroll.setVerticalScrollBarEnabled(true);
+        activationScroll.addView(panel, new ScrollView.LayoutParams(-1, -2));
+
         AlertDialog dialog = new AlertDialog.Builder(this).setTitle("Активация и синхронизация")
-                .setView(panel).setNegativeButton("Закрыть", null).create();
+                .setView(activationScroll).setNegativeButton("Закрыть", null).create();
 
         final Runnable[] refreshDevices = new Runnable[1];
         refreshDevices[0] = () -> {
@@ -4004,6 +4015,15 @@ public class MainActivity extends Activity {
                 }
             });
         });
+        sync.setFocusable(true);
+        sync.setFocusableInTouchMode(false);
+        sync.setOnFocusChangeListener((view, focused) -> {
+            if (focused) activationScroll.post(() -> {
+                android.graphics.Rect visible = new android.graphics.Rect();
+                sync.getDrawingRect(visible);
+                activationScroll.requestChildRectangleOnScreen(sync, visible, true);
+            });
+        });
         sync.setOnClickListener(v -> {
             if (!CloudSyncManager.isActivated(this)) {
                 showMessage("Сначала активируйте устройство");
@@ -4014,6 +4034,10 @@ public class MainActivity extends Activity {
             executeSafely(io, () -> {
                 try {
                     CloudSyncManager.sync(this);
+                    // Cloud sync can add or remove local items from another device.
+                    // Refresh launcher channels from the just-merged local snapshot.
+                    TvHomeChannels.refreshFavorites(MainActivity.this);
+                    TvHomeChannels.refreshContinue(MainActivity.this);
                     runOnUiThread(() -> {
                         sync.setEnabled(true);
                         syncState.setText("Статус: синхронизировано");
@@ -6528,8 +6552,44 @@ public class MainActivity extends Activity {
             } catch (Exception ignored) { }
         }
         presetLabels.add(0, "Список пресетов");
-        ArrayAdapter<String> presetAdapter = new ArrayAdapter<>(this,
-                android.R.layout.simple_spinner_item, presetLabels);
+        ArrayAdapter<String> presetAdapter = new ArrayAdapter<String>(this,
+                android.R.layout.simple_spinner_item, presetLabels) {
+            private void stylePresetRow(View row) {
+                if (!(row instanceof TextView)) return;
+                TextView text = (TextView) row;
+                int[][] states = new int[][] {
+                        new int[] { android.R.attr.state_focused },
+                        new int[] { android.R.attr.state_pressed },
+                        new int[] { android.R.attr.state_activated },
+                        new int[] {}
+                };
+                int[] colors = new int[] { GOLD, GOLD, GOLD, Color.WHITE };
+                text.setTextColor(new android.content.res.ColorStateList(states, colors));
+                android.graphics.drawable.StateListDrawable background =
+                        new android.graphics.drawable.StateListDrawable();
+                background.addState(new int[] { android.R.attr.state_focused },
+                        shape(Color.rgb(65, 72, 73), GOLD));
+                background.addState(new int[] { android.R.attr.state_pressed },
+                        shape(Color.rgb(65, 72, 73), GOLD));
+                background.addState(new int[] { android.R.attr.state_activated },
+                        shape(Color.rgb(57, 68, 70), GOLD));
+                background.addState(new int[] {}, shape(PANEL, 0));
+                text.setBackground(background);
+                text.setPadding(dp(12), dp(8), dp(12), dp(8));
+                text.setMinHeight(dp(44));
+                text.setFocusable(true);
+            }
+            @Override public View getView(int position, View convertView, ViewGroup parent) {
+                View row = super.getView(position, convertView, parent);
+                stylePresetRow(row);
+                return row;
+            }
+            @Override public View getDropDownView(int position, View convertView, ViewGroup parent) {
+                View row = super.getDropDownView(position, convertView, parent);
+                stylePresetRow(row);
+                return row;
+            }
+        };
         presetAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
         presetList.setAdapter(presetAdapter);
         presetList.setBackground(shape(PANEL, TEAL));
