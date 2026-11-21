@@ -6578,7 +6578,18 @@ public class MainActivity extends Activity {
                     rowBackground.addState(new int[] {}, shape(PANEL, 0));
                     text.setBackground(rowBackground);
                     text.setActivated(selected);
-                    text.setFocusable(false);
+                    // Keep dropdown rows in the DPAD focus chain. On Android TV,
+                    // non-focusable custom rows can leave the popup stuck on the
+                    // initially selected item even though the popup is visible.
+                    text.setFocusable(true);
+                    text.setFocusableInTouchMode(false);
+                    text.setClickable(false);
+                    text.setOnFocusChangeListener((view, focused) -> {
+                        view.setSelected(focused);
+                        view.setBackground(shape(focused
+                                ? Color.rgb(57, 68, 70) : PANEL, focused ? GOLD : 0));
+                        ((TextView) view).setTextColor(focused ? GOLD : Color.WHITE);
+                    });
                 } else {
                     text.setBackgroundColor(Color.TRANSPARENT);
                 }
