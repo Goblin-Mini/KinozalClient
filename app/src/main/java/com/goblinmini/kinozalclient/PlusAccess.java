@@ -26,7 +26,8 @@ final class PlusAccess {
         SharedPreferences prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
         if (!prefs.getBoolean(KEY_ACTIVE, false)) return false;
         long checkedAt = prefs.getLong(KEY_CHECKED, 0L);
-        if (checkedAt <= 0L || System.currentTimeMillis() - checkedAt > OFFLINE_GRACE_MS) return false;
+        long now = System.currentTimeMillis();
+        if (checkedAt <= 0L || now < checkedAt || now - checkedAt > OFFLINE_GRACE_MS) return false;
         try {
             JSONArray features = new JSONArray(prefs.getString(KEY_FEATURES, "[]"));
             for (int i = 0; i < features.length(); i++) {
@@ -68,10 +69,10 @@ final class PlusAccess {
                     };
                     java.util.HashSet<String> supported =
                             new java.util.HashSet<>(java.util.Arrays.asList(supportedFeatures));
+                    java.util.HashSet<String> granted = new java.util.HashSet<>();
                     for (int i = 0; i < serverFeatures.length(); i++) {
                         String feature = serverFeatures.optString(i, "");
-                        if (supported.contains(feature) && !features.toString().contains(
-                                "\\"" + feature + "\\"")) {
+                        if (supported.contains(feature) && granted.add(feature)) {
                             features.put(feature);
                         }
                     }
