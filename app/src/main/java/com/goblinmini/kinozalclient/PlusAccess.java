@@ -23,6 +23,7 @@ final class PlusAccess {
 
     static boolean hasFeature(Context context, String feature) {
         if (context == null || feature == null || feature.isEmpty()) return false;
+        if (!AppSignatureVerifier.isTrusted(context)) return false;
         SharedPreferences prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
         if (!prefs.getBoolean(KEY_ACTIVE, false)) return false;
         long checkedAt = prefs.getLong(KEY_CHECKED, 0L);
@@ -42,6 +43,11 @@ final class PlusAccess {
     static void refresh(Context context, Runnable onComplete) {
         if (context == null) return;
         final Context app = context.getApplicationContext();
+        if (!AppSignatureVerifier.isTrusted(app)) {
+            clearEntitlement(app);
+            postCompletion(onComplete);
+            return;
+        }
         if (!CloudSyncManager.isActivated(app)) {
             clearEntitlement(app);
             postCompletion(onComplete);
