@@ -2,7 +2,7 @@ name: Android CI
 
 on:
   push:
-    branches: [ main, feature/magnet-playback, feature/performance, feature/screen-cache-background-refresh, feature/sidebar-login-status-stable-restore, fix/home-feed-js-extractor-diagnostics, fix/cloud-sync-request-throttling, feature/plus-premium-feature-gates, security/plus-signed-entitlements, security/apk-native-signature-guard, security/apk-file-signature-verifier ]
+    branches: [ main, feature/magnet-playback, feature/performance, feature/screen-cache-background-refresh, feature/sidebar-login-status-stable-restore, fix/home-feed-js-extractor-diagnostics, fix/cloud-sync-request-throttling, feature/plus-premium-feature-gates, security/plus-signed-entitlements, security/apk-native-signature-guard, security/apk-file-signature-verifier, feature/public-update-repository ]
   pull_request:
     branches: [ main ]
   workflow_dispatch:
@@ -53,11 +53,11 @@ jobs:
           test -d "$ANDROID_HOME/cmake/3.22.1"
 
       - name: Build debug APK for pull requests
-        if: github.event_name == 'pull_request' || (github.ref_name == 'feature/magnet-playback' || github.ref_name == 'feature/performance' || github.ref_name == 'feature/screen-cache-background-refresh' || github.ref_name == 'feature/sidebar-login-status-stable-restore' || github.ref_name == 'fix/home-feed-js-extractor-diagnostics' || github.ref_name == 'fix/cloud-sync-request-throttling' || github.ref_name == 'feature/plus-premium-feature-gates' || github.ref_name == 'security/plus-signed-entitlements' || github.ref_name == 'security/apk-file-signature-verifier')
+        if: github.event_name == 'pull_request' || (github.ref_name == 'feature/magnet-playback' || github.ref_name == 'feature/performance' || github.ref_name == 'feature/screen-cache-background-refresh' || github.ref_name == 'feature/sidebar-login-status-stable-restore' || github.ref_name == 'fix/home-feed-js-extractor-diagnostics' || github.ref_name == 'fix/cloud-sync-request-throttling' || github.ref_name == 'feature/plus-premium-feature-gates' || github.ref_name == 'security/plus-signed-entitlements' || github.ref_name == 'security/apk-file-signature-verifier' || github.ref_name == 'feature/public-update-repository')
         run: gradle --no-daemon assembleDebug
 
       - name: Upload debug APK
-        if: github.event_name == 'pull_request' || github.ref_name == 'feature/magnet-playback' || github.ref_name == 'feature/performance' || github.ref_name == 'feature/screen-cache-background-refresh' || github.ref_name == 'feature/sidebar-login-status-stable-restore' || github.ref_name == 'fix/home-feed-js-extractor-diagnostics' || github.ref_name == 'fix/cloud-sync-request-throttling' || github.ref_name == 'feature/plus-premium-feature-gates' || github.ref_name == 'security/plus-signed-entitlements' || github.ref_name == 'security/apk-file-signature-verifier'
+        if: github.event_name == 'pull_request' || github.ref_name == 'feature/magnet-playback' || github.ref_name == 'feature/performance' || github.ref_name == 'feature/screen-cache-background-refresh' || github.ref_name == 'feature/sidebar-login-status-stable-restore' || github.ref_name == 'fix/home-feed-js-extractor-diagnostics' || github.ref_name == 'fix/cloud-sync-request-throttling' || github.ref_name == 'feature/plus-premium-feature-gates' || github.ref_name == 'security/plus-signed-entitlements' || github.ref_name == 'security/apk-file-signature-verifier' || github.ref_name == 'feature/public-update-repository'
         uses: actions/upload-artifact@v4
         with:
           name: KinozalClient-debug
@@ -146,7 +146,7 @@ jobs:
           echo "VERSION_NAME=$VERSION_NAME" >> "$GITHUB_ENV"
 
       - name: Verify and upload signature-guard Release APK
-        if: github.event_name != 'pull_request' && github.ref_name == 'security/apk-file-signature-verifier'
+        if: github.event_name != 'pull_request' && (github.ref_name == 'security/apk-file-signature-verifier' || github.ref_name == 'feature/public-update-repository')
         shell: bash
         run: |
           APK="app/build/outputs/apk/release/app-release.apk"
@@ -160,7 +160,7 @@ jobs:
           cp "$APK" dist/KinozalClient-signature-guard-release.apk
 
       - name: Upload signature-guard Release APK
-        if: github.event_name != 'pull_request' && github.ref_name == 'security/apk-file-signature-verifier'
+        if: github.event_name != 'pull_request' && (github.ref_name == 'security/apk-file-signature-verifier' || github.ref_name == 'feature/public-update-repository')
         uses: actions/upload-artifact@v4
         with:
           name: KinozalClient-signature-guard-release
@@ -178,7 +178,7 @@ jobs:
           retention-days: 14
 
       - name: Publish GitHub Release
-        if: github.event_name != 'pull_request' && github.ref_name != 'feature/magnet-playback' && github.ref_name != 'feature/performance' && github.ref_name != 'feature/screen-cache-background-refresh' && github.ref_name != 'security/plus-signed-entitlements' && github.ref_name != 'security/apk-native-signature-guard' && github.ref_name != 'fix/home-feed-js-extractor-diagnostics' && github.ref_name != 'fix/cloud-sync-request-throttling' && github.ref_name != 'feature/plus-premium-feature-gates' && github.ref_name != 'security/apk-file-signature-verifier'
+        if: github.event_name != 'pull_request' && github.ref_name != 'feature/magnet-playback' && github.ref_name != 'feature/performance' && github.ref_name != 'feature/screen-cache-background-refresh' && github.ref_name != 'security/plus-signed-entitlements' && github.ref_name != 'security/apk-native-signature-guard' && github.ref_name != 'fix/home-feed-js-extractor-diagnostics' && github.ref_name != 'fix/cloud-sync-request-throttling' && github.ref_name != 'feature/plus-premium-feature-gates' && github.ref_name != 'security/apk-file-signature-verifier' && github.ref_name != 'feature/public-update-repository'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ env.VERSION_CODE }}
