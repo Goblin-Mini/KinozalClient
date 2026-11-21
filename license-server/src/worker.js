@@ -230,7 +230,8 @@ async function getLicense(request, env) {
        l.device_limit, l.created_at,
        (SELECT COUNT(*) FROM devices x WHERE x.license_id=l.id AND x.revoked_at IS NULL) AS active_devices
      FROM devices d JOIN licenses l ON l.id=d.license_id
-     WHERE d.token_hash=? AND d.revoked_at IS NULL AND l.status='active'`
+     WHERE d.token_hash=? AND d.revoked_at IS NULL AND l.status='active'
+       AND (l.expires_at IS NULL OR l.expires_at > strftime('%Y-%m-%dT%H:%M:%fZ','now'))`
   ).bind(tokenHash).first();
   if (!row) return response(request, env, { error: "license_not_found" }, 404);
 
