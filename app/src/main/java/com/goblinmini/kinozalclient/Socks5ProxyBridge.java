@@ -78,6 +78,8 @@ public final class Socks5ProxyBridge {
 
     public synchronized void saveSettings(boolean enabled, String host, int port,
             String username, String password) throws Exception {
+        if (enabled && !PlusAccess.hasFeature(context, "proxy"))
+            throw new SecurityException("Для SOCKS5 требуется активный Plus");
         String h = host == null ? "" : host.trim();
         String u = username == null ? "" : username.trim();
         String p = password == null ? "" : password;
@@ -110,6 +112,8 @@ public final class Socks5ProxyBridge {
 
     /** Verify DNS, TCP reachability and SOCKS5 authentication without changing saved settings. */
     public void testConnection(String host, int port, String username, String password) throws Exception {
+        if (!PlusAccess.hasFeature(context, "proxy"))
+            throw new SecurityException("Для проверки SOCKS5 требуется активный Plus");
         String h = host == null ? "" : host.trim();
         String u = username == null ? "" : username.trim();
         String p = password == null ? "" : password;
@@ -133,6 +137,8 @@ public final class Socks5ProxyBridge {
     public synchronized Proxy start() throws Exception {
         stop();
         Settings cfg = settings;
+        if (cfg.enabled && !PlusAccess.hasFeature(context, "proxy"))
+            throw new SecurityException("Для SOCKS5 требуется активный Plus");
         if (!cfg.enabled) return Proxy.NO_PROXY;
         if (cfg.host.isEmpty() || cfg.port < 1 || cfg.port > 65535)
             throw new IllegalStateException("Проверьте адрес и порт SOCKS5");
