@@ -6512,7 +6512,7 @@ public class MainActivity extends Activity {
         presetList.setPrompt("Список пресетов");
         List<String> presetLabels = new ArrayList<>();
         List<Integer> presetIndexes = new ArrayList<>();
-        org.json.JSONArray storedPresets;
+        final org.json.JSONArray storedPresets;
         org.json.JSONArray loadedPresets;
         try {
             loadedPresets = new org.json.JSONArray(getSharedPreferences(PREFS, MODE_PRIVATE)
@@ -6635,10 +6635,7 @@ public class MainActivity extends Activity {
                     .setNegativeButton("Отмена", null)
                     .setPositiveButton("Удалить", (d, which) -> {
                         try {
-                            org.json.JSONArray updated = new org.json.JSONArray();
-                            for (int i = 0; i < storedPresets.length(); i++)
-                                if (i != storedIndex) updated.put(storedPresets.get(i));
-                            storedPresets = updated;
+                            storedPresets.remove(storedIndex);
                             presetIndexes.clear();
                             presetLabels.clear();
                             presetLabels.add("Список пресетов");
