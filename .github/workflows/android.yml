@@ -32,7 +32,11 @@ jobs:
       - name: Install Android NDK and CMake
         shell: bash
         run: |
+          # sdkmanager exits after accepting all licenses; yes may receive SIGPIPE.
+          # Disable pipefail only for this pipeline, while preserving sdkmanager's exit code.
+          set +o pipefail
           yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses
+          set -o pipefail
           "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "ndk;27.2.12479018" "cmake;3.22.1"
 
       - name: Set up Gradle
