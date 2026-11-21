@@ -25,6 +25,17 @@ This service supports manual payment verification and manual license issuance. I
 
 Keep `ADMIN_TOKEN` in a password manager. Never put it in the APK, GitHub, a public website, or a message to a customer. The real `wrangler.toml` should not be committed if it contains account-specific values; the checked-in example contains only a placeholder.
 
+## Signed Plus entitlements
+
+The Worker signs each `GET /v1/license` response with RS256. The Android app contains only the matching public key and rejects grants with an invalid signature, wrong package audience, wrong installation binding, inactive plan, or expired lifetime. Grants expire after 6 hours; the app does not extend Plus access beyond the signed expiry.
+
+1. Add the private signing key as a Cloudflare secret named `PLUS_SIGNING_PRIVATE_KEY`. Its value must be the complete unencrypted PKCS#8 PEM, including the `BEGIN PRIVATE KEY` and `END PRIVATE KEY` lines.
+2. Keep that private key only in Cloudflare Secrets and a secure offline backup. Never commit it, put it in a Worker source file, or embed it in the APK.
+3. Deploy the Worker source from `license-server/src/index.ts` (or the synchronized manual entrypoint `license-server/src/worker.js`).
+4. Confirm `GET /v1/license` for an activated device returns a non-empty `grant` field. Do not remove the existing D1 binding, `ADMIN_TOKEN`, device tokens, or activation codes.
+
+Set the secret with Wrangler using `npx wrangler secret put PLUS_SIGNING_PRIVATE_KEY`, or add it in Cloudflare **Workers & Pages → your Worker → Settings → Variables and Secrets → Add secret**. Use the exact variable name above.
+
 ## Manual sale and issuance
 
 After independently confirming the customer's payment, create a license:
