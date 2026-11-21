@@ -6563,28 +6563,6 @@ public class MainActivity extends Activity {
         presetSelector.setBackground(shape(PANEL, TEAL));
         presetSelector.setOnFocusChangeListener((view, focused) ->
                 view.setBackground(shape(PANEL, focused ? GOLD : TEAL)));
-        presetSelector.setOnClickListener(v -> {
-            String[] choices = presetLabels.toArray(new String[0]);
-            AlertDialog chooser = new AlertDialog.Builder(this)
-                    .setTitle("Список пресетов")
-                    .setSingleChoiceItems(choices, selectedPresetPosition[0], (choiceDialog, which) -> {
-                        selectedPresetPosition[0] = which;
-                        presetSelector.setText(presetLabels.get(which));
-                        if (which > 0) {
-                            try {
-                                int storedIndex = presetIndexes.get(which - 1);
-                                restorePreset.accept(storedPresets.getJSONObject(storedIndex));
-                            } catch (Exception e) {
-                                showMessage("Не удалось открыть пресет поиска.");
-                            }
-                        }
-                        choiceDialog.dismiss();
-                    })
-                    .setNegativeButton("Закрыть", null)
-                    .create();
-            chooser.show();
-            chooser.getWindow().setBackgroundDrawable(shape(BG, TEAL));
-        });
         panel.addView(presetSelector, new LinearLayout.LayoutParams(-1, dp(43)));
 
         CheckBox remember = new CheckBox(this);
@@ -6627,6 +6605,28 @@ public class MainActivity extends Activity {
                 }
             }
         };
+        presetSelector.setOnClickListener(v -> {
+            String[] choices = presetLabels.toArray(new String[0]);
+            AlertDialog chooser = new AlertDialog.Builder(this)
+                    .setTitle("Список пресетов")
+                    .setSingleChoiceItems(choices, selectedPresetPosition[0], (choiceDialog, which) -> {
+                        selectedPresetPosition[0] = which;
+                        presetSelector.setText(presetLabels.get(which));
+                        if (which > 0) {
+                            try {
+                                int storedIndex = presetIndexes.get(which - 1);
+                                restorePreset.accept(storedPresets.getJSONObject(storedIndex));
+                            } catch (Exception e) {
+                                showMessage("Не удалось открыть пресет поиска.");
+                            }
+                        }
+                        choiceDialog.dismiss();
+                    })
+                    .setNegativeButton("Закрыть", null)
+                    .create();
+            chooser.show();
+            chooser.getWindow().setBackgroundDrawable(shape(BG, TEAL));
+        });
         if (remember.isChecked()) {
             try {
                 String last = getSharedPreferences(PREFS, MODE_PRIVATE)
