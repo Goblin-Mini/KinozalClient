@@ -3,15 +3,30 @@ plugins {
 }
 
 android {
-    namespace = "ru.gm.ktv"
+    namespace = "com.goblinmini.kinozalclient"
     compileSdk = 35
+    ndkVersion = "27.2.12479018"
 
     defaultConfig {
         applicationId = "ru.gm.ktv"
         minSdk = 23
         targetSdk = 28
-        versionCode = 20
-        versionName = "0.5.15"
+        versionCode = 7
+        versionName = "1.0.6"
+        ndk {
+            abiFilters += listOf("armeabi-v7a", "arm64-v8a")
+        }
+    }
+
+    buildFeatures {
+        buildConfig = true
+    }
+
+    externalNativeBuild {
+        cmake {
+            path = file("src/main/cpp/CMakeLists.txt")
+            version = "3.22.1"
+        }
     }
 
     lint {
@@ -32,12 +47,21 @@ android {
                 keyAlias = System.getenv("KINOZAL_KEY_ALIAS")
                 keyPassword = System.getenv("KINOZAL_KEY_PASSWORD")
             }
+            // The runtime APK-file verifier validates the signed JAR entries.
+            // Keep v1 alongside v2 so this works on API 23+ TV devices.
+            enableV1Signing = true
+            enableV2Signing = true
         }
     }
 
     buildTypes {
         release {
-            isMinifyEnabled = false
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro"
+            )
             signingConfig = signingConfigs.getByName("release")
         }
     }
@@ -46,4 +70,6 @@ android {
 dependencies {
     implementation("org.jsoup:jsoup:1.18.3")
     implementation("androidx.webkit:webkit:1.14.0")
+    implementation("androidx.tvprovider:tvprovider:1.1.0")
+    implementation("androidx.work:work-runtime:2.10.1")
 }

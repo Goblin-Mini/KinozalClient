@@ -5,21 +5,28 @@ import android.content.Intent;
 import android.net.Uri;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
+import android.util.LruCache;
+import android.util.Log;
+import android.view.Choreographer;
 import android.widget.ImageView;
 import android.app.AlertDialog;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
+import android.animation.ObjectAnimator;
 import android.os.Bundle;
 import android.view.Gravity;
 import android.view.KeyEvent;
 import android.view.View;
 import android.view.ViewGroup;
+import android.graphics.Rect;
 import android.view.inputmethod.EditorInfo;
 import android.widget.Button;
+import android.widget.ArrayAdapter;
 import android.widget.CheckBox;
 import android.widget.EditText;
 import android.widget.LinearLayout;
+import android.widget.FrameLayout;
 import android.widget.ProgressBar;
 import android.widget.ScrollView;
 import android.widget.TextView;
@@ -44,6 +51,8 @@ import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import androidx.webkit.ProxyConfig;
@@ -53,35 +62,95 @@ import androidx.webkit.WebViewFeature;
 public class MainActivity extends Activity {
     private static final int BG = Color.rgb(16, 19, 23);
     private static final int PANEL = Color.rgb(29, 34, 39);
-    private static final int GOLD = Color.rgb(251, 226, 173);
+    private int GOLD = Color.rgb(251, 226, 173);
     private static final int RED = Color.rgb(174, 55, 18);
     private static final int TEAL = Color.rgb(115, 164, 170);
+    private static final java.util.regex.Pattern LOGIN_PASSWORD_TYPE =
+            java.util.regex.Pattern.compile("\\btype\\s*=\\s*(['\\\"]?)password\\1");
     private static final String PREFS = "kinozal_settings";
+    private static final String FONT_SIZE_OFFSET_KEY = "font_size_offset_sp";
+    private int fontOffsetSp = 0;
     private static final String[] MIRRORS = {
-            "https://kinozal.cloudns.nz", "https://kinozal.guru",
-            "https://kinozal.tv", "https://kinozal.me"
+            "https://kinozal.me", "https://kinozal.guru",
+            "https://kinozal.jumpingcrab.com"
     };
 
     private final ExecutorService io = Executors.newSingleThreadExecutor();
+    // Image cache reads/downloads must not block catalogue parsing or other app I/O.
+    private final ExecutorService imageIo = Executors.newFixedThreadPool(3);
+    // Home refresh is isolated so nine feed requests cannot starve poster loading.
+    private final ExecutorService homeRefreshIo = Executors.newFixedThreadPool(4);
+
+    // WebView callbacks may arrive after Activity.onDestroy() has shut down
+    // the executors. Ignore those late tasks instead of crashing the UI thread.
+    private void executeSafely(ExecutorService executor, Runnable task) {
+        if (executor == null || task == null || executor.isShutdown()
+                || isFinishing() || isDestroyed()) return;
+        try {
+            executor.execute(task);
+        } catch (java.util.concurrent.RejectedExecutionException ignored) {
+            // The executor may be shut down between the state check and execute().
+        }
+    }
     private KinozalHttpClient client;
     private Socks5ProxyBridge socks5Bridge;
     private DiskCache diskCache;
+    private LruCache<String, Bitmap> decodedImageCache;
     private String mirror;
     private String currentPath = "browse.php";
     private String currentTitle = "Все раздачи";
+    private TextView sidebarConnectionInfo;
+    private TextView sidebarCategoryInfo;
+    private TextView sidebarCountryInfo;
+    private TextView sidebarVersionInfo;
+    private TextView sidebarLoginInfo;
+    private int lastLoadedTorrentCount = 0;
+    private String lastKinozalConnectionStatus = "не проверено";
     private String activeTorrentDetailsHref = "";
+    private String pendingDetailPrefetchHref = "";
+    private final java.util.Set<String> detailPrefetchScheduled = new java.util.HashSet<>();
     private LinearLayout root, sidebar, content, list, menuItems;
+    private ScrollView homeScrollView;
+    private ScrollView collectionsScrollView;
+    private ScrollView browseScrollView;
+    private LinearLayout browseList;
+    private LinearLayout homeList, collectionsList;
+    private ViewGroup feedScreenParent;
+    private ScrollView activeFeedScrollView;
+    private String activeFeedScreen = "home";
+    private boolean homeLoadedOnce = false;
+    private List<HomeSection> homeDiskCacheSnapshot = new ArrayList<>();
+    private boolean collectionsLoadedOnce = false;
+    private android.content.BroadcastReceiver feedCacheReceiver;
+    private final Map<String, TextView> feedRefreshStatusViews = new HashMap<>();
+    private final Map<String, ProgressBar> feedRefreshProgressViews = new HashMap<>();
+    private final Map<String, LinearLayout> feedRefreshPanels = new HashMap<>();
+    private final Map<String, Button> feedRefreshButtons = new HashMap<>();
+    private final Map<String, ObjectAnimator> feedRefreshAnimations = new HashMap<>();
+    private List<HomeSection> collectionsSectionsMemory = new ArrayList<>();
     private TextView heading, status;
     private ProgressBar progress;
-    private EditText search;
+    private EditText search, localListSearch;
+    private LinearLayout mainSearchBar, localListSearchBar;
+    private List<Torrent> activeLocalItems = new ArrayList<>();
     private View focusedTorrentSource;
     private final List<Torrent> torrents = new ArrayList<>();
     private int page = 0;
     private String searchSort = "date";
     private boolean searchSortDescending = true;
+    private String localSort = "recent";
+    private boolean localSortDescending = true;
     private LinearLayout searchSortBar;
     private Button sortDateButton, sortSizeButton, sortSeedsButton;
     private AlertDialog settingsDialog;
+    private boolean plusSettingsRefreshPending = false;
+    private boolean refreshingTorrentCardForPlus = false;
+    private AlertDialog activeTorrentDetailsDialog;
+    private Torrent activeTorrentDetailsTorrent;
+    private TorrentDetails activeTorrentDetailsData;
+    private View plusVoiceSearchButton;
+    private Button plusAdvancedSearchButton;
+    private final java.util.Map<View, String> plusFeatureControls = new java.util.LinkedHashMap<>();
     private static final String FAVORITES_KEY = "local_favorites";
     private volatile String lastHtml = "";
     private WebView sessionWebView;
@@ -89,94 +158,209 @@ public class MainActivity extends Activity {
     private final android.os.Handler browserHandler = new android.os.Handler(android.os.Looper.getMainLooper());
     private Runnable browserRequestTimeout;
     private boolean startupCatalogReady = false;
+    private boolean firstLaunchAuthorizationPending = false;
+    private boolean firstLaunchAuthorizationShown = false;
+    private String pendingTvTorrentHref = "";
+    private String pendingTvTorrentTitle = "";
+    private String pendingExternalSearchQuery = "";
     private boolean startupCatalogStarted = false;
+    private boolean autoSessionRestoreInProgress = false;
     private boolean automaticUpdateCheckScheduled = false;
     private boolean homeCacheDisplayed = false;
+    private boolean homeCacheLoadFinished = false;
+    private boolean initialHomeFetchPending = false;
+    private boolean homeRefreshInProgress = false;
+    // Home/collection and Android TV feed refreshes share one WebView. Queue
+    // interactive navigation until the background sequence releases it.
+    private boolean browserFeedLoading = false;
+    private Runnable pendingBrowserNavigation;
+    private List<HomeSection> homeSectionsMemory = new ArrayList<>();
     private String homeCacheDiagnostic = "Кэш главной ещё не проверялся";
+    // Temporary feed diagnostics: timings and response metadata only; never store cookies or page bodies.
+    private final StringBuilder feedLoadDiagnostics = new StringBuilder();
+    private final Object feedDiagnosticsLock = new Object();
+    private long feedDiagnosticStartedAtMs = 0L;
+    private String feedDiagnosticGroup = "";
+    private void resetFeedDiagnostics(String group, String[] paths) {
+        synchronized (feedDiagnosticsLock) {
+            feedLoadDiagnostics.setLength(0);
+            feedDiagnosticStartedAtMs = android.os.SystemClock.elapsedRealtime();
+            feedDiagnosticGroup = group;
+        }
+        FeedDiagnostics.start(this, group, client == null ? "?" : client.getMirror(), paths, "WebView");
+        appendFeedDiagnostic("START", "начата загрузка группы");
+    }
+    private void appendFeedDiagnostic(String stage, String details) {
+        long elapsed = feedDiagnosticStartedAtMs == 0L ? 0L
+                : android.os.SystemClock.elapsedRealtime() - feedDiagnosticStartedAtMs;
+        String line = String.format(java.util.Locale.ROOT, "[+%d ms] %s %s%n", elapsed, stage,
+                details == null ? "" : details);
+        synchronized (feedDiagnosticsLock) {
+            feedLoadDiagnostics.append(line);
+            if (feedLoadDiagnostics.length() > 48000)
+                feedLoadDiagnostics.delete(0, feedLoadDiagnostics.length() - 48000);
+        }
+        FeedDiagnostics.log(this, feedDiagnosticGroup, stage, details);
+    }
+    private String getFeedDiagnosticsText() {
+        String persistent = FeedDiagnostics.read(this);
+        if (!persistent.trim().isEmpty()) return persistent;
+        synchronized (feedDiagnosticsLock) { return feedLoadDiagnostics.toString(); }
+    }
+
+    private int homeRenderGeneration = 0;
+    // Lightweight startup diagnostics: frame gaps and expensive home-row renders.
+    private boolean homePerfMonitoring = false;
+    private long homePerfLastFrameNanos = 0L;
+    private long homePerfStartedAtMs = 0L;
+    private int homePerfSlowFrames = 0;
+    private final Choreographer.FrameCallback homePerfFrameCallback = new Choreographer.FrameCallback() {
+        @Override public void doFrame(long frameTimeNanos) {
+            if (!homePerfMonitoring) return;
+            if (homePerfLastFrameNanos != 0L) {
+                long frameGapMs = (frameTimeNanos - homePerfLastFrameNanos) / 1_000_000L;
+                if (frameGapMs >= 32L) {
+                    homePerfSlowFrames++;
+                    Log.w("KinozalPerf", "slow frame gap=" + frameGapMs
+                            + "ms, homeLoading=true, renderedSections=" + homeRenderGeneration);
+                }
+            }
+            homePerfLastFrameNanos = frameTimeNanos;
+            Choreographer.getInstance().postFrameCallback(this);
+        }
+    };
+
+    private void startHomePerformanceMonitor() {
+        if (homePerfMonitoring) return;
+        homePerfMonitoring = true;
+        homePerfStartedAtMs = android.os.SystemClock.elapsedRealtime();
+        homePerfLastFrameNanos = 0L;
+        homePerfSlowFrames = 0;
+        FeedDiagnostics.log(this, "home", "PERF_DEVICE",
+                "model=" + android.os.Build.MODEL
+                + ", manufacturer=" + android.os.Build.MANUFACTURER
+                + ", sdk=" + android.os.Build.VERSION.SDK_INT
+                + ", abi=" + android.os.Build.SUPPORTED_ABIS[0]
+                + ", screen=" + getResources().getDisplayMetrics().widthPixels + "x"
+                + getResources().getDisplayMetrics().heightPixels
+                + ", density=" + getResources().getDisplayMetrics().density
+                + ", appMemoryClassMB=" + ((android.app.ActivityManager)getSystemService(ACTIVITY_SERVICE))
+                    .getMemoryClass()
+                + ", lowRamDevice=" + getSystemService(android.app.ActivityManager.class).isLowRamDevice());
+        Choreographer.getInstance().postFrameCallback(homePerfFrameCallback);
+    }
+
+    private void stopHomePerformanceMonitor() {
+        if (!homePerfMonitoring) return;
+        homePerfMonitoring = false;
+        Choreographer.getInstance().removeFrameCallback(homePerfFrameCallback);
+        long duration = android.os.SystemClock.elapsedRealtime() - homePerfStartedAtMs;
+        FeedDiagnostics.log(this, "home", "PERF_SUMMARY",
+                "durationMs=" + duration + ", slowFramesOver32ms=" + homePerfSlowFrames
+                + ", renderedSections=" + homeRenderGeneration);
+    }
+
+    // Per-category timing diagnostics. These measurements do not cache pages or alter request behavior.
+    private long browsePerfStartedAtMs = 0L;
+    private String browsePerfPath = "";
+
+    private void logBrowsePerf(String stage, long durationMs, String details) {
+        FeedDiagnostics.log(this, "catalog", "PERF_" + stage,
+                "durationMs=" + durationMs + ", " + details);
+    }
 
     private volatile String lastBrowserError = "Причина пока не определена";
+    // Infohash is prefetched while the native details dialog is being viewed.
+    // This hides the Kinozal/Cloudflare round trip behind the user's reading time.
+    private final java.util.Map<String, String> infoHashCache = new java.util.HashMap<>();
+    private String pendingInfoHashId;
+    private final List<java.util.function.Consumer<String>> pendingInfoHashCallbacks = new ArrayList<>();
+
     private interface BrowserPageCallback { void onPage(String html, String error); }
     private final java.util.LinkedHashMap<String, String> pageCache =
-            new java.util.LinkedHashMap<String, String>(12, 0.75f, true) {
+            new java.util.LinkedHashMap<String, String>(48, 0.75f, true) {
                 @Override protected boolean removeEldestEntry(java.util.Map.Entry<String, String> eldest) {
-                    return size() > 12;
+                    return size() > 48;
                 }
             };
 
-    private static class Category { String title, href, method = "GET", body = ""; }
-
-    private static class Torrent {
-        String title, href, size, seeds, leeches, uploaded;
+    // Parsed detail models are kept separately from HTML so reopening a release
+    // does not repeatedly parse a large document on the UI thread.
+    private final java.util.LinkedHashMap<String, TorrentDetails> detailDataCache =
+            new java.util.LinkedHashMap<String, TorrentDetails>(32, 0.75f, true) {
+                @Override protected boolean removeEldestEntry(
+                        java.util.Map.Entry<String, TorrentDetails> eldest) {
+                    return size() > 32;
+                }
+            };
+    private TorrentDetails getCachedDetailData(String key) {
+        synchronized (detailDataCache) { return detailDataCache.get(key); }
+    }
+    private void putCachedDetailData(String key, TorrentDetails data) {
+        if (key == null || data == null) return;
+        synchronized (detailDataCache) { detailDataCache.put(key, data); }
     }
 
-    private static boolean MAINTENANCE_MODE = true;
+    private static class Category { String title, href, method = "GET", body = ""; }
+
+    private static String normalizeReleaseType(String value) {
+        return "r1".equals(value) || "r2".equals(value) ? value : "r0";
+    }
+
+    private int releaseTypeColor(String value) {
+        String type = normalizeReleaseType(value);
+        // Muted catalogue accents: distinguish release types without neon-bright titles.
+        if ("r1".equals(type)) return Color.rgb(197, 168, 90); // muted gold
+        if ("r2".equals(type)) return Color.rgb(120, 153, 157); // muted teal
+        return Color.rgb(211, 215, 218); // soft white
+    }
+
+    private static class Torrent {
+        String title, href, size, seeds, leeches, uploaded, poster;
+        long viewedAt = 0L;
+        String releaseType = "r0";
+    }
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
-        if (MAINTENANCE_MODE) {
-            showMaintenanceScreen();
-            return;
-        }
+        GOLD = getAccentColor(getSharedPreferences(PREFS, MODE_PRIVATE).getString("accent_color", "gold"));
+        fontOffsetSp = getSharedPreferences(PREFS, MODE_PRIVATE).getInt(FONT_SIZE_OFFSET_KEY, 0);
+        readTvLaunchIntent(getIntent());
         mirror = getSharedPreferences(PREFS, MODE_PRIVATE).getString("mirror", MIRRORS[0]);
+        if ("https://kinozal.tv".equalsIgnoreCase(mirror)) {
+            mirror = MIRRORS[0];
+            getSharedPreferences(PREFS, MODE_PRIVATE).edit().putString("mirror", mirror).apply();
+        }
         client = new KinozalHttpClient(this, mirror);
         diskCache = new DiskCache(this, 200L * 1024L * 1024L);
+        int bitmapCacheBytes = (int) Math.min(16L * 1024L * 1024L,
+                Math.max(2L * 1024L * 1024L, Runtime.getRuntime().maxMemory() / 8L));
+        decodedImageCache = new LruCache<String, Bitmap>(bitmapCacheBytes) {
+            @Override protected int sizeOf(String key, Bitmap value) {
+                return value == null ? 0 : value.getAllocationByteCount();
+            }
+        };
         buildShell();
-        socks5Bridge = new Socks5ProxyBridge(this);
+        PlusAccess.refresh(this, this::onPlusEntitlementsUpdated);
+        // Read the last successful home snapshot off the UI thread. This runs
+        // alongside proxy/session initialization so a returning user sees
+        // useful content before the sequential WebView refresh begins.
+        preloadHomeCache();
+        socks5Bridge = Socks5ProxyBridge.getInstance(this);
         String savedBrowserCookies = client.getSavedBrowserCookies();
         initializeNetwork(savedBrowserCookies);
+        loadExternalCountryInfo(sidebarCountryInfo);
     }
 
-
-    private void showMaintenanceScreen() {
-        LinearLayout screen = new LinearLayout(this);
-        screen.setOrientation(LinearLayout.VERTICAL);
-        screen.setGravity(Gravity.CENTER);
-        screen.setBackgroundColor(Color.rgb(16, 19, 23));
-        screen.setPadding(32, 24, 32, 24);
-
-        TextView title = new TextView(this);
-        title.setText("Кинозал ТВ");
-        title.setTextColor(Color.rgb(251, 226, 173));
-        title.setTextSize(30);
-        title.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
-        title.setGravity(Gravity.CENTER);
-        screen.addView(title, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-
-        TextView details = new TextView(this);
-        details.setText("Приложение временно приостановлено.\\nНовости и информация — на нашем сайте.");
-        details.setTextColor(Color.LTGRAY);
-        details.setTextSize(18);
-        details.setGravity(Gravity.CENTER);
-        details.setPadding(0, 18, 0, 24);
-        screen.addView(details, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-
-        Button website = new Button(this);
-        website.setText("Перейти на сайт Кинозал ТВ");
-        website.setTextSize(16);
-        website.setTextColor(Color.WHITE);
-        website.setBackgroundTintList(android.content.res.ColorStateList.valueOf(Color.rgb(174, 55, 18)));
-        website.setOnClickListener(v -> startActivity(new Intent(Intent.ACTION_VIEW,
-                Uri.parse("https://kinozal-tv.pages.dev/"))));
-        screen.addView(website, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-
-        TextView close = new TextView(this);
-        close.setText("Нажмите «Назад», чтобы закрыть приложение");
-        close.setTextColor(Color.GRAY);
-        close.setTextSize(14);
-        close.setGravity(Gravity.CENTER);
-        close.setPadding(0, 20, 0, 0);
-        screen.addView(close, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-
-        setContentView(screen);
-        website.requestFocus();
-    }
 
     private void initializeNetwork(String savedBrowserCookies) {
         Socks5ProxyBridge.Settings config = socks5Bridge.getSettings();
+        if (config.enabled && !PlusAccess.hasFeature(this, "proxy")) {
+            socks5Bridge.stop();
+            client.setProxy(Proxy.NO_PROXY);
+            continueStartup(savedBrowserCookies);
+            return;
+        }
         if (!config.enabled) {
             client.setProxy(Proxy.NO_PROXY);
             continueStartup(savedBrowserCookies);
@@ -205,7 +389,51 @@ public class MainActivity extends Activity {
         return new Proxy(Proxy.Type.HTTP, new java.net.InetSocketAddress("127.0.0.1", 1));
     }
 
+    @Override protected void onNewIntent(android.content.Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        readTvLaunchIntent(intent);
+        if (startupCatalogReady) browserHandler.postDelayed(this::openConfiguredStartupSource, 150);
+    }
+
+    private void readTvLaunchIntent(android.content.Intent intent) {
+        if (intent == null) return;
+        Uri incomingData = intent.getData();
+        if (incomingData != null && "kinozal".equals(incomingData.getScheme())) {
+            if ("torrent".equals(incomingData.getHost())) {
+                String href = incomingData.getQueryParameter("href");
+                if (href != null && !href.trim().isEmpty()) {
+                    pendingTvTorrentHref = href.trim();
+                    pendingTvTorrentTitle = incomingData.getQueryParameter("title");
+                }
+            } else if ("search".equals(incomingData.getHost())) {
+                String query = incomingData.getQueryParameter("q");
+                if (query != null && !query.trim().isEmpty()) pendingExternalSearchQuery = query.trim();
+            }
+        }
+        String action = intent.getAction();
+        if (Intent.ACTION_SEARCH.equals(action) || "android.intent.action.WEB_SEARCH".equals(action)) {
+            String query = intent.getStringExtra(android.app.SearchManager.QUERY);
+            if (query == null || query.trim().isEmpty()) query = intent.getStringExtra("query");
+            if (query != null && !query.trim().isEmpty()) pendingExternalSearchQuery = query.trim();
+        }
+        String href = intent.getStringExtra("tv_torrent_href");
+        if (href != null && !href.trim().isEmpty()) {
+            pendingTvTorrentHref = href.trim();
+            pendingTvTorrentTitle = intent.getStringExtra("tv_torrent_title");
+        }
+    }
+
     private void continueStartup(String savedBrowserCookies) {
+        android.content.SharedPreferences prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
+        if (!prefs.getBoolean("first_launch_authorization_handled", false)) {
+            // On a fresh install, show the Kinozal authorization window before
+            // opening any catalogue page. Persist the one-time decision so
+            // later launches follow the user's configured startup section.
+            prefs.edit().putBoolean("first_launch_authorization_handled", true).apply();
+            firstLaunchAuthorizationPending = true;
+            return;
+        }
         if (savedBrowserCookies != null) restoreBrowserSession(savedBrowserCookies);
         else markStartupCatalogReady();
     }
@@ -224,6 +452,7 @@ public class MainActivity extends Activity {
     }
 
     private void showSocks5Settings() {
+        if (!requirePlusFeature("proxy")) return;
         Socks5ProxyBridge.Settings cfg = socks5Bridge.getSettings();
         LinearLayout panel = new LinearLayout(this);
         panel.setOrientation(LinearLayout.VERTICAL);
@@ -268,13 +497,13 @@ public class MainActivity extends Activity {
             test.setEnabled(false);
             testResult.setTextColor(TEAL);
             testResult.setText("Проверка SOCKS5 и авторизации…");
-            io.execute(() -> {
+            executeSafely(io, () -> {
                 try {
                     socks5Bridge.testConnection(testHost, testPort, testUser, testPassword);
                     runOnUiThread(() -> {
                         test.setEnabled(true);
                         testResult.setTextColor(GOLD);
-                        testResult.setText("✓ SOCKS5 отвечает, авторизация успешна. Для определения страны сохраните настройки и откройте Диагностику.");
+                        testResult.setText("✓ SOCKS5 отвечает, авторизация успешна. Страна подключения отображается в настройках.");
                     });
                 } catch (Exception e) {
                     String error = safe(e.getMessage());
@@ -334,7 +563,7 @@ public class MainActivity extends Activity {
         field.setHint(hint);
         field.setTextColor(Color.WHITE);
         field.setHintTextColor(TEAL);
-        field.setTextSize(14);
+        field.setTextSize(fontSize(14));
         field.setInputType(inputType);
         field.setPadding(dp(10), dp(7), dp(10), dp(7));
         field.setBackground(shape(PANEL, TEAL));
@@ -351,7 +580,14 @@ public class MainActivity extends Activity {
     @Override public void onWindowFocusChanged(boolean hasFocus) {
         super.onWindowFocusChanged(hasFocus);
         if (hasFocus) {
-            startInitialCatalogWhenReady();
+            if (firstLaunchAuthorizationPending && !firstLaunchAuthorizationShown
+                    && root != null && root.isAttachedToWindow()) {
+                firstLaunchAuthorizationShown = true;
+                firstLaunchAuthorizationPending = false;
+                browserHandler.postDelayed(this::showLogin, 350);
+            } else {
+                startInitialCatalogWhenReady();
+            }
             scheduleAutomaticUpdateCheck();
         }
     }
@@ -372,7 +608,43 @@ public class MainActivity extends Activity {
         if (!startupCatalogReady || startupCatalogStarted || !hasWindowFocus()
                 || root == null || !root.isAttachedToWindow()) return;
         startupCatalogStarted = true;
-        browserHandler.postDelayed(this::loadInitialCatalog, 350);
+        browserHandler.postDelayed(this::openConfiguredStartupSource, 350);
+    }
+
+    private void openConfiguredStartupSource() {
+        if (!pendingExternalSearchQuery.isEmpty()) {
+            String query = pendingExternalSearchQuery;
+            pendingExternalSearchQuery = "";
+            search.setText(query);
+            submitSearch();
+            Log.i("KinozalSearch", "Opened external voice search query");
+            return;
+        }
+        if (!pendingTvTorrentHref.isEmpty()) {
+            Torrent selected = new Torrent();
+            selected.href = pendingTvTorrentHref;
+            selected.title = pendingTvTorrentTitle == null || pendingTvTorrentTitle.trim().isEmpty()
+                    ? "Раздача Kinozal" : pendingTvTorrentTitle;
+            selected.size = selected.seeds = selected.leeches = "—";
+            pendingTvTorrentHref = "";
+            pendingTvTorrentTitle = "";
+            showTorrent(selected);
+            return;
+        }
+        android.content.SharedPreferences startupPrefs = getSharedPreferences(PREFS, MODE_PRIVATE);
+        // A clean installation must always start on Home. Only honor a startup
+        // section after the user explicitly selected it in settings.
+        if (!startupPrefs.getBoolean("startup_source_user_set", false)) {
+            startupPrefs.edit().putString("startup_source", "home").apply();
+        }
+        String source = startupPrefs.getString("startup_source", "home");
+        if ("collections".equals(source)) loadCollections();
+        else if ("browse.php".equals(source)) load("browse.php", "Все раздачи");
+        else if ("browse.php?c=1002".equals(source)) load(source, "Все фильмы");
+        else if ("browse.php?c=1001".equals(source)) load(source, "Все сериалы");
+        else if ("browse.php?c=46".equals(source)) load(source, "Зарубежные сериалы");
+        else if ("browse.php?c=45".equals(source)) load(source, "Российские сериалы");
+        else loadInitialCatalog();
     }
 
     private static class HomeSection {
@@ -384,273 +656,993 @@ public class MainActivity extends Activity {
     private static class HomePoster {
         Torrent torrent;
         String imageUrl;
+        // Prepared away from the UI thread before the card enters the view tree.
+        List<String> preparedBadges;
     }
 
     private void loadInitialCatalog() {
+        if (deferBrowserNavigationIfBusy(this::loadInitialCatalog)) return;
         loadInitialCatalog(0);
     }
 
-    private void loadInitialCatalog(int startupRetry) {
-        currentPath = "";
-        currentTitle = "Главная";
-        heading.setText("Главная");
-        showPageLoading("Подключение к Kinozal…");
-        String[] homePaths = {"novinki.php", "top.php?c=0&d=0&f=0&j=&k=0&s=0&t=0",
-                "top.php?c=0&d=0&f=0&j=&k=0&s=0&t=0&w=1",
-                "top.php?c=0&d=0&f=0&j=&k=0&s=0&t=0&w=2",
-                "top.php?j=%D0%BB%D1%83%D1%87%D1%88%D0%B8%D0%B9%20%D1%84%D0%B8%D0%BB%D1%8C%D0%BC%20%D0%9E%D1%81%D0%BA%D0%B0%D1%80",
-                "top.php?j=Netflix", "top.php?j=HBO",
-                "top.php?j=Walt%20Disney%20Pictures", "top.php?j=Marvel"};
-        String[] homeTitles = {"Новинки", "Топ раздач", "Топ недели", "Топ месяца",
-                "Топ Оскар", "Топ Netflix", "Топ HBO", "Топ Walt Disney", "Топ Marvel"};
+    private static final String[] HOME_PATHS = {
+            "novinki.php",
+            "top.php?j=&t=0&d=0&k=0&f=0&w=2&s=0",
+            "top.php?j=&t=31&d=0&k=0&f=0&w=2&s=0",
+            "top.php?j=&t=32&d=0&k=0&f=0&w=2&s=0",
+            "top.php?j=&t=1&d=0&k=0&f=0&w=2&s=0",
+            "top.php?t=2&d=0&f=0&k=0&j=&s=0&w=2",
+            "top.php?j=&t=4&d=0&k=0&f=0&w=2&s=0",
+            "top.php?j=&t=7&d=0&k=0&f=0&w=2&s=0"
+    };
+    private static final String[] HOME_TITLES = {
+            "Новинки кино",
+            "Топ раздач месяца",
+            "Топ русские сериалы",
+            "Топ иностранные сериалы",
+            "Топ фильмы",
+            "Топ мульты",
+            "Топ музыка",
+            "Топ игр"
+    };
 
-        // Cache I/O and Jsoup parsing can be expensive for large HTML files.
-        // Never do this work on Android's UI thread: it caused startup freezes
-        // and could trigger an ANR or process death on TV devices.
-        io.execute(() -> {
-            List<HomeSection> cached = new ArrayList<>();
-            int cachedFiles = 0;
-            long startedAt = android.os.SystemClock.elapsedRealtime();
-            for (int i = 0; i < homePaths.length; i++) {
-                byte[] bytes = diskCache.get("home|" + client.getMirror() + "|" + homePaths[i],
-                        7L * 24L * 60L * 60L * 1000L);
-                if (bytes == null || bytes.length == 0) continue;
-                cachedFiles++;
-                try {
-                    String html = new String(bytes, StandardCharsets.UTF_8);
-                    HomeSection section = new HomeSection(homeTitles[i], homePaths[i]);
-                    section.items.addAll(parseHomePosters(Jsoup.parse(html, client.getMirror() + "/")));
-                    if (!section.items.isEmpty()) cached.add(section);
-                } catch (Exception ignored) { }
-            }
-            removeHomeDuplicates(cached);
-            int total = countHomeCards(cached);
-            long elapsed = android.os.SystemClock.elapsedRealtime() - startedAt;
-            String diagnostic = String.format(java.util.Locale.ROOT,
-                    "Главная: файлов прочитано %d из %d; лент восстановлено %d; карточек восстановлено %d; чтение %.1f мс",
-                    cachedFiles, homePaths.length, cached.size(), total, (double) elapsed);
+    private static final String[] COLLECTION_PATHS = {
+            "top.php?j=Netflix",
+            "top.php?j=HBO",
+            "top.php?j=Marvel",
+            "top.php?j=Walt%20Disney%20Pictures",
+            "top.php?j=Pixar",
+            "top.php?j=%D0%9F%D1%81%D0%B8%D1%85%D0%BE%D0%BB%D0%BE%D0%B3%D0%B8%D1%87%D0%B5%D1%81%D0%BA%D0%B8%D0%B9%20%D1%82%D1%80%D0%B8%D0%BB%D0%BB%D0%B5%D1%80",
+            "top.php?j=%D0%9D%D0%BE%D0%B2%D0%BE%D0%B3%D0%BE%D0%B4%D0%BD%D0%B8%D0%B9",
+            "top.php?j=%D0%A0%D0%B5%D0%B0%D0%BB%D1%8C%D0%BD%D1%8B%D0%B5%20%D1%81%D0%BE%D0%B1%D1%8B%D1%82%D0%B8%D1%8F",
+            "top_collections.php?j=%D0%BE%D1%81%D0%BA%D0%B0%D1%80%D0%BE%D0%BD%D0%BE%D1%81%D0%BD%D1%8B%D0%B5",
+            "top.php?j=%D1%8D%D0%BA%D1%80%D0%B0%D0%BD%D0%B8%D0%B7%D0%B0%D1%86%D0%B8%D1%8F",
+            "top_collections.php?j=%D0%BA%D0%B8%D0%BD%D0%BE%D1%81%D0%BF%D0%BE%D1%80%D1%82"
+    };
+    private static final String[] COLLECTION_TITLES = {
+            "Netflix", "HBO", "Marvel", "Walt Disney", "Pixar",
+            "Триллер", "Новый год", "Реальные события", "Оскар",
+            "Экранизации", "Спорт"
+    };
+
+    private boolean deferBrowserNavigationIfBusy(Runnable navigation) {
+        if (!browserFeedLoading && !tvChannelsRefreshInProgress) return false;
+        // Keep the latest explicit user choice; it will open as soon as the
+        // background WebView sequence finishes instead of cancelling it.
+        pendingBrowserNavigation = navigation;
+        progress.setVisibility(View.VISIBLE);
+        status.setText("Завершаем обновление каталога…");
+        return true;
+    }
+
+    private void runPendingBrowserNavigation() {
+        if (browserFeedLoading || tvChannelsRefreshInProgress || pendingBrowserNavigation == null) return;
+        Runnable navigation = pendingBrowserNavigation;
+        pendingBrowserNavigation = null;
+        browserHandler.post(navigation);
+    }
+
+    private void loadCollections() {
+        if (deferBrowserNavigationIfBusy(this::loadCollections)) return;
+        activateFeedScreen("collections");
+        currentPath = "collections";
+        currentTitle = "Подборки";
+        heading.setText("Подборки");
+        synchronized (feedDiagnosticsLock) {
+            feedLoadDiagnostics.setLength(0);
+            feedDiagnosticStartedAtMs = android.os.SystemClock.elapsedRealtime();
+            feedDiagnosticGroup = "Подборки";
+        }
+        FeedDiagnostics.start(this, "Подборки", client == null ? "?" : client.getMirror(),
+                COLLECTION_PATHS, "вход на экран подборок");
+        if (!collectionsSectionsMemory.isEmpty()) {
+            collectionsLoadedOnce = true;
+            appendFeedDiagnostic("CACHE_MEMORY", "экран показан из памяти Activity; секций="
+                    + collectionsSectionsMemory.size() + ", карточек=" + countHomeCards(collectionsSectionsMemory));
+            appendFeedDiagnostic("REFRESH_DECISION", "кэш памяти показан сразу; проверяем фоновое обновление по сроку давности");
+            HomeFeedScheduler.refreshCachedIfStale(getApplicationContext(), "collections");
+            status.setText("Показано лент: " + collectionsSectionsMemory.size());
+            return;
+        }
+        List<HomeSection> cached = readCollectionsModel();
+        if (cached != null && !cached.isEmpty()) {
+            collectionsSectionsMemory = new ArrayList<>(cached);
+            collectionsLoadedOnce = true;
+            java.io.File cacheFile = collectionsModelFile();
+            long cacheAgeMs = cacheFile.isFile() ? Math.max(0L, System.currentTimeMillis() - cacheFile.lastModified()) : -1L;
+            appendFeedDiagnostic("CACHE_DISK", "экран показан из файла kinozal_collections_model_v1.json; секций="
+                    + cached.size() + ", карточек=" + countHomeCards(cached)
+                    + ", fileBytes=" + (cacheFile.isFile() ? cacheFile.length() : 0L)
+                    + ", fileAgeMs=" + cacheAgeMs);
+            renderHome(cached);
+            status.setText("Подборки из кэша");
+            appendFeedDiagnostic("REFRESH_SCHEDULE", "кэш показан сразу; запрашиваем фоновое обновление, если прошло 30 минут");
+            HomeFeedScheduler.refreshCachedIfStale(getApplicationContext(), "collections");
+            return;
+        }
+        appendFeedDiagnostic("CACHE_MISS", "валидный дисковый кеш не найден; запускается WebView-загрузка");
+        if (collectionsLoadedOnce) {
+            appendFeedDiagnostic("REFRESH_DECISION", "collectionsLoadedOnce=true; ранний выход без сетевого запроса");
+            return;
+        }
+        browserFeedLoading = true;
+        showPageLoading("Загрузка подборок через WebView…");
+        if (sessionWebView == null) restoreBrowserSession("");
+        browserHandler.postDelayed(() -> loadHomeSectionsInBrowser(
+                COLLECTION_PATHS, COLLECTION_TITLES, 0, new ArrayList<>(), 0),
+                sessionWebView == null ? 350 : 100);
+    }
+
+    private void preloadHomeCache() {
+        if (!pendingTvTorrentHref.isEmpty()) {
+            homeCacheLoadFinished = true;
+            return;
+        }
+        executeSafely(io, () -> {
+            List<HomeSection> cached = readHomeModel();
             runOnUiThread(() -> {
-                homeCacheDiagnostic = diagnostic;
-                homeCacheDisplayed = total > 0;
-                if (homeCacheDisplayed) {
-                    setCatalogStatus("Постеров в кэше", total);
-                    renderHome(cached);
-                    progress.setVisibility(View.GONE);
-                    status.setText("Сохранённые ленты: " + cached.size() + " · обновление…");
+                homeCacheLoadFinished = true;
+                homeDiskCacheSnapshot = cached == null ? new ArrayList<>() : new ArrayList<>(cached);
+                if (!homeDiskCacheSnapshot.isEmpty()) {
+                    homeSectionsMemory = new ArrayList<>(homeDiskCacheSnapshot);
+                    homeCacheDisplayed = true;
+                    homeLoadedOnce = true;
+                    // Only attach Home when it is the currently selected startup page.
+                    if ((currentPath == null || currentPath.isEmpty())
+                            && "home".equals(getSharedPreferences(PREFS, MODE_PRIVATE)
+                                    .getString("startup_source", "home"))) {
+                        renderCachedHomeIfNeeded();
+                        status.setText("Главная · восстановлена из кэша");
+                        HomeFeedScheduler.scheduleInitial(getApplicationContext(), "home");
+                    }
                 }
-                if (sessionWebView != null) {
-                    loadHomeSectionsInBrowser(homePaths, homeTitles, 0, new ArrayList<>(), startupRetry);
-                } else {
-                    loadInitialCatalogFromHttp(homePaths, homeTitles);
+                if (initialHomeFetchPending) {
+                    initialHomeFetchPending = false;
+                    if (!homeLoadedOnce && (currentPath == null || currentPath.isEmpty())) {
+                        startInitialHomeBrowserLoad();
+                    }
                 }
             });
         });
     }
 
-    private void loadInitialCatalogFromHttp(String[] homePaths, String[] homeTitles) {
-        io.execute(() -> {
-            try {
-                List<HomeSection> sections = new ArrayList<>();
-                for (int i = 0; i < homePaths.length; i++) {
-                    String html = client.fetch(homePaths[i]);
-                    if (html == null || html.trim().isEmpty()) continue;
-                    HomeSection section = new HomeSection(homeTitles[i], homePaths[i]);
-                    try {
-                        section.items.addAll(parseHomePosters(
-                                Jsoup.parse(html, client.getMirror() + "/")));
-                        if (!section.items.isEmpty()) {
-                            List<HomeSection> oneFeed = new ArrayList<>();
-                            oneFeed.add(section);
-                            removeHomeDuplicates(oneFeed);
-                            if (!section.items.isEmpty()) {
-                                diskCache.put("home|" + client.getMirror() + "|" + homePaths[i],
-                                        html.getBytes(StandardCharsets.UTF_8));
-                                sections.add(section);
-                            }
-                        }
-                    } catch (Exception ignored) {
-                        // A malformed or challenge response must not poison the cache.
-                    }
+    private void renderCachedHomeIfNeeded() {
+        if (homeList == null || homeSectionsMemory.isEmpty() || homeList.getChildCount() > 0) return;
+        LinearLayout previous = list;
+        list = homeList;
+        renderHome(homeSectionsMemory);
+        list = previous;
+    }
+
+    private void loadInitialCatalog(int startupRetry) {
+        activateFeedScreen("home");
+        currentPath = "";
+        currentTitle = "Главная";
+        heading.setText("Главная");
+        if (homeLoadedOnce) {
+            renderCachedHomeIfNeeded();
+            status.setText("Главная · сохранённый экран");
+            return;
+        }
+        if (!homeCacheLoadFinished) {
+            initialHomeFetchPending = true;
+            progress.setVisibility(View.VISIBLE);
+            status.setText("Подготавливаем главную…");
+            return;
+        }
+        startInitialHomeBrowserLoad();
+    }
+
+    private void startInitialHomeBrowserLoad() {
+        activateFeedScreen("home");
+        if (homeLoadedOnce || browserFeedLoading) return;
+        browserFeedLoading = true;
+        currentPath = "";
+        currentTitle = "Главная";
+        heading.setText("Главная");
+        if (homeCacheDisplayed) {
+            // Keep cached rows visible while fresh feeds arrive one by one.
+            progress.setVisibility(View.VISIBLE);
+            status.setText("Обновляем главную…");
+        } else {
+            showPageLoading("Загрузка главной через WebView…");
+        }
+
+        // Keep the authenticated browser session as the source of fresh feeds.
+        // The local snapshot only improves first paint; it does not replace auth.
+        if (sessionWebView == null) {
+            restoreBrowserSession("");
+        }
+        browserHandler.postDelayed(() -> loadHomeSectionsInBrowser(
+                HOME_PATHS, HOME_TITLES, 0, new ArrayList<>(), 0),
+                sessionWebView == null ? 350 : 100);
+    }
+
+    private java.io.File homeModelFile() {
+        return new java.io.File(getFilesDir(), "kinozal_home_model_v2.json");
+    }
+
+    private void saveHomeModel(List<HomeSection> sections) {
+        try {
+            org.json.JSONArray feeds = new org.json.JSONArray();
+            for (HomeSection section : sections) {
+                org.json.JSONObject feed = new org.json.JSONObject();
+                feed.put("title", section.title);
+                feed.put("path", section.path);
+                org.json.JSONArray items = new org.json.JSONArray();
+                for (HomePoster poster : section.items) {
+                    org.json.JSONObject item = new org.json.JSONObject();
+                    item.put("title", poster.torrent.title);
+                    item.put("href", poster.torrent.href);
+                    item.put("size", poster.torrent.size);
+                    item.put("seeds", poster.torrent.seeds);
+                    item.put("leeches", poster.torrent.leeches);
+                    item.put("uploaded", poster.torrent.uploaded);
+                    item.put("image", poster.imageUrl);
+                    items.put(item);
                 }
-                removeHomeDuplicates(sections);
-                int total = countHomeCards(sections);
-                runOnUiThread(() -> {
-                    progress.setVisibility(View.GONE);
-                    if (!homeCacheDisplayed) {
-                        setCatalogStatus("Постеров", total);
-                        renderHome(sections);
-                    }
-                });
-            } catch (Exception e) {
-                runOnUiThread(() -> {
-                    progress.setVisibility(View.GONE);
-                    if (!homeCacheDisplayed) {
-                        status.setText("Нет соединения");
-                        addEmpty("Не удалось загрузить главную страницу. " + safe(e.getMessage()));
-                    }
-                });
+                feed.put("items", items);
+                feeds.put(feed);
             }
+            org.json.JSONObject rootJson = new org.json.JSONObject();
+            rootJson.put("version", 2);
+            rootJson.put("mirror", client.getMirror());
+            rootJson.put("savedAt", System.currentTimeMillis());
+            rootJson.put("feeds", feeds);
+            java.io.File target = homeModelFile();
+            java.io.File temp = new java.io.File(target.getParentFile(), target.getName() + ".tmp");
+            try (java.io.FileOutputStream out = new java.io.FileOutputStream(temp)) {
+                out.write(rootJson.toString().getBytes(StandardCharsets.UTF_8));
+                out.getFD().sync();
+            }
+            if (target.exists() && !target.delete()) throw new java.io.IOException("Cannot replace home cache");
+            if (!temp.renameTo(target)) throw new java.io.IOException("Cannot commit home cache");
+            // TV channels are refreshed separately from authenticated channel feeds.
+        } catch (Exception ignored) { }
+    }
+
+    private List<HomeSection> readHomeModel() {
+        java.io.File file = homeModelFile();
+        if (!file.isFile() || file.length() <= 0 || file.length() > 8L * 1024L * 1024L) return null;
+        try {
+            byte[] bytes = java.nio.file.Files.readAllBytes(file.toPath());
+            org.json.JSONObject rootJson = new org.json.JSONObject(new String(bytes, StandardCharsets.UTF_8));
+            if (rootJson.optInt("version") != 2
+                    || !client.getMirror().equals(rootJson.optString("mirror"))) return null;
+            if (System.currentTimeMillis() - rootJson.optLong("savedAt") > 7L * 24 * 60 * 60 * 1000) return null;
+            org.json.JSONArray feeds = rootJson.optJSONArray("feeds");
+            if (feeds == null) return null;
+            List<HomeSection> result = new ArrayList<>();
+            for (int i = 0; i < feeds.length(); i++) {                org.json.JSONObject feed = feeds.optJSONObject(i);
+                if (feed == null) continue;
+                String cachedPath = feed.optString("path");
+                // Drop legacy "new arrivals" sections saved by older builds.
+                if (cachedPath.isEmpty() || "?page=1".equals(cachedPath)) continue;
+                HomeSection section = new HomeSection(feed.optString("title"), cachedPath);
+                org.json.JSONArray items = feed.optJSONArray("items");
+                if (items == null) continue;
+                for (int j = 0; j < items.length(); j++) {
+                    org.json.JSONObject value = items.optJSONObject(j);
+                    if (value == null) continue;
+                    HomePoster poster = new HomePoster();
+                    poster.torrent = new Torrent();
+                    poster.torrent.title = value.optString("title");
+                    poster.torrent.href = value.optString("href");
+                    poster.torrent.size = value.optString("size", "—");
+                    poster.torrent.seeds = value.optString("seeds", "—");
+                    poster.torrent.leeches = value.optString("leeches", "—");
+                    poster.torrent.uploaded = value.optString("uploaded", "");
+                    poster.imageUrl = value.optString("image");
+                    if (!poster.torrent.title.isEmpty() && !poster.torrent.href.isEmpty()) section.items.add(poster);
+                }
+                if (!section.items.isEmpty()) result.add(section);
+            }
+            int beforeDedup = countHomeCards(result);
+            removeHomeDuplicates(result);
+            if (countHomeCards(result) != beforeDedup) saveHomeModel(result);
+            return result;
+        } catch (Exception ignored) { return null; }
+    }
+
+    private void refreshHomeInBackground() {
+        if (homeRefreshInProgress) return;
+        homeRefreshInProgress = true;
+        executeSafely(homeRefreshIo, () -> {
+            try {
+                java.util.Map<String, HomeSection> merged = new java.util.LinkedHashMap<>();
+                for (HomeSection old : homeSectionsMemory) merged.put(old.path, old);
+                List<java.util.concurrent.Future<HomeSection>> jobs = new ArrayList<>();
+                for (int i = 0; i < HOME_PATHS.length; i++) {
+                    final int index = i;
+                    jobs.add(homeRefreshIo.submit(() -> {
+                        String html = client.fetchPublic(HOME_PATHS[index]);
+                        if (html == null || html.trim().isEmpty()) return null;
+                        HomeSection section = new HomeSection(HOME_TITLES[index], HOME_PATHS[index]);
+                        section.items.addAll(parseHomePosters(Jsoup.parse(html, client.getMirror() + "/")));
+                        if (section.items.isEmpty()) return null;
+                        diskCache.put("home|" + client.getMirror() + "|" + HOME_PATHS[index],
+                                html.getBytes(StandardCharsets.UTF_8));
+                        return section;
+                    }));
+                }
+                boolean changed = false;
+                for (java.util.concurrent.Future<HomeSection> job : jobs) {
+                    try {
+                        HomeSection section = job.get();
+                        if (section != null) {
+                            if (!merged.containsKey(section.path) || isHomeSectionChanged(section)) changed = true;
+                            merged.put(section.path, section);
+                        }
+                    } catch (Exception ignored) { }
+                }
+                List<HomeSection> refreshed = new ArrayList<>(merged.values());
+                removeHomeDuplicates(refreshed);
+                saveHomeModel(refreshed);
+                final boolean contentChanged = changed;
+                runOnUiThread(() -> {
+                    homeSectionsMemory = refreshed;
+                    if (contentChanged && (currentPath == null || currentPath.isEmpty())) renderHome(refreshed);
+                    homeRefreshInProgress = false;
+                });
+            } catch (Exception ignored) {
+                runOnUiThread(() -> homeRefreshInProgress = false);
+            }
+        });
+    }
+
+    private boolean isHomeSectionChanged(HomeSection updated) {
+        for (HomeSection old : homeSectionsMemory) {
+            if (!old.path.equals(updated.path)) continue;
+            if (old.items.size() != updated.items.size()) return true;
+            for (int i = 0; i < old.items.size(); i++) {
+                HomePoster a = old.items.get(i), b = updated.items.get(i);
+                if (!a.torrent.href.equals(b.torrent.href)
+                        || !a.torrent.title.equals(b.torrent.title)
+                        || !a.imageUrl.equals(b.imageUrl)) return true;
+            }
+            return false;
+        }
+        return true;
+    }
+
+    private void loadInitialCatalogFromHttp(String[] homePaths, String[] homeTitles) {
+        executeSafely(homeRefreshIo, () -> {
+            List<java.util.concurrent.Future<HomeSection>> jobs = new ArrayList<>();
+            for (int i = 0; i < homePaths.length; i++) {
+                final int index = i;
+                jobs.add(homeRefreshIo.submit(() -> {
+                    String html = client.fetchPublic(homePaths[index]);
+                    if (html == null || html.trim().isEmpty()) return null;
+                    HomeSection section = new HomeSection(homeTitles[index], homePaths[index]);
+                    section.items.addAll(parseHomePosters(Jsoup.parse(html, client.getMirror() + "/")));
+                    if (section.items.isEmpty()) return null;
+                    diskCache.put("home|" + client.getMirror() + "|" + homePaths[index],
+                            html.getBytes(StandardCharsets.UTF_8));
+                    return section;
+                }));
+            }
+            List<HomeSection> sections = new ArrayList<>();
+            for (java.util.concurrent.Future<HomeSection> job : jobs) {
+                try { HomeSection section = job.get(); if (section != null) sections.add(section); }
+                catch (Exception ignored) { }
+            }
+            removeHomeDuplicates(sections);
+            if (!sections.isEmpty()) saveHomeModel(sections);
+            int total = countHomeCards(sections);
+            runOnUiThread(() -> {
+                progress.setVisibility(View.GONE);
+                if (!sections.isEmpty()) {
+                    homeSectionsMemory = new ArrayList<>(sections);
+                    homeCacheDisplayed = true;
+                    setCatalogStatus("Постеров", total);
+                    renderHome(sections);
+                    status.setText("Показано лент: " + sections.size());
+                } else if (!homeCacheDisplayed) {
+                    status.setText("Пробуем резервную загрузку через WebView…");
+                    if (sessionWebView == null) restoreBrowserSession("");
+                    browserHandler.postDelayed(() -> loadHomeSectionsInBrowser(
+                            homePaths, homeTitles, 0, new ArrayList<>(), 0), 250);
+                }
+            });
         });
     }
 
     private void loadHomeSectionsInBrowser(String[] paths, String[] titles, int index,
             List<HomeSection> sections, int retry) {
-        if (index >= paths.length) {
-            removeHomeDuplicates(sections);
-            // Re-render the final de-duplicated model. This replaces each row
-            // in place, so cards discarded by final normalization disappear too.
-            for (HomeSection section : sections) renderHomeSection(section);
-            int total = countHomeCards(sections);
-            progress.setVisibility(View.GONE);
-            if (total == 0) {
-                status.setText("Нет соединения");
-                addEmpty("Не удалось получить постеры Kinozal. Проверьте авторизацию и выбранное зеркало.");
-            } else {
-                setCatalogStatus("Постеров", total);
-                status.setText("Главная · Лент показано: " + sections.size() + "/" + paths.length
-                        + "\nЗапросов обработано: " + paths.length + "/" + paths.length
-                        + (homeCacheDisplayed ? "\nКэш обновлён" : ""));
-            }
-            return;
-        }
+        // Home and Collections are navigated sequentially; each rendered page is
+        // extracted directly from its authenticated WebView DOM using JavaScript.
+        if (index != 0) return;
+        String group = paths == HOME_PATHS ? "Главная" : "Подборки";
+        resetFeedDiagnostics(group, paths);
+        if (paths == HOME_PATHS) startHomePerformanceMonitor();
 
-        fetchBrowserPage(paths[index], null, html -> {
-            if (html == null || html.isEmpty()) {
-                if (index == 0 && retry == 0) {
-                    status.setText("Повторное подключение к Kinozal…");
-                    browserHandler.postDelayed(() -> loadHomeSectionsInBrowser(
-                            paths, titles, 0, new ArrayList<>(), 1), 1200);
-                    return;
-                }
-                browserHandler.postDelayed(() -> loadHomeSectionsInBrowser(
-                        paths, titles, index + 1, sections, 0), 150);
-                return;
-            }
-
-            // Disk writes and Jsoup parsing are deliberately kept off the UI
-            // thread. Each completed page is processed independently, then
-            // only its small parsed model is handed back for rendering.
-            io.execute(() -> {
-                HomeSection section = new HomeSection(titles[index], paths[index]);
-                try {
-                    // Parse and validate first. Never replace a known-good cache
-                    // entry with a Cloudflare challenge, login page or empty response.
-                    section.items.addAll(parseHomePosters(
-                            Jsoup.parse(html, client.getMirror() + "/")));
-                    if (!section.items.isEmpty()) {
-                        List<HomeSection> oneFeed = new ArrayList<>();
-                        oneFeed.add(section);
-                        removeHomeDuplicates(oneFeed);
-                        if (!section.items.isEmpty()) {
-                            diskCache.put("home|" + client.getMirror() + "|" + paths[index],
-                                    html.getBytes(StandardCharsets.UTF_8));
+        long fetchStarted = android.os.SystemClock.elapsedRealtime();
+        long parseStarted = fetchStarted;
+        fetchAndParseHomeFeedsSequentially(paths, titles, 0, new ArrayList<>(),
+                fetchStarted, parseStarted, loaded -> {
+                    if (loaded.isEmpty() && retry == 0) {
+                        appendFeedDiagnostic("NAVIGATION", "не получены карточки; error=" + safe(lastBrowserError));
+                        status.setText("Повторное подключение к Kinozal…");
+                        browserHandler.postDelayed(() -> loadHomeSectionsInBrowser(
+                                paths, titles, 0, new ArrayList<>(), 1), 1200);
+                        return;
+                    }
+                    removeHomeDuplicates(loaded);
+                    for (HomeSection section : loaded) {
+                        if (section == null || section.items == null) continue;
+                        for (HomePoster poster : section.items) {
+                            if (poster == null || poster.torrent == null) continue;
+                            appendFeedDiagnostic("CARD", "section=" + safe(section.title)
+                                    + ", title=" + safe(poster.torrent.title)
+                                    + ", href=" + safe(poster.torrent.href));
                         }
                     }
-                } catch (Exception ignored) { }
-
-                runOnUiThread(() -> {
-                    if (!section.items.isEmpty()) {
-                        sections.add(section);
-                        renderHomeSection(section);
+                    appendFeedDiagnostic("PARSE_DONE", "mode=webview-js, секций=" + loaded.size()
+                            + ", карточек=" + countHomeCards(loaded)
+                            + ", processingMs=" + (android.os.SystemClock.elapsedRealtime() - parseStarted));
+                    if (!loaded.isEmpty()) {
+                        if (paths == HOME_PATHS) saveHomeModel(loaded);
+                        else if (paths == COLLECTION_PATHS) saveCollectionsModel(loaded);
                     }
-                    status.setText("Обработано " + (index + 1) + "/" + paths.length
-                            + " · показано лент " + sections.size() + " · карточек "
-                            + countHomeCards(sections));
-                    setHomeProgress(index + 1, paths.length, sections.size());
-                    browserHandler.postDelayed(() -> loadHomeSectionsInBrowser(
-                            paths, titles, index + 1, sections, 0), 100);
+                    finishHomeBrowserLoad(paths, loaded);
+                });
+    }
+
+    private void finishHomeBrowserLoad(String[] paths, List<HomeSection> sections) {
+        appendFeedDiagnostic("RENDER_START", "секций=" + sections.size() + ", карточек=" + countHomeCards(sections));
+        // Preserve the existing screen completion behavior and keep Android TV
+        // channel loading on its separate, unchanged pipeline.
+        ensureFeedActions();
+        renderHomeSectionsIncrementally(sections);
+        int total = countHomeCards(sections);
+        if (!sections.isEmpty() && paths == HOME_PATHS) {
+            homeSectionsMemory = new ArrayList<>(sections);
+            homeLoadedOnce = true;
+            HomeFeedScheduler.scheduleInitial(getApplicationContext(), "home");
+        } else if (!sections.isEmpty() && paths == COLLECTION_PATHS) {
+            collectionsSectionsMemory = new ArrayList<>(sections);
+            collectionsLoadedOnce = true;
+            HomeFeedScheduler.scheduleInitial(getApplicationContext(), "collections");
+        }
+        progress.setVisibility(View.GONE);
+        browserFeedLoading = false;
+        if (paths == HOME_PATHS && pendingBrowserNavigation == null) {
+            browserHandler.postDelayed(() -> {
+                if (currentPath == null || currentPath.isEmpty()) loadTvChannelFeedsInBrowser();
+            }, 350);
+        } else {
+            runPendingBrowserNavigation();
+        }
+        appendFeedDiagnostic("FINISH", "секций=" + sections.size() + ", карточек=" + total
+                + ", totalMs=" + (android.os.SystemClock.elapsedRealtime() - feedDiagnosticStartedAtMs));
+        if (total == 0) {
+            status.setText("Нет соединения");
+            addEmpty("Не удалось получить постеры Kinozal. Проверьте авторизацию и выбранное зеркало.");
+        } else {
+            setCatalogStatus("Постеров", total);
+            status.setText("Показано лент: " + sections.size());
+        }
+    }
+
+    private void mergeNewArrivalsHomePages(List<HomeSection> sections) {
+        HomeSection combined = new HomeSection("Новые поступления", "");
+        for (int i = sections.size() - 1; i >= 0; i--) {
+            HomeSection section = sections.get(i);
+            if ("".equals(section.path) || "?page=1".equals(section.path)) {
+                combined.items.addAll(0, section.items);
+                sections.remove(i);
+            }
+        }
+        if (!combined.items.isEmpty()) sections.add(0, combined);
+    }
+
+    private static final String[] TV_CHANNEL_PATHS = HOME_PATHS;
+    private static final String[] TV_CHANNEL_TITLES = HOME_TITLES;
+    private boolean tvChannelsRefreshInProgress;
+
+    private java.io.File tvChannelModelFile() {
+        return new java.io.File(getFilesDir(), "kinozal_tv_channels_v1.json");
+    }
+
+    private void loadTvChannelFeedsInBrowser() {
+        if (tvChannelsRefreshInProgress || sessionWebView == null || isFinishing()) return;
+        tvChannelsRefreshInProgress = true;
+        List<HomeSection> sections = new ArrayList<>();
+        final String generalTopPath = "top.php?c=0&d=0&f=0&j=&k=0&s=0&t=0";
+        for (HomeSection existing : homeSectionsMemory) {
+            if (generalTopPath.equals(existing.path) && !existing.items.isEmpty()) {
+                HomeSection general = new HomeSection("Общий топ Kinozal", generalTopPath);
+                general.items.addAll(existing.items);
+                sections.add(general);
+                break;
+            }
+        }
+        loadNextTvChannelFeed(0, sections);
+    }
+
+    private void loadNextTvChannelFeed(int index, List<HomeSection> sections) {
+        if (index >= TV_CHANNEL_PATHS.length) {
+            // Keep each TV channel independent: the same release may legitimately
+            // appear in more than one feed. parseHomePosters already removes duplicates
+            // within an individual feed.
+            executeSafely(io, () -> {
+                try {
+                    org.json.JSONArray feeds = new org.json.JSONArray();
+                    for (HomeSection section : sections) {
+                        org.json.JSONObject feed = new org.json.JSONObject();
+                        feed.put("title", section.title);
+                        feed.put("path", section.path);
+                        org.json.JSONArray items = new org.json.JSONArray();
+                        for (HomePoster poster : section.items) {
+                            org.json.JSONObject item = new org.json.JSONObject();
+                            item.put("title", poster.torrent.title);
+                            item.put("href", poster.torrent.href);
+                            item.put("size", poster.torrent.size);
+                            item.put("seeds", poster.torrent.seeds);
+                            item.put("leeches", poster.torrent.leeches);
+                            item.put("uploaded", poster.torrent.uploaded);
+                            item.put("image", poster.imageUrl);
+                            items.put(item);
+                        }
+                        feed.put("items", items);
+                        feeds.put(feed);
+                    }
+                    org.json.JSONObject rootJson = new org.json.JSONObject();
+                    rootJson.put("version", 1);
+                    rootJson.put("mirror", client.getMirror());
+                    rootJson.put("savedAt", System.currentTimeMillis());
+                    rootJson.put("feeds", feeds);
+                    java.io.File target = tvChannelModelFile();
+                    java.io.File temp = new java.io.File(target.getParentFile(), target.getName() + ".tmp");
+                    try (java.io.FileOutputStream out = new java.io.FileOutputStream(temp)) {
+                        out.write(rootJson.toString().getBytes(StandardCharsets.UTF_8));
+                        out.getFD().sync();
+                    }
+                    if (target.exists() && !target.delete()) throw new java.io.IOException("Cannot replace TV channel cache");
+                    if (!temp.renameTo(target)) throw new java.io.IOException("Cannot commit TV channel cache");
+                    runOnUiThread(() -> {
+                        tvChannelsRefreshInProgress = false;
+                        TvHomeChannels.sync(this, target);
+                        runPendingBrowserNavigation();
+                    });
+                } catch (Exception e) {
+                    runOnUiThread(() -> {
+                        tvChannelsRefreshInProgress = false;
+                        runPendingBrowserNavigation();
+                    });
+                }
+            });
+            return;
+        }
+        final String path = TV_CHANNEL_PATHS[index];
+        final String title = TV_CHANNEL_TITLES[index];
+        fetchBrowserPage(path, null, html -> {
+            if (html == null || html.trim().isEmpty()) {
+                browserHandler.postDelayed(() -> loadNextTvChannelFeed(index + 1, sections), 180);
+                return;
+            }
+            executeSafely(io, () -> {
+                HomeSection section = new HomeSection(title, path);
+                try {
+                    section.items.addAll(parseHomePosters(Jsoup.parse(html, client.getMirror() + "/")));
+                    // Apply the same title/id/link de-duplication used by the home rows,
+                    // but scope it to this feed so separate TV collections stay independent.
+                    List<HomeSection> oneFeed = new ArrayList<>();
+                    oneFeed.add(section);
+                    removeHomeDuplicates(oneFeed);
+                } catch (Exception ignored) { }
+                runOnUiThread(() -> {
+                    if (!section.items.isEmpty()) sections.add(section);
+                    browserHandler.postDelayed(() -> loadNextTvChannelFeed(index + 1, sections), 180);
                 });
             });
         });
     }
 
     /**
-     * Load the first page as a normal WebView navigation to establish the
-     * authenticated origin, then fetch all remaining home sections concurrently.
+     * Navigate feeds sequentially and extract their already-rendered DOM in WebView.
+     * Jsoup is retained as a background fallback if JavaScript extraction fails.
      */
-    private void fetchBrowserPages(String[] paths, java.util.function.Consumer<List<String>> callback) {
-        fetchBrowserPage(paths[0], null, firstHtml -> {
-            if (firstHtml == null || firstHtml.isEmpty()) {
-                if (lastBrowserError == null || lastBrowserError.isEmpty())
-                    lastBrowserError = "Первый запрос novinki.php не вернул HTML";
-                callback.accept(null);
+    private void fetchAndParseHomeFeedsSequentially(String[] paths, String[] titles, int index,
+            List<HomeSection> loaded, long fetchStarted, long parseStarted,
+            java.util.function.Consumer<List<HomeSection>> callback) {
+        if (index >= paths.length) {
+            appendFeedDiagnostic("FETCH_DONE", "parallelBatchSize=2, totalMs="
+                    + (android.os.SystemClock.elapsedRealtime() - fetchStarted));
+            callback.accept(loaded);
+            return;
+        }
+
+        final int feedIndex = index;
+        final String path = paths[index];
+        final String title = titles[index];
+        long requestStarted = android.os.SystemClock.elapsedRealtime();
+        appendFeedDiagnostic(index == 0 ? "NAVIGATION_START" : "BATCH_NAVIGATION",
+                path + " index=" + (index + 1) + "/" + paths.length);
+
+        // One real WebView navigation establishes/refreshes the authenticated origin.
+        // The next two same-origin feeds are fetched concurrently with credentials.
+        fetchBrowserPage(path, null, html -> {
+            long requestDuration = android.os.SystemClock.elapsedRealtime() - requestStarted;
+            int htmlLength = html == null ? 0 : html.length();
+            appendFeedDiagnostic("NAVIGATION_DONE", path + " durationMs=" + requestDuration
+                    + ", htmlChars=" + htmlLength
+                    + (htmlLength == 0 ? ", error=" + safe(lastBrowserError) : ""));
+            if (htmlLength == 0) {
+                fetchAndParseHomeFeedsSequentialFallback(paths, titles, feedIndex + 1, loaded,
+                        fetchStarted, parseStarted, callback, "navigation failed");
                 return;
             }
-            if (paths.length == 1) {
-                List<String> only = new ArrayList<>();
-                only.add(firstHtml);
-                callback.accept(only);
+
+            WebView web = sessionWebView;
+            if (web == null) {
+                parseHomeFeedFallback(html, title, path, feedIndex, loaded, paths, titles,
+                        fetchStarted, parseStarted, callback, "WebView отсутствует");
+                return;
+            }
+
+            final String currentHtml = html;
+            final int batchEnd = Math.min(paths.length, feedIndex + 3);
+            org.json.JSONArray batchPaths = new org.json.JSONArray();
+            for (int i = feedIndex + 1; i < batchEnd; i++) {
+                org.json.JSONObject entry = new org.json.JSONObject();
+                try {
+                    entry.put("path", paths[i]);
+                    entry.put("title", titles[i]);
+                    entry.put("index", i);
+                    batchPaths.put(entry);
+                } catch (Exception ignored) { }
+            }
+
+            String script = buildHomeParallelExtractScript(batchPaths.toString(), feedIndex,
+                    org.json.JSONObject.quote(currentHtml));
+            long batchStarted = android.os.SystemClock.elapsedRealtime();
+            evaluateHomeParallelBatch(web, script, value -> {
+                try {
+                    String json = new org.json.JSONArray("[" + value + "]").getString(0);
+                    org.json.JSONArray results = new org.json.JSONArray(json);
+                    boolean batchOk = results.length() == batchEnd - feedIndex;
+                    for (int i = 0; i < results.length(); i++) {
+                        org.json.JSONObject result = results.optJSONObject(i);
+                        if (result == null || !result.optBoolean("ok", false)) {
+                            batchOk = false;
+                            continue;
+                        }
+                        int resultIndex = result.optInt("index", -1);
+                        if (resultIndex < feedIndex || resultIndex >= batchEnd) {
+                            batchOk = false;
+                            continue;
+                        }
+                        String resultPath = paths[resultIndex];
+                        String resultHtml = result.optString("html", "");
+                        if (isCloudflareChallengeHtml(resultHtml)) {
+                            batchOk = false;
+                            appendFeedDiagnostic("CLOUDFLARE_BATCH_BLOCKED",
+                                    resultPath + " response is a Cloudflare challenge; switching to real WebView navigation");
+                            continue;
+                        }
+                        org.json.JSONArray extractedItems = result.optJSONArray("items");
+                        appendHomeExtractorDiagnostics(extractedItems, resultPath);
+                        HomeSection section = new HomeSection(titles[resultIndex], resultPath);
+                        section.items.addAll(parseHomePostersFromJsonArray(extractedItems));
+                        if (!section.items.isEmpty()) {
+                            loaded.add(section);
+                            diskCache.put("home|" + client.getMirror() + "|" + resultPath,
+                                    resultHtml.getBytes(StandardCharsets.UTF_8));
+                        }
+                        appendFeedDiagnostic(resultIndex == feedIndex ? "PARSE_JS" : "PARSE_JS_PARALLEL",
+                                resultPath + " durationMs="
+                                + (android.os.SystemClock.elapsedRealtime() - batchStarted)
+                                + ", cards=" + section.items.size()
+                                + ", htmlChars=" + resultHtml.length());
+                    }
+                    if (batchOk) {
+                        appendFeedDiagnostic("PARALLEL_BATCH", "feeds=" + (batchEnd - feedIndex - 1)
+                                + ", durationMs=" + (android.os.SystemClock.elapsedRealtime() - batchStarted));
+                        fetchAndParseHomeFeedsSequentially(paths, titles, batchEnd, loaded,
+                                fetchStarted, parseStarted, callback);
+                    } else {
+                        appendFeedDiagnostic("PARALLEL_FALLBACK", "batch incomplete; continue sequentially from "
+                                + (feedIndex + 1));
+                        fetchAndParseHomeFeedsSequentialFallback(paths, titles, feedIndex + 1, loaded,
+                                fetchStarted, parseStarted, callback, "parallel batch incomplete");
+                    }
+                } catch (Exception e) {
+                    appendFeedDiagnostic("PARALLEL_FALLBACK", path + " " + safe(e.getMessage()));
+                    // The current navigated page is retained; remaining feeds use the proven path.
+                    fetchAndParseHomeFeedsSequentialFallback(paths, titles, feedIndex + 1, loaded,
+                            fetchStarted, parseStarted, callback, "JS batch error");
+                }
+            });
+        });
+    }
+
+    private String buildHomeParallelExtractScript(String pathsJson, int currentIndex, String currentHtmlJson) {
+        return "(function(){"
+                + "function extract(doc,base){try{"
+                + "var links=doc.querySelectorAll('a[href*=\"details.php?id=\"]');"
+                + "var out=[],seen=Object.create(null),stats={anchors:links.length,noRow:0,shortRow:0,noTitle:0,accepted:0};"
+                + "function txt(e){return e?(e.innerText||e.textContent||'').replace(/\\\\s+/g,' ').trim():'';}"
+                + "function imgSrc(img){if(!img)return '';var a=['data-src','data-original','data-lazy-src','data-original-src','src'];"
+                + "for(var i=0;i<a.length;i++){var v=(img.getAttribute(a[i])||'').trim();"
+                + "if(v&&v.indexOf('data:image/')!==0)return v;}"
+                + "var ss=img.getAttribute('data-srcset')||img.getAttribute('srcset')||'';"
+                + "return ss?ss.split(',')[0].trim().split(/\\\\s+/)[0]:'';}"
+                + "for(var i=0;i<links.length;i++){var a=links[i],raw=a.getAttribute('href')||'';"
+                + "if(raw.indexOf('details.php?id=')<0||/userdetails/i.test(raw))continue;"
+                + "var href='';try{href=new URL(raw,base).href;}catch(e){continue;}if(seen[href])continue;"
+                + "var row=a.closest('tr');if(!row)stats.noRow++;else if(row.querySelectorAll('td').length<6)stats.shortRow++;seen[href]=1;"
+                + "var img=a.querySelector('img');if(!img&&row)img=row.querySelector('img');"
+                + "if(!img&&a.parentElement)img=a.parentElement.querySelector('img');"
+                + "var p=a;for(var d=0;d<4&&!img&&p;d++){p=p.parentElement;if(p)img=p.querySelector('img');}"
+                + "var title=(a.getAttribute('title')||'').trim()||(img?(img.getAttribute('alt')||'').trim():'')||txt(a);"
+                + "if(!title){stats.noTitle++;continue;}var image=imgSrc(img);try{if(image)image=new URL(image,base).href;}catch(e){}"
+                + "var cells=row?row.querySelectorAll('td'):[];function cell(n){return cells.length>n?txt(cells[n]):'—';}"
+                + "out.push({title:title,href:href,image:image,size:cell(3),seeds:cell(4),leeches:cell(5),uploaded:cell(6)});stats.accepted++;}out.push({_diag:stats});"
+                + "return out;}catch(e){return [];}}"
+                + "var requests=" + pathsJson + ";"
+                + "var currentHtml=" + currentHtmlJson + ",currentIndex=" + currentIndex + ";"
+                + "window.__kinozalParallelResult=null;"
+                + "Promise.all(requests.map(function(r){"
+                + "var url=new URL(r.path,location.href).href;"
+                + "return fetch(url,{credentials:'include',cache:'no-store'}).then(function(resp){"
+                + "if(!resp.ok)throw new Error('HTTP '+resp.status+' '+r.path);"
+                + "return resp.arrayBuffer().then(function(buf){"
+                + "var ct=resp.headers.get('content-type')||'',match=ct.match(/charset\\s*=\\s*['\\\"]?([^;\\s'\\\"]+)/i);"
+                + "var probe=new TextDecoder('windows-1252').decode(buf.slice(0,4096));"
+                + "var meta=probe.match(/<meta[^>]+charset\\s*=\\s*['\\\"]?([^\\s'\\\"/>;]+)/i)"
+                + "||probe.match(/<meta[^>]+content=[^>]*charset=([^\\s'\\\";]+)/i);"
+                + "var enc=match?match[1].toLowerCase():(meta?meta[1].toLowerCase():'utf-8'),html;"
+                + "try{html=new TextDecoder(enc).decode(buf);}catch(decodeError){html=new TextDecoder('utf-8').decode(buf);}"
+                + "var doc=new DOMParser().parseFromString(html,'text/html');"
+                + "return {ok:true,index:r.index,html:html,items:extract(doc,url)};});"
+                + "});})).then(function(rows){rows.unshift({ok:true,index:currentIndex,html:currentHtml,"
+                + "items:extract(document,document.baseURI)});window.__kinozalParallelResult=JSON.stringify(rows);})"
+                + ".catch(function(e){window.__kinozalParallelResult=JSON.stringify([{ok:true,index:currentIndex,html:currentHtml,"
+                + "items:extract(document,document.baseURI)},{ok:false,error:String(e)}]);});"
+                + "return 'started';})()";
+    }
+
+    private void evaluateHomeParallelBatch(WebView web, String script,
+            java.util.function.Consumer<String> callback) {
+        final int[] attempts = {0};
+        web.evaluateJavascript("window.__kinozalParallelResult=null;" + script, ignored -> {
+            final Runnable[] poll = new Runnable[1];
+            poll[0] = () -> {
+                if (web != sessionWebView || isFinishing()) {
+                    callback.accept(null);
+                    return;
+                }
+                web.evaluateJavascript("window.__kinozalParallelResult", value -> {
+                    if (value != null && !"null".equals(value) && value.length() > 2) {
+                        callback.accept(value);
+                    } else if (++attempts[0] >= 150) {
+                        appendFeedDiagnostic("PARALLEL_TIMEOUT", "fetch batch exceeded 15 seconds");
+                        callback.accept(null);
+                    } else {
+                        browserHandler.postDelayed(poll[0], 100);
+                    }
+                });
+            };
+            browserHandler.postDelayed(poll[0], 100);
+        });
+    }
+
+    private void appendHomeExtractorDiagnostics(org.json.JSONArray array, String path) {
+        if (array == null || array.length() == 0) return;
+        org.json.JSONObject last = array.optJSONObject(array.length() - 1);
+        org.json.JSONObject stats = last == null ? null : last.optJSONObject("_diag");
+        if (stats == null) return;
+        appendFeedDiagnostic("JS_EXTRACT_STATS", path + " anchors=" + stats.optInt("anchors")
+                + ", noRow=" + stats.optInt("noRow") + ", shortRow=" + stats.optInt("shortRow")
+                + ", noTitle=" + stats.optInt("noTitle") + ", accepted=" + stats.optInt("accepted"));
+    }
+
+    private List<HomePoster> parseHomePostersFromJsonArray(org.json.JSONArray array) {
+        List<HomePoster> out = new ArrayList<>();
+        if (array == null) return out;
+        java.util.Set<String> seen = new java.util.HashSet<>();
+        for (int i = 0; i < array.length(); i++) {
+            org.json.JSONObject obj = array.optJSONObject(i);
+            if (obj == null) continue;
+            String title = obj.optString("title", "").trim();
+            String href = obj.optString("href", "").trim();
+            if (title.isEmpty() || href.isEmpty() || !seen.add(href)) continue;
+            HomePoster item = new HomePoster();
+            item.torrent = new Torrent();
+            item.torrent.title = title;
+            item.torrent.href = href;
+            item.torrent.size = obj.optString("size", "—");
+            item.torrent.seeds = obj.optString("seeds", "—");
+            item.torrent.leeches = obj.optString("leeches", "—");
+            item.torrent.uploaded = obj.optString("uploaded", "—");
+            String image = obj.optString("image", "").trim();
+            if (!image.startsWith("http://") && !image.startsWith("https://")) image = "";
+            item.imageUrl = image;
+            item.torrent.poster = image;
+            out.add(item);
+        }
+        return out;
+    }
+
+    private void fetchAndParseHomeFeedsSequentialFallback(String[] paths, String[] titles, int index,
+            List<HomeSection> loaded, long fetchStarted, long parseStarted,
+            java.util.function.Consumer<List<HomeSection>> callback, String reason) {
+        appendFeedDiagnostic("SEQUENTIAL_FALLBACK", reason + ", fromIndex=" + index);
+        fetchAndParseHomeFeedsSequentiallyLegacy(paths, titles, index, loaded,
+                fetchStarted, parseStarted, callback);
+    }
+
+    private void fetchAndParseHomeFeedsSequentiallyLegacy(String[] paths, String[] titles, int index,
+            List<HomeSection> loaded, long fetchStarted, long parseStarted,
+            java.util.function.Consumer<List<HomeSection>> callback) {
+        if (index >= paths.length) {
+            appendFeedDiagnostic("FETCH_DONE", "sequentialFallback=true, totalMs="
+                    + (android.os.SystemClock.elapsedRealtime() - fetchStarted));
+            callback.accept(loaded);
+            return;
+        }
+        final int feedIndex = index;
+        final String path = paths[index];
+        fetchBrowserPage(path, null, html -> {
+            if (html == null || html.trim().isEmpty()) {
+                fetchAndParseHomeFeedsSequentiallyLegacy(paths, titles, feedIndex + 1, loaded,
+                        fetchStarted, parseStarted, callback);
                 return;
             }
             WebView web = sessionWebView;
             if (web == null) {
-                callback.accept(null);
+                parseHomeFeedFallback(html, titles[feedIndex], path, feedIndex, loaded, paths, titles,
+                        fetchStarted, parseStarted, callback, "WebView отсутствует during fallback");
                 return;
             }
-
-            org.json.JSONArray requested = new org.json.JSONArray();
-            for (int i = 1; i < paths.length; i++) requested.put(paths[i]);
-
-            final boolean[] completed = {false};
-            final Runnable[] timeoutHolder = {null};
-            web.addJavascriptInterface(new Object() {
-                @JavascriptInterface
-                public void onHomePagesResult(String json) {
-                    runOnUiThread(() -> {
-                        if (completed[0]) return;
-                        completed[0] = true;
-                        if (timeoutHolder[0] != null) browserHandler.removeCallbacks(timeoutHolder[0]);
-                        web.removeJavascriptInterface("KinozalHomeBridge");
-                        try {
-                            org.json.JSONArray array = new org.json.JSONArray(json);
-                            List<String> result = new ArrayList<>();
-                            result.add(firstHtml);
-                            for (int i = 0; i < array.length(); i++) {
-                                String html = array.optString(i, "");
-                                result.add(html);
-                            }
-                            callback.accept(result);
-                        } catch (Exception e) {
-                            lastBrowserError = "Ошибка разбора ответа JS-моста: " + e.getMessage();
-                            callback.accept(null);
-                        }
-                    });
+            // Reuse the DOM extraction logic with the current live document.
+            String currentScript = "(function(){try{var links=document.querySelectorAll('a[href*=\"details.php?id=\"]');var out=[],seen={};"
+                    + "function t(e){return e?(e.innerText||e.textContent||'').replace(/\\\\s+/g,' ').trim():'';}"
+                    + "function im(x){if(!x)return '';var z=['data-src','data-original','data-lazy-src','data-original-src','src'];"
+                    + "for(var j=0;j<z.length;j++){var v=x.getAttribute(z[j])||'';if(v&&v.indexOf('data:image/')!==0)return v;}"
+                    + "return '';}for(var i=0;i<links.length;i++){var a=links[i],h=a.getAttribute('href')||'';"
+                    + "if(h.indexOf('details.php?id=')<0||/userdetails/i.test(h))continue;var u=a.href||h;if(seen[u])continue;"
+                    + "var r=a.closest('tr');seen[u]=1;var x=a.querySelector('img');if(!x&&r)x=r.querySelector('img');"
+                    + "if(!x&&a.parentElement)x=a.parentElement.querySelector('img');var p=a;"
+                    + "for(var d=0;d<4&&!x&&p;d++){p=p.parentElement;if(p)x=p.querySelector('img');}"
+                    + "var n=(a.getAttribute('title')||'').trim()||(x?(x.getAttribute('alt')||'').trim():'')||t(a);if(!n)continue;"
+                    + "var q=im(x);try{if(q)q=new URL(q,document.baseURI).href;}catch(e){}var c=r?r.querySelectorAll('td'):[];"
+                    + "function cell(k){return c.length>k?t(c[k]):'—';}out.push({title:n,href:u,image:q,size:cell(3),seeds:cell(4),leeches:cell(5),uploaded:cell(6)});}"
+                    + "return JSON.stringify(out);}catch(e){return '[]';}})()";
+            web.evaluateJavascript(currentScript, value -> {
+                List<HomePoster> posters = parseHomePostersJson(value);
+                HomeSection section = new HomeSection(titles[feedIndex], path);                section.items.addAll(posters);
+                if (!section.items.isEmpty()) {
+                    loaded.add(section);
+                    diskCache.put("home|" + client.getMirror() + "|" + path,
+                            html.getBytes(StandardCharsets.UTF_8));
                 }
-            }, "KinozalHomeBridge");
+                appendFeedDiagnostic("PARSE_JS_FALLBACK", path + " cards=" + posters.size());
+                fetchAndParseHomeFeedsSequentiallyLegacy(paths, titles, feedIndex + 1, loaded,
+                        fetchStarted, parseStarted, callback);
+            });
+        });
+    }
 
-            timeoutHolder[0] = () -> {
-                if (completed[0]) return;
-                completed[0] = true;
-                web.removeJavascriptInterface("KinozalHomeBridge");
-                lastBrowserError = "Тайм-аут параллельных запросов (35 секунд)";
-                callback.accept(null);
-            };
-            browserHandler.postDelayed(timeoutHolder[0], 35000);
+    private List<HomePoster> parseHomePostersJson(String javascriptValue) {
+        List<HomePoster> out = new ArrayList<>();
+        try {
+            String json = new org.json.JSONArray("[" + javascriptValue + "]").getString(0);
+            org.json.JSONArray array = new org.json.JSONArray(json);
+            java.util.Set<String> seen = new java.util.HashSet<>();
+            for (int i = 0; i < array.length(); i++) {
+                org.json.JSONObject obj = array.optJSONObject(i);
+                if (obj == null) continue;
+                String title = obj.optString("title", "").trim();
+                String href = obj.optString("href", "").trim();
+                if (title.isEmpty() || href.isEmpty() || !seen.add(href)) continue;
+                HomePoster item = new HomePoster();
+                item.torrent = new Torrent();
+                item.torrent.title = title;
+                item.torrent.href = href;
+                item.torrent.size = obj.optString("size", "—");
+                item.torrent.seeds = obj.optString("seeds", "—");
+                item.torrent.leeches = obj.optString("leeches", "—");
+                item.torrent.uploaded = obj.optString("uploaded", "—");
+                String image = obj.optString("image", "").trim();
+                if (!image.startsWith("http://") && !image.startsWith("https://")) image = "";
+                item.imageUrl = image;
+                item.torrent.poster = image;
+                out.add(item);
+            }
+        } catch (Exception e) {
+            Log.w("KinozalFeedDiag", "Home JS JSON parse failed", e);
+        }
+        return out;
+    }
 
-            String script = "(function(){var p=" + requested.toString() + ";"
-                    + "Promise.all(p.map(function(u){return fetch(u,{credentials:'include',"
-                    + "cache:'no-store'}).then(function(r){if(!r.ok)return '';return r.text();}"
-                    + ").catch(function(){return '';});})).then(function(a){"
-                    + "window.KinozalHomeBridge.onHomePagesResult(JSON.stringify(a));"
-                    + "}).catch(function(e){window.KinozalHomeBridge.onHomePagesResult('[]');});})()";
-            web.evaluateJavascript(script, null);
+    private void parseHomeFeedFallback(String html, String title, String path, int feedIndex,
+            List<HomeSection> loaded, String[] paths, String[] titles, long fetchStarted,
+            long parseStarted, java.util.function.Consumer<List<HomeSection>> callback,
+            String reason) {
+        appendFeedDiagnostic("PARSE_JS_FALLBACK", path + " " + reason);
+        executeSafely(io, () -> {
+            long fallbackStarted = android.os.SystemClock.elapsedRealtime();
+            HomeSection section = new HomeSection(title, path);
+            try {
+                section.items.addAll(parseHomePosters(Jsoup.parse(html, client.getMirror() + "/")));
+            } catch (Exception e) {
+                appendFeedDiagnostic("PARSE_ERROR", path + " " + safe(e.getMessage()));
+            }
+            long fallbackDuration = android.os.SystemClock.elapsedRealtime() - fallbackStarted;
+            runOnUiThread(() -> {
+                if (!section.items.isEmpty()) {
+                    loaded.add(section);
+                    diskCache.put("home|" + client.getMirror() + "|" + path,
+                            html.getBytes(StandardCharsets.UTF_8));
+                }
+                appendFeedDiagnostic("PARSE_JS_FALLBACK_DONE", path + " durationMs="
+                        + fallbackDuration + ", cards=" + section.items.size());
+                fetchAndParseHomeFeedsSequentially(paths, titles, feedIndex + 1, loaded,
+                        fetchStarted, parseStarted, callback);
+            });
+        });
+    }
+
+    /**
+     * Load home feeds one by one through the authenticated WebView session.
+     * Sequential navigations avoid stalled parallel fetch() requests on Kinozal.
+     */
+    private void fetchBrowserPages(String[] paths, java.util.function.Consumer<List<String>> callback) {
+        long started = android.os.SystemClock.elapsedRealtime();
+        List<String> result = new ArrayList<>();
+        fetchBrowserPagesSequentially(paths, 0, result, started, callback);
+    }
+
+    private void fetchBrowserPagesSequentially(String[] paths, int index, List<String> result,
+            long started, java.util.function.Consumer<List<String>> callback) {
+        if (index >= paths.length) {
+            appendFeedDiagnostic("FETCH_DONE", "sequentialRequests=" + result.size()
+                    + ", totalMs=" + (android.os.SystemClock.elapsedRealtime() - started));
+            callback.accept(result);
+            return;
+        }
+
+        String path = paths[index];
+        long requestStarted = android.os.SystemClock.elapsedRealtime();
+        appendFeedDiagnostic(index == 0 ? "NAVIGATION_START" : "HTTP_START",
+                path + " index=" + (index + 1) + "/" + paths.length);
+
+        fetchBrowserPage(path, null, html -> {
+            long duration = android.os.SystemClock.elapsedRealtime() - requestStarted;
+            int length = html == null ? 0 : html.length();
+            appendFeedDiagnostic(index == 0 ? "NAVIGATION_DONE" : "HTTP",
+                    path + " durationMs=" + duration + ", htmlChars=" + length
+                            + (length == 0 ? ", error=" + safe(lastBrowserError) : ""));
+
+            if (length == 0) {
+                // Keep already loaded sections; a single failed feed must not
+                // discard successful responses from the same group.
+                result.add("");
+            } else {
+                result.add(html);
+            }
+            fetchBrowserPagesSequentially(paths, index + 1, result, started, callback);
         });
     }
 
     private List<HomePoster> parseHomePosters(Document doc) {
         List<HomePoster> out = new ArrayList<>();
-        Elements anchors = doc.select("table.t_peer td.nam > a[href*=details.php?id=]");
-        if (anchors.isEmpty()) anchors = doc.select("a[href*=details.php?id=]");
+        java.util.Set<String> seenLinks = new java.util.HashSet<>();
+        Elements anchors = doc.select("a[href*=details.php?id=]");
         for (Element a : anchors) {
             String linkPath = a.attr("href").toLowerCase(java.util.Locale.ROOT);
-            if (linkPath.contains("userdetails.php") || linkPath.contains("userdetails")) continue;
+            if (linkPath.contains("userdetails") || !linkPath.contains("details.php?id=")) continue;
             String href = mirrorUrl(a.absUrl("href"), a.attr("href"));
-            if (href.isEmpty()) continue;
+            if (href.isEmpty() || !seenLinks.add(href)) continue;
+            Element row = a.closest("tr");
+            // Keep release links even when a mirror no longer uses the legacy six-cell table.
+            // Row statistics are optional; poster/title extraction does not depend on them.
+
+            // Resolve the table row once and reuse it for poster and statistics lookup.
             Element img = a.selectFirst("img");
-            if (img == null) {
-                Element row = a.closest("tr");
-                if (row != null) img = row.selectFirst("img");
-            }
+            if (img == null && row != null) img = row.selectFirst("img");
             if (img == null && a.parent() != null) img = a.parent().selectFirst("img");
             if (img == null) {
                 Element ancestor = a;
@@ -674,29 +1666,28 @@ public class MainActivity extends Activity {
             item.torrent = new Torrent();
             item.torrent.title = title;
             item.torrent.href = href;
-            Element statsRow = a.closest("tr");
-            if (statsRow != null) {
-                Elements cells = statsRow.select("td");
+            if (row != null) {
+                Elements cells = row.select("td");
                 item.torrent.size = cells.size() > 3 ? cells.get(3).text().trim() : "—";
                 item.torrent.seeds = cells.size() > 4 ? cells.get(4).text().trim() : "—";
                 item.torrent.leeches = cells.size() > 5 ? cells.get(5).text().trim() : "—";
             } else {
                 item.torrent.size = item.torrent.seeds = item.torrent.leeches = "—";
             }
+            // Keep releases even when Kinozal has no poster or lazy loading has not
+            // produced a usable URL. The supplied Kinozal logo is shown as fallback.
+            if (image == null || !(image.startsWith("http://") || image.startsWith("https://"))) image = "";
             item.imageUrl = image;
-            boolean duplicate = false;
-            for (HomePoster old : out) {
-                if (old.torrent.href.equals(href)) { duplicate = true; break; }
-            }
-            if (!duplicate) out.add(item);
+            item.torrent.poster = image;
+            out.add(item);
         }
         return out;
     }
 
     /**
-     * Collapse alternate encodes of the same release inside each home section.
-     * Keep the torrent with the most seeders; leechers break ties. Other sections
-     * remain independent so a title can appear in multiple home collections.
+     * Collapse duplicate releases independently inside each home section.
+     * A title may legitimately appear in several different feeds, so no
+     * de-duplication key is shared between sections.
      */
     private int countHomeCards(List<HomeSection> sections) {
         int count = 0;
@@ -705,50 +1696,68 @@ public class MainActivity extends Activity {
     }
 
     private void removeHomeDuplicates(List<HomeSection> sections) {
+        java.util.regex.Pattern idPattern = java.util.regex.Pattern.compile(
+                "[?&]id=(\\d+)", java.util.regex.Pattern.CASE_INSENSITIVE);
         for (HomeSection section : sections) {
-            java.util.LinkedHashMap<String, HomePoster> bestByTitle = new java.util.LinkedHashMap<>();
-            java.util.Map<String, String> posterGroups = new java.util.HashMap<>();
-            java.util.Set<String> seenLinks = new java.util.HashSet<>();
+            java.util.Set<String> ids = new java.util.HashSet<>();
+            java.util.Set<String> titles = new java.util.HashSet<>();
+            java.util.Set<String> links = new java.util.HashSet<>();
+            java.util.Set<String> posterKeys = new java.util.HashSet<>();
             List<HomePoster> unique = new ArrayList<>();
-            for (HomePoster item : section.items) {
-                String href = item.torrent.href == null ? "" : item.torrent.href;
-                String id = "";
-                java.util.regex.Matcher matcher = java.util.regex.Pattern
-                        .compile("[?&]id=(\\d+)", java.util.regex.Pattern.CASE_INSENSITIVE)
-                        .matcher(href);
-                if (matcher.find()) id = matcher.group(1);
-                if ((!id.isEmpty() && seenLinks.contains("id:" + id))
-                        || (!href.isEmpty() && seenLinks.contains("url:" + href))) continue;
-                if (!id.isEmpty()) seenLinks.add("id:" + id);
-                if (!href.isEmpty()) seenLinks.add("url:" + href);
+            int duplicateIds = 0;
+            int duplicateLinks = 0;
+            int duplicateTitles = 0;
+            int invalid = 0;
 
-                String titleKey = normalizeHomeTitle(item.torrent.title);
-                String posterKey = normalizeHomePosterImage(item.imageUrl);
-                // Kinozal can expose the same movie under slightly different title
-                // strings. The poster URL is a second identity signal that catches
-                // those aliases without merging unrelated seasons by title alone.
-                String groupKey = titleKey;
-                if (!posterKey.isEmpty()) {
-                    String knownGroup = posterGroups.get(posterKey);
-                    if (knownGroup != null) groupKey = knownGroup;
-                    else if (groupKey.isEmpty()) groupKey = "poster:" + posterKey;
-                    posterGroups.put(posterKey, groupKey);
-                }
-                if (groupKey.isEmpty()) {
-                    unique.add(item);
+            for (HomePoster item : section.items) {
+                if (item == null || item.torrent == null) {
+                    invalid++;
                     continue;
                 }
-                HomePoster current = bestByTitle.get(groupKey);
-                if (current == null) {
-                    bestByTitle.put(groupKey, item);
-                } else if (homeTorrentScore(item) > homeTorrentScore(current)) {
-                    bestByTitle.put(groupKey, item);
+
+                String href = item.torrent.href == null ? "" : item.torrent.href.trim();
+                java.util.regex.Matcher matcher = idPattern.matcher(href);
+                String id = matcher.find() ? matcher.group(1) : "";
+                String titleKey = normalizeHomeTitle(item.torrent.title);
+                String posterKey = normalizeHomePosterImage(item.imageUrl);
+
+                if (!id.isEmpty() && ids.contains(id)) {
+                    duplicateIds++;
+                    continue;
                 }
+                if (!href.isEmpty() && links.contains(href)) {
+                    duplicateLinks++;
+                    continue;
+                }
+                if (!titleKey.isEmpty() && titles.contains(titleKey)) {
+                    duplicateTitles++;
+                    continue;
+                }
+                if (!posterKey.isEmpty() && posterKeys.contains(posterKey)) {
+                    duplicateTitles++;
+                    continue;
+                }
+
+                if (!id.isEmpty()) ids.add(id);
+                if (!href.isEmpty()) links.add(href);
+                if (!titleKey.isEmpty()) titles.add(titleKey);
+                if (!posterKey.isEmpty()) posterKeys.add(posterKey);
+                unique.add(item);
+                if (unique.size() >= 15) break;
             }
-            unique.addAll(bestByTitle.values());
+
+            int before = section.items.size();
             section.items.clear();
-            section.items.addAll(unique.subList(0, Math.min(15, unique.size())));
+            section.items.addAll(unique);
+            appendFeedDiagnostic("DEDUP", section.title
+                    + " before=" + before + ", after=" + unique.size()
+                    + ", duplicateIds=" + duplicateIds
+                    + ", duplicateLinks=" + duplicateLinks
+                    + ", duplicateTitles=" + duplicateTitles
+                    + ", invalid=" + invalid
+                    + ", limit=15");
         }
+        sections.removeIf(section -> section.items.isEmpty());
     }
 
     private String normalizeHomePosterImage(String imageUrl) {
@@ -764,14 +1773,32 @@ public class MainActivity extends Activity {
     }
 
     private void setHomeProgress(int processed, int total, int displayed) {
-        status.setText("Главная · Запросов: " + processed + "/" + total
-                + " · Лент отображено: " + displayed + "/" + total
-                + "\nВерсия: " + getAppVersionName());
+        status.setText("Показано лент: " + displayed);
     }
 
     private void setCatalogStatus(String itemType, int count) {
         status.setText(currentTitle + " · Загружено: " + count + " " + itemType
                 + "\nВерсия: " + getAppVersionName());
+        updateSidebarCategoryInfo(count);
+    }
+
+    private void updateSidebarCategoryInfo(int count) {
+        lastLoadedTorrentCount = count;
+        if (sidebarCategoryInfo != null) {
+            sidebarCategoryInfo.setText(currentTitle + " — загружено " + count + " раздач");
+        }
+    }
+
+    private void updateSidebarConnectionInfo() {
+        if (sidebarConnectionInfo != null) {
+            sidebarConnectionInfo.setText("Подключение к Kinozal: " + lastKinozalConnectionStatus);
+        }
+    }
+
+    private void updateSidebarLoginStatus(boolean loggedIn) {
+        if (sidebarLoginInfo == null) return;
+        sidebarLoginInfo.setText(loggedIn ? "Вход: выполнен" : "Вход: не выполнен");
+        sidebarLoginInfo.setTextColor(loggedIn ? Color.rgb(115, 190, 135) : Color.rgb(230, 105, 90));
     }
 
     private String getAppVersionName() {
@@ -784,8 +1811,7 @@ public class MainActivity extends Activity {
     }
 
     private int homeTorrentScore(HomePoster item) {
-        return parseInt(item.torrent.seeds) * 1000000 + parseInt(item.torrent.leeches);
-    }
+        return parseInt(item.torrent.seeds) * 1000000 + parseInt(item.torrent.leeches);    }
 
     private String normalizeHomeTitle(String title) {
         if (title == null) return "";
@@ -795,8 +1821,6 @@ public class MainActivity extends Activity {
         // alternate encodes don't fill a feed with copies of one film.
         int slash = value.indexOf(" / ");
         if (slash > 0) value = value.substring(0, slash);
-        value = value.replaceAll("\\([^)]*\\)", " ");
-        value = value.replaceAll("\\b(19|20)\\d{2}\\b", " ");
         value = value.replaceAll("\\b(2160p|1080p|720p|480p|4k|uhd|hdr10?|web[- .]?dl|webrip|blu[- .]?ray|bdrip|brrip|dvdrip|hdtv|h265|h264|x265|x264|hevc|avc|aac|dts|ac3|proper|repack|remux|extended|directors cut|theatrical|dubbed|subbed)\\b", " ");
         return value.replaceAll("[^\\p{L}\\p{N}]+", " ")
                 .replaceAll("\\s+", " ").trim();
@@ -828,7 +1852,7 @@ public class MainActivity extends Activity {
      * Resolve it from the torrent page og:image, also used by the details view.
      */
     private void loadHomePosterFromDetails(HomePoster item, ImageView target) {
-        io.execute(() -> {
+        executeSafely(io, () -> {
             try {
                 String html = client.fetch(item.torrent.href);
                 Document doc = Jsoup.parse(html, item.torrent.href);
@@ -857,48 +1881,68 @@ public class MainActivity extends Activity {
         });
     }
 
+    private Bitmap decodeImageForView(byte[] bytes, ImageView target) {
+        if (bytes == null || bytes.length == 0) return null;
+        BitmapFactory.Options bounds = new BitmapFactory.Options();
+        bounds.inJustDecodeBounds = true;
+        BitmapFactory.decodeByteArray(bytes, 0, bytes.length, bounds);
+        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null;
+        int targetWidth = target == null ? 0 : target.getWidth();
+        int targetHeight = target == null ? 0 : target.getHeight();
+        if (targetWidth <= 0 && target != null && target.getLayoutParams() != null)
+            targetWidth = target.getLayoutParams().width;
+        if (targetHeight <= 0 && target != null && target.getLayoutParams() != null)
+            targetHeight = target.getLayoutParams().height;
+        if (targetWidth <= 0) targetWidth = dp(240);
+        if (targetHeight <= 0) targetHeight = dp(360);
+        BitmapFactory.Options options = new BitmapFactory.Options();
+        options.inSampleSize = 1;
+        while (bounds.outWidth / (options.inSampleSize * 2) >= targetWidth
+                && bounds.outHeight / (options.inSampleSize * 2) >= targetHeight)
+            options.inSampleSize *= 2;
+        options.inPreferredConfig = Bitmap.Config.RGB_565;
+        options.inDither = true;
+        return BitmapFactory.decodeByteArray(bytes, 0, bytes.length, options);
+    }
+
+    private Bitmap getCachedImageBitmap(String imageUrl) {
+        return decodedImageCache == null ? null : decodedImageCache.get(imageUrl);
+    }
+
+    private void cacheImageBitmap(String imageUrl, Bitmap bitmap) {
+        if (decodedImageCache != null && imageUrl != null && bitmap != null && !bitmap.isRecycled())
+            decodedImageCache.put(imageUrl, bitmap);
+    }
+
     private void loadImageIntoView(String imageUrl, ImageView target) {
         loadImageIntoView(imageUrl, target, client.getMirror() + "/");
     }
 
     private void loadImageIntoView(String imageUrl, ImageView target, String referer) {
-        if (imageUrl == null || imageUrl.isEmpty()) return;
-        byte[] cachedImage = diskCache.get("image|" + imageUrl, 0L);
-        if (cachedImage != null) {
-            Bitmap cachedBitmap = BitmapFactory.decodeByteArray(cachedImage, 0, cachedImage.length);
-            if (cachedBitmap != null) { target.setImageBitmap(cachedBitmap); return; }
-        }
-        WebView web = sessionWebView;
-        if (web == null) {
-            loadImageWithHttp(imageUrl, target, referer);
+        if (imageUrl == null || imageUrl.isEmpty() || target == null) return;
+        Bitmap memoryBitmap = getCachedImageBitmap(imageUrl);
+        if (memoryBitmap != null) {
+            target.setImageBitmap(memoryBitmap);
             return;
         }
-        String quotedUrl = org.json.JSONObject.quote(imageUrl);
-        String script = "(function(){return fetch(" + quotedUrl + ",{credentials:'include'})"
-                + ".then(function(r){if(!r.ok)throw new Error('HTTP '+r.status);return r.blob();})"
-                + ".then(function(b){return new Promise(function(resolve,reject){var f=new FileReader();"
-                + "f.onloadend=function(){var v=String(f.result||'');resolve(v.substring(v.indexOf(',')+1));};"
-                + "f.onerror=reject;f.readAsDataURL(b);});});})()";
-        web.evaluateJavascript(script, result -> {
-            String encoded = null;
-            try { encoded = new org.json.JSONArray("[" + result + "]").getString(0); }
-            catch (Exception ignored) { }
-            if (encoded == null || encoded.isEmpty() || "null".equals(encoded)) {
-                loadImageWithHttp(imageUrl, target, referer);
+        executeSafely(imageIo, () -> {
+            Bitmap ready = getCachedImageBitmap(imageUrl);
+            if (ready != null) {
+                runOnUiThread(() -> { if (target.getParent() != null) target.setImageBitmap(ready); });
                 return;
             }
-            final String base64 = encoded;
-            io.execute(() -> {
-                try {
-                    byte[] bytes = android.util.Base64.decode(base64, android.util.Base64.DEFAULT);
-                    diskCache.put("image|" + imageUrl, bytes);
-                    Bitmap bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.length);
-                    if (bitmap != null) runOnUiThread(() -> {
-                        if (target.getParent() != null) target.setImageBitmap(bitmap);
-                    });
-                    else loadImageWithHttp(imageUrl, target, referer);
-                } catch (Exception ignored) { loadImageWithHttp(imageUrl, target, referer); }
-            });
+            byte[] cachedImage = diskCache.get("image|" + imageUrl, 0L);
+            if (cachedImage != null && cachedImage.length > 0) {
+                Bitmap cachedBitmap = decodeImageForView(cachedImage, target);
+                if (cachedBitmap != null) {
+                    cacheImageBitmap(imageUrl, cachedBitmap);
+                    runOnUiThread(() -> { if (target.getParent() != null) target.setImageBitmap(cachedBitmap); });
+                    return;
+                }
+            }
+            // Poster traffic must not share the authenticated WebView's main-thread
+        // JavaScript queue with catalogue navigation. Fetch and decode on imageIo.
+        loadImageWithHttp(imageUrl, target, referer);
         });
     }
 
@@ -907,14 +1951,17 @@ public class MainActivity extends Activity {
     }
 
     private void loadImageWithHttp(String imageUrl, ImageView target, String referer) {
-        io.execute(() -> {
+        if (imageUrl == null || imageUrl.isEmpty() || target == null) return;
+        executeSafely(imageIo, () -> {
             try {
                 byte[] bytes = diskCache.get("image|" + imageUrl, 0L);
-                if (bytes == null) {
+                if (bytes == null || bytes.length == 0) {
                     bytes = client.fetchBytes(imageUrl, "image/*", referer);
+                    if (bytes == null || bytes.length == 0) return;
                     diskCache.put("image|" + imageUrl, bytes);
                 }
-                Bitmap bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.length);
+                Bitmap bitmap = decodeImageForView(bytes, target);
+                cacheImageBitmap(imageUrl, bitmap);
                 if (bitmap != null) runOnUiThread(() -> {
                     if (target.getParent() != null) target.setImageBitmap(bitmap);
                 });
@@ -946,77 +1993,944 @@ public class MainActivity extends Activity {
         } catch (Exception ignored) { return value; }
     }
 
-    private void renderHome(List<HomeSection> sections) {
-        list.removeAllViews();
-        for (HomeSection section : sections) renderHomeSection(section);
-        if (sections.isEmpty()) addEmpty("На главной пока нет подборок.");
-        animateContentTransition(list);
+    private static final java.util.concurrent.ConcurrentHashMap<String, java.util.regex.Pattern>
+            HOME_BADGE_PATTERNS = new java.util.concurrent.ConcurrentHashMap<>();
+    private static final java.util.regex.Pattern HOME_MUSIC_HINT =
+            java.util.regex.Pattern.compile("\\b(FLAC|MP3|WAV|ALAC|APE|AAC|DSD)\\b");
+    private static final java.util.regex.Pattern HOME_GAME_HINT =
+            java.util.regex.Pattern.compile("\\b(PC|PS[345]|XBOX|NINTENDO|SWITCH|REPACK|PORTABLE)\\b");
+    private static final java.util.regex.Pattern HOME_GAME_VERSION =
+            java.util.regex.Pattern.compile("(?i)\\b(?:v(?:ersion)?\\s*)?([0-9]+\\.[0-9]+(?:\\.[0-9]+){0,2})\\b");
+
+    private static java.util.regex.Pattern homeBadgePattern(String alternatives) {
+        return HOME_BADGE_PATTERNS.computeIfAbsent(alternatives, key ->
+                java.util.regex.Pattern.compile("(?i)(?<![A-Z0-9])(?:" + key + ")(?![A-Z0-9])"));
     }
 
-    /** Append one completed home feed without rebuilding rows already on screen. */
+    private List<String> extractHomeBadges(String title, String sectionTitle) {
+        List<String> badges = new ArrayList<>();
+        if (title == null) return badges;
+        String value = title.toUpperCase(java.util.Locale.ROOT);
+        String section = sectionTitle == null ? "" : sectionTitle.toLowerCase(java.util.Locale.ROOT);
+        boolean music = section.contains("музык") || section.contains("music")
+                || HOME_MUSIC_HINT.matcher(value).find();
+        boolean game = section.contains("игр") || section.contains("game")
+                || HOME_GAME_HINT.matcher(value).find();
+
+        if (music) {
+            addBadge(badges, value, "FLAC|ALAC|APE|WAV|DSD|MP3|AAC|OGG|OPUS");
+            addBadge(badges, value, "24\\s*BIT|24BIT|16\\s*BIT|16BIT");
+            addBadge(badges, value, "192\\s*KHZ|96\\s*KHZ|48\\s*KHZ|44[,.]1\\s*KHZ");
+            addBadge(badges, value, "LOSSLESS|HI-RES|HIRES");
+        } else if (game) {
+            addBadge(badges, value, "PC|WINDOWS|STEAM|GOG|PS5|PS4|PS3|XBOX|SWITCH");
+            addBadge(badges, value, "REPACK|PORTABLE|ISO|RIP");
+            java.util.regex.Matcher version = HOME_GAME_VERSION.matcher(title);
+            if (version.find()) badges.add("v" + version.group(1));
+            addBadge(badges, value, "RUS|РУССКИЙ|MULTI[0-9]*|ENG|АНГЛ");
+        } else {
+            addBadge(badges, value, "4320P|2160P|4K|1080P|720P|576P|480P");
+            addBadge(badges, value, "BLU[- .]?RAY REMUX|BDREMUX|REMUX|BLU[- .]?RAY|BDRIP|BRRIP|WEB[- .]?DL[- .]?RIP|WEB[- .]?DL|WEBRIP|HDRIP|HDTV|DVDRIP|CAM|TS");
+            addBadge(badges, value, "HEVC|H\\.?265|X265|AV1|AVC|H\\.?264|X264");
+            addBadge(badges, value, "DOLBY VISION|DV|HDR10\\+?|HDR");
+            addBadge(badges, value, "3D");
+        }
+        if (badges.size() > 3) return new ArrayList<>(badges.subList(0, 3));
+        return badges;
+    }
+
+    private void addBadge(List<String> badges, String title, String alternatives) {
+        if (badges.size() >= 3) return;
+        java.util.regex.Matcher matcher = homeBadgePattern(alternatives).matcher(title);
+        if (matcher.find()) {
+            String badge = matcher.group().replaceAll("\\s+", " ").replaceAll("[- ]+", " ").trim();
+            if ("WEB DL RIP".equals(badge)) badge = "WEB-DLRip";
+            if (!badges.contains(badge)) badges.add(badge);
+        }
+    }
+
+    private void ensureFeedActions() {
+        if (list.getChildCount() > 0 && "feed-actions".equals(list.getChildAt(0).getTag())) return;
+        LinearLayout actions = new LinearLayout(this);
+        actions.setOrientation(LinearLayout.VERTICAL);
+        actions.setTag("feed-actions");
+
+        String screenKey = "collections".equals(activeFeedScreen) ? "collections" : "home";
+        LinearLayout feedRefreshPanel = new LinearLayout(this);
+        feedRefreshPanel.setOrientation(LinearLayout.VERTICAL);
+        feedRefreshPanel.setPadding(dp(2), dp(3), dp(2), dp(8));
+        feedRefreshPanel.setVisibility(View.GONE);
+        TextView feedRefreshStatus = text("", 12, TEAL, false);
+        feedRefreshStatus.setSingleLine(false);
+        feedRefreshPanel.addView(feedRefreshStatus, new LinearLayout.LayoutParams(-1, -2));
+        ProgressBar feedRefreshProgress = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
+        feedRefreshProgress.setMax(100);
+        feedRefreshProgress.setProgress(0);
+        LinearLayout.LayoutParams progressParams = new LinearLayout.LayoutParams(-1, dp(4));
+        progressParams.topMargin = dp(5);
+        feedRefreshPanel.addView(feedRefreshProgress, progressParams);
+        feedRefreshPanels.put(screenKey, feedRefreshPanel);
+        feedRefreshStatusViews.put(screenKey, feedRefreshStatus);
+        feedRefreshProgressViews.put(screenKey, feedRefreshProgress);
+        actions.addView(feedRefreshPanel, new LinearLayout.LayoutParams(-1, -2));
+        list.addView(actions, 0, new LinearLayout.LayoutParams(-1, -2));
+    }
+
+    private String[] feedPaths(String group) {
+        return "collections".equals(group) ? COLLECTION_PATHS : HOME_PATHS;
+    }
+
+    private String[] feedTitles(String group) {
+        return "collections".equals(group) ? COLLECTION_TITLES : HOME_TITLES;
+    }
+
+    /** Refresh through the already-cleared WebView session so Cloudflare JavaScript runs. */
+    private void refreshFeedInBrowser(String group, int index, String path, String title,
+            boolean bulk, int total) {
+        appendFeedDiagnostic("REFRESH_REQUEST", "mode=" + (bulk ? "bulk-item" : "single")
+                + ", group=" + group + ", path=" + path + ", title=" + title
+                + ", modelSections=" + ("collections".equals(group)
+                    ? collectionsSectionsMemory.size() : homeSectionsMemory.size()));
+        if (sessionWebView == null) {
+            status.setText("Браузерная сессия ещё не готова. Открой Kinozal и повтори обновление.");
+            return;
+        }
+        if (browserFeedLoading || pendingBrowserCallback != null) {
+            status.setText("Сейчас выполняется другой запрос к Kinozal. Повтори обновление чуть позже.");
+            return;
+        }
+        Intent running = new Intent();
+        running.putExtra("feed_group", group);
+        running.putExtra("feed_path", path);
+        running.putExtra("feed_title", title);
+        running.putExtra("feed_index", index);
+        running.putExtra("feed_total", total);
+        running.putExtra("feed_bulk", bulk);
+        running.putExtra("refresh_state", "running");
+        handleFeedRefreshState(running);
+
+        fetchBrowserPage(path, null, html -> {
+            if (html == null || html.trim().isEmpty()) {
+                Intent failed = new Intent();
+                failed.putExtra("feed_group", group);
+                failed.putExtra("feed_path", path);
+                failed.putExtra("feed_title", title);
+                failed.putExtra("feed_index", index);
+                failed.putExtra("feed_total", total);
+                failed.putExtra("feed_bulk", bulk);
+                failed.putExtra("refresh_state", "failure");
+                failed.putExtra("refresh_error", lastBrowserError == null
+                        ? "WebView не получил ответ Kinozal" : lastBrowserError);
+                handleFeedRefreshState(failed);
+                return;
+            }
+            executeSafely(io, () -> {
+                HomeSection refreshed = new HomeSection(title, path);
+                String cloudflareText = Jsoup.parse(html).text().toLowerCase(java.util.Locale.ROOT);
+                String failure = null;
+                if (cloudflareText.contains("just a moment")
+                        || cloudflareText.contains("enable javascript and cookies")
+                        || cloudflareText.contains("checking your browser")
+                        || cloudflareText.contains("attention required")) {
+                    failure = "Cloudflare ещё не завершил проверку. Открой сайт в браузере и повтори попытку.";
+                } else {
+                    try {
+                        refreshed.items.addAll(parseHomePosters(Jsoup.parse(html, client.getMirror() + "/")));
+                        // Keep single-feed refresh consistent with initial and bulk loading:
+                        // collapse alternate encodes of the same movie before saving/rendering.
+                        List<HomeSection> singleFeed = new ArrayList<>();
+                        singleFeed.add(refreshed);
+                        removeHomeDuplicates(singleFeed);
+                    } catch (Exception e) {
+                        failure = "Не удалось разобрать ленту: " + e.getMessage();
+                    }
+                    if (failure == null && refreshed.items.isEmpty()) {
+                        failure = "В ответе нет раздач; прежний кэш сохранён.";
+                    }
+                }
+                final String error = failure;
+                runOnUiThread(() -> {
+                    if (error != null) {
+                        Intent failed = new Intent();
+                        failed.putExtra("feed_group", group);
+                        failed.putExtra("feed_path", path);
+                        failed.putExtra("feed_title", title);
+                        failed.putExtra("feed_index", index);
+                        failed.putExtra("feed_total", total);
+                        failed.putExtra("feed_bulk", bulk);
+                        failed.putExtra("refresh_state", "failure");
+                        failed.putExtra("refresh_error", error);
+                        handleFeedRefreshState(failed);
+                        return;
+                    }
+                    List<HomeSection> model = "collections".equals(group)
+                            ? new ArrayList<>(collectionsSectionsMemory)
+                            : new ArrayList<>(homeSectionsMemory);
+                    int oldCardCount = 0;
+                    for (HomeSection old : model) {
+                        if (path.equals(old.path)) { oldCardCount = old.items.size(); break; }
+                    }
+                    appendFeedDiagnostic("REFRESH_MODEL_BEFORE",
+                            "mode=" + (bulk ? "bulk-item" : "single") + ", path=" + path
+                            + ", oldCards=" + oldCardCount + ", incomingCards=" + refreshed.items.size()
+                            + ", modelSections=" + model.size());
+                    int existing = -1;
+                    for (int i = 0; i < model.size(); i++) {
+                        if (path.equals(model.get(i).path)) { existing = i; break; }
+                    }
+                    if (existing >= 0) model.set(existing, refreshed);
+                    else model.add(refreshed);
+                    appendFeedDiagnostic("REFRESH_MODEL_AFTER",
+                            "path=" + path + ", action=" + (existing >= 0 ? "replace" : "append")
+                            + ", replacedIndex=" + existing + ", newCards=" + refreshed.items.size()
+                            + ", modelSections=" + model.size());
+                    if ("collections".equals(group)) {
+                        collectionsSectionsMemory = model;
+                        saveCollectionsModel(model);
+                    } else {
+                        homeSectionsMemory = model;
+                        saveHomeModel(model);
+                    }
+                    if (group.equals(activeFeedScreen)) {
+                        renderHomeSection(refreshed, homeRenderGeneration, true);
+                    }
+                    Intent success = new Intent();
+                    success.putExtra("feed_group", group);
+                    success.putExtra("feed_path", path);
+                    success.putExtra("feed_title", title);
+                    success.putExtra("feed_index", index);
+                    success.putExtra("feed_total", total);
+                    success.putExtra("feed_bulk", bulk);
+                    success.putExtra("refresh_state", "success");
+                    handleFeedRefreshState(success);
+                });
+            });
+        });
+    }
+
+    private boolean bulkFeedRefreshInProgress = false;
+
+    /**
+     * Refresh the first page in the authenticated WebView, then fetch every
+     * remaining feed concurrently from that same origin/session. The shared
+     * WebView is navigated only once; no five-minute per-feed queue.
+     */
+    private void refreshAllFeedsInBrowser(String group) {
+        String[] paths = feedPaths(group);
+        String[] titles = feedTitles(group);
+        if (bulkFeedRefreshInProgress) {
+            status.setText("Обновление всех лент уже выполняется.");
+            return;
+        }
+        if (sessionWebView == null || browserFeedLoading || pendingBrowserCallback != null) {
+            status.setText("Сейчас занят браузер Kinozal. Повтори обновление чуть позже.");
+            return;
+        }
+        bulkFeedRefreshInProgress = true;
+        showFeedRefreshQueued(group, "Все ленты", paths.length, true);
+        TextView label = feedRefreshStatusViews.get(group);
+        ProgressBar bar = feedRefreshProgressViews.get(group);
+        if (label != null) label.setText("Одновременное обновление " + paths.length + " лент…");
+        if (bar != null) bar.setIndeterminate(true);
+
+        for (int i = 0; i < paths.length; i++) {
+            Intent running = new Intent();
+            running.putExtra("feed_group", group);
+            running.putExtra("feed_path", paths[i]);
+            running.putExtra("feed_title", titles[i]);
+            running.putExtra("feed_index", i);
+            running.putExtra("feed_total", paths.length);
+            running.putExtra("feed_bulk", true);
+            running.putExtra("refresh_state", "running");
+            handleFeedRefreshState(running);
+        }
+        if (label != null) label.setText("Одновременно загружаются все " + paths.length + " лент…");
+        if (bar != null) bar.setIndeterminate(true);
+
+        fetchBrowserPage(paths[0], null, html -> {
+            if (isFinishing()) {
+                bulkFeedRefreshInProgress = false;
+                return;
+            }
+            if (html == null || html.trim().isEmpty() || sessionWebView == null) {
+                finishBulkFeedRefresh(group, paths, titles, null,
+                        lastBrowserError == null ? "Не удалось открыть первую ленту" : lastBrowserError);
+                return;
+            }
+
+            org.json.JSONArray requests = new org.json.JSONArray();
+            try {
+                for (int i = 1; i < paths.length; i++) {
+                    org.json.JSONObject request = new org.json.JSONObject();
+                    request.put("path", paths[i]);
+                    request.put("title", titles[i]);
+                    request.put("index", i);
+                    requests.put(request);
+                }
+            } catch (Exception e) {
+                finishBulkFeedRefresh(group, paths, titles, null, safe(e.getMessage()));
+                return;
+            }
+
+            String script = buildHomeParallelExtractScript(requests.toString(), 0,
+                    org.json.JSONObject.quote(html));
+            evaluateHomeParallelBatch(sessionWebView, script, value -> {
+                List<HomeSection> refreshed = new ArrayList<>();
+                String failure = null;
+                try {
+                    if (value == null || "null".equals(value)) {
+                        throw new java.io.IOException("Истекло время ожидания ответов лент");
+                    }
+                    String json = new org.json.JSONArray("[" + value + "]").getString(0);
+                    org.json.JSONArray results = new org.json.JSONArray(json);
+                    boolean[] received = new boolean[paths.length];
+                    for (int i = 0; i < results.length(); i++) {
+                        org.json.JSONObject result = results.optJSONObject(i);
+                        if (result == null || !result.optBoolean("ok", false)) continue;
+                        int index = result.optInt("index", -1);
+                        if (index < 0 || index >= paths.length || received[index]) continue;
+                        received[index] = true;
+                        HomeSection section = new HomeSection(titles[index], paths[index]);
+                        section.items.addAll(parseHomePostersFromJsonArray(result.optJSONArray("items")));
+                        if (!section.items.isEmpty()) {
+                            List<HomeSection> oneFeed = new ArrayList<>();
+                            oneFeed.add(section);
+                            removeHomeDuplicates(oneFeed);
+                            if (!section.items.isEmpty()) {
+                                refreshed.add(section);
+                                String pageHtml = result.optString("html", "");
+                                if (!pageHtml.isEmpty()) {
+                                    diskCache.put("home|" + client.getMirror() + "|" + paths[index],
+                                            pageHtml.getBytes(StandardCharsets.UTF_8));
+                                }
+                            }
+                        }
+                    }
+                    if (refreshed.isEmpty()) {
+                        throw new java.io.IOException("Не получено ни одной ленты");
+                    }
+                    appendFeedDiagnostic("BULK_REFRESH_PARALLEL",
+                            "group=" + group + ", received=" + refreshed.size() + "/" + paths.length);
+                } catch (Exception e) {
+                    failure = safe(e.getMessage());
+                }
+                finishBulkFeedRefresh(group, paths, titles, refreshed, failure);
+            });
+        });
+    }
+
+    private void finishBulkFeedRefresh(String group, String[] paths, String[] titles,
+            List<HomeSection> refreshed, String failure) {
+        bulkFeedRefreshInProgress = false;
+        if (isFinishing()) return;
+        if (refreshed == null || refreshed.isEmpty()) {
+            for (int i = 0; i < paths.length; i++) {
+                Intent failed = new Intent();
+                failed.putExtra("feed_group", group);
+                failed.putExtra("feed_path", paths[i]);
+                failed.putExtra("feed_title", titles[i]);
+                failed.putExtra("feed_index", i);
+                failed.putExtra("feed_total", paths.length);
+                failed.putExtra("feed_bulk", true);
+                failed.putExtra("refresh_state", "failure");
+                failed.putExtra("refresh_error", failure == null ? "Нет данных от Kinozal" : failure);
+                handleFeedRefreshState(failed);
+            }
+            return;
+        }
+
+        List<HomeSection> model = "collections".equals(group)
+                ? new ArrayList<>(collectionsSectionsMemory)
+                : new ArrayList<>(homeSectionsMemory);
+        appendFeedDiagnostic("BULK_MODEL_BEFORE",
+                "group=" + group + ", modelSections=" + model.size()
+                + ", successfulFeeds=" + refreshed.size() + "/" + paths.length);
+        int successCount = 0;
+        for (HomeSection section : refreshed) {
+            int existing = -1;
+            for (int i = 0; i < model.size(); i++) {
+                if (section.path.equals(model.get(i).path)) { existing = i; break; }
+            }
+            int oldCards = existing >= 0 ? model.get(existing).items.size() : 0;
+            if (existing >= 0) model.set(existing, section);
+            else model.add(section);
+            appendFeedDiagnostic("BULK_MODEL_ITEM",
+                    "path=" + section.path + ", action=" + (existing >= 0 ? "replace" : "append")
+                    + ", oldCards=" + oldCards + ", incomingCards=" + section.items.size());
+            successCount++;
+        }
+        appendFeedDiagnostic("BULK_MODEL_AFTER",
+                "group=" + group + ", modelSections=" + model.size()
+                + ", successfulFeeds=" + successCount);
+        if ("collections".equals(group)) {
+            collectionsSectionsMemory = model;
+            saveCollectionsModel(model);
+        } else {
+            homeSectionsMemory = model;
+            saveHomeModel(model);
+        }
+
+        for (int i = 0; i < paths.length; i++) {
+            HomeSection updated = null;
+            for (HomeSection section : refreshed) if (paths[i].equals(section.path)) { updated = section; break; }
+            Intent result = new Intent();
+            result.putExtra("feed_group", group);
+            result.putExtra("feed_path", paths[i]);
+            result.putExtra("feed_title", titles[i]);
+            result.putExtra("feed_index", i);
+            result.putExtra("feed_total", paths.length);
+            result.putExtra("feed_bulk", true);
+            result.putExtra("refresh_state", updated == null ? "failure" : "success");
+            if (updated == null) result.putExtra("refresh_error", "Эта лента не вернула раздачи; прежний кэш сохранён.");
+            handleFeedRefreshState(result);
+            if (updated != null && group.equals(activeFeedScreen)) {
+                renderHomeSection(updated, homeRenderGeneration, true);
+            }
+        }
+
+        TextView label = feedRefreshStatusViews.get(group);
+        ProgressBar bar = feedRefreshProgressViews.get(group);
+        if (label != null) {
+            label.setText(successCount == paths.length
+                    ? "Все " + paths.length + " лент обновлены одновременно"
+                    : "Обновлено " + successCount + " из " + paths.length + " лент");
+        }
+        if (bar != null) {
+            bar.setIndeterminate(false);
+            bar.setMax(paths.length);
+            bar.setProgress(successCount);
+        }
+        status.setText("Обновлено лент: " + successCount + " из " + paths.length);
+
+        // Hide the completed bulk-refresh message automatically, but only if
+        // it has not been replaced by a newer refresh status in the meantime.
+        if (label != null) {
+            final String completedMessage = label.getText().toString();
+            browserHandler.postDelayed(() -> {
+                TextView currentLabel = feedRefreshStatusViews.get(group);
+                LinearLayout currentPanel = feedRefreshPanels.get(group);
+                if (!bulkFeedRefreshInProgress && currentLabel != null
+                        && currentPanel != null
+                        && completedMessage.contentEquals(currentLabel.getText())) {
+                    currentPanel.setVisibility(View.GONE);
+                }
+            }, 3500L);
+        }
+    }
+
+    private String feedButtonKey(String group, String path) { return group + "|" + path; }
+
+    private void showFeedRefreshQueued(String group, String title, int total, boolean bulk) {
+        LinearLayout panel = feedRefreshPanels.get(group);
+        TextView label = feedRefreshStatusViews.get(group);
+        ProgressBar bar = feedRefreshProgressViews.get(group);
+        if (panel == null || label == null || bar == null) return;
+        panel.setVisibility(View.VISIBLE);
+        label.setText(bulk
+                ? "В очереди " + total + " лент. Ожидаем запуск первой…"
+                : "Лента «" + title + "» поставлена в очередь…");
+        bar.setIndeterminate(true);
+    }
+
+    private void stopFeedRefreshAnimation(String key) {
+        ObjectAnimator animator = feedRefreshAnimations.remove(key);
+        if (animator != null) {
+            animator.cancel();
+            Button target = feedRefreshButtons.get(key);
+            if (target != null) target.setRotation(0f);
+        }
+    }
+
+    private void startFeedRefreshAnimation(String key) {
+        Button target = feedRefreshButtons.get(key);
+        if (target == null || feedRefreshAnimations.containsKey(key)) return;
+        ObjectAnimator animator = ObjectAnimator.ofFloat(target, View.ROTATION, 0f, 360f);
+        animator.setDuration(900L);
+        animator.setRepeatCount(ObjectAnimator.INFINITE);
+        animator.setInterpolator(new android.view.animation.LinearInterpolator());
+        feedRefreshAnimations.put(key, animator);
+        animator.start();
+    }
+
+    private void handleFeedRefreshState(Intent intent) {
+        String group = intent.getStringExtra("feed_group");
+        String path = intent.getStringExtra("feed_path");
+        String title = intent.getStringExtra("feed_title");
+        String state = intent.getStringExtra("refresh_state");
+        if (group == null || path == null || state == null) return;
+        String key = feedButtonKey(group, path);
+        boolean visibleGroup = group.equals(activeFeedScreen);
+        int index = intent.getIntExtra("feed_index", 0);
+        int total = Math.max(1, intent.getIntExtra("feed_total", 1));
+        boolean bulk = intent.getBooleanExtra("feed_bulk", false);
+        LinearLayout panel = feedRefreshPanels.get(group);
+        TextView label = feedRefreshStatusViews.get(group);
+        ProgressBar bar = feedRefreshProgressViews.get(group);
+        if ("running".equals(state)) {
+            if (visibleGroup && panel != null && label != null && bar != null) {
+                panel.setVisibility(View.VISIBLE);
+                label.setVisibility(View.VISIBLE);
+                label.setText(bulk
+                        ? "Обновление лент: " + (index + 1) + " из " + total + " — " + title
+                        : "Обновляется лента: " + title);
+                bar.setIndeterminate(false);
+                bar.setMax(total);
+                bar.setProgress(Math.min(total, index + 1));
+            }
+            if (visibleGroup) startFeedRefreshAnimation(key);
+        } else if ("success".equals(state)) {
+            stopFeedRefreshAnimation(key);
+            if (visibleGroup && panel != null && label != null && bar != null) {
+                panel.setVisibility(View.VISIBLE);
+                bar.setIndeterminate(false);
+                bar.setMax(total);
+                bar.setProgress(Math.min(total, index + 1));
+                if (bulk && index + 1 >= total) {
+                    label.setText("Все " + total + " лент обновлены");
+                } else if (bulk) {
+                    // Keep the thin progress indicator, but hide the verbose
+                    // queued-subscriptions status line from the feed screen.
+                    label.setVisibility(View.GONE);
+                } else {
+                    label.setText("Лента обновлена: " + title);
+                    final String completedMessage = label.getText().toString();
+                    browserHandler.postDelayed(() -> {
+                        TextView currentLabel = feedRefreshStatusViews.get(group);
+                        LinearLayout currentPanel = feedRefreshPanels.get(group);
+                        if (!bulkFeedRefreshInProgress && currentLabel != null
+                                && currentPanel != null
+                                && completedMessage.contentEquals(currentLabel.getText())) {
+                            currentPanel.setVisibility(View.GONE);
+                        }
+                    }, 3500L);
+                }
+            }
+        } else if ("failure".equals(state)) {
+            stopFeedRefreshAnimation(key);
+            if (visibleGroup && panel != null && label != null && bar != null) {
+                panel.setVisibility(View.VISIBLE);
+                bar.setIndeterminate(false);
+                bar.setProgress(0);
+                label.setText("Ошибка обновления «" + title + "»: "
+                        + intent.getStringExtra("refresh_error"));
+            }
+        }
+    }
+
+    private int homePreparationGeneration = 0;
+
+    private void renderHome(List<HomeSection> sections) {
+        if (list == null || isFinishing()) return;
+        final int preparation = ++homePreparationGeneration;
+        final List<HomeSection> snapshot = new ArrayList<>(sections);
+        // Regex matching and badge classification are pure data work. Do it on
+        // the I/O executor so the first few cards do not stall DPAD handling.
+        executeSafely(io, () -> {
+            for (HomeSection section : snapshot) {
+                if (section == null || section.items == null) continue;
+                for (HomePoster poster : section.items) {
+                    if (poster == null || poster.torrent == null) continue;
+                    poster.preparedBadges = extractHomeBadges(
+                            poster.torrent.title, section.title);
+                }
+            }
+            runOnUiThread(() -> {
+                if (preparation != homePreparationGeneration || isFinishing() || list == null) return;
+                list.removeAllViews();
+                ensureFeedActions();
+                if (snapshot.isEmpty()) {
+                    addEmpty("Подборки пока не загружены.");
+                    return;
+                }
+                renderHomeSectionsIncrementally(snapshot);
+            });
+        });
+    }
+
+    /**
+     * Build poster rows across separate UI frames instead of creating every
+     * card in one long main-thread pass. This is especially important on
+     * low-memory Android TV boxes.
+     */
+    private final java.util.ArrayDeque<Runnable> homeCardBuildQueue = new java.util.ArrayDeque<>();
+    private boolean homeCardBuildScheduled = false;
+    private boolean homeRowsEnqueued = false;
+
+    private void renderHomeSectionsIncrementally(List<HomeSection> sections) {
+        final int generation = ++homeRenderGeneration;
+        homeCardBuildQueue.clear();
+        homeCardBuildScheduled = false;
+        homeRowsEnqueued = false;
+        // A newly rendered feed must start at the top; stale scroll position can
+        // otherwise let the first row draw over the fixed page heading/search area.
+        ScrollView feedScroll = "collections".equals(activeFeedScreen)
+                ? collectionsScrollView : homeScrollView;
+        if (feedScroll != null) feedScroll.post(() -> {
+            if (generation == homeRenderGeneration) feedScroll.scrollTo(0, 0);
+        });
+        final List<HomeSection> snapshot = new ArrayList<>(sections);
+        final int[] index = {0};
+        Runnable[] next = new Runnable[1];
+        next[0] = () -> {
+            if (generation != homeRenderGeneration || isFinishing()) return;
+            if (index[0] >= snapshot.size()) {
+                homeRowsEnqueued = true;
+                scheduleVisibleHomePosterLoad();
+                scheduleNextHomeCardBuild(generation);
+                return;
+            }
+            HomeSection section = snapshot.get(index[0]++);
+            renderHomeSection(section, generation);
+            browserHandler.postDelayed(next[0], 24);
+        };
+        browserHandler.post(next[0]);
+    }
+
+    private void scheduleNextHomeCardBuild(int generation) {
+        if (generation != homeRenderGeneration || isFinishing() || homeCardBuildScheduled) return;
+        homeCardBuildScheduled = true;
+        browserHandler.post(() -> {
+            homeCardBuildScheduled = false;
+            if (generation != homeRenderGeneration || isFinishing()) return;
+            Runnable task = homeCardBuildQueue.pollFirst();
+            if (task == null) {
+                if (homeRowsEnqueued) {
+                    scheduleVisibleHomePosterLoad();
+                    stopHomePerformanceMonitor();
+                } else {
+                    browserHandler.postDelayed(() -> scheduleNextHomeCardBuild(generation), 24);
+                }
+                return;
+            }
+            task.run();
+            // Yield several display frames between card constructions. The
+            // handler runs on the UI thread; an 8 ms cadence starves DPAD and
+            // click handling on slower Android TV hardware while rows are built.
+            if (!homeCardBuildQueue.isEmpty()) {
+                browserHandler.postDelayed(() -> scheduleNextHomeCardBuild(generation), 48L);
+            } else {
+                browserHandler.postDelayed(() -> scheduleNextHomeCardBuild(generation), 48L);
+            }
+        });
+    }
+
+    /** Append a feed shell immediately, then construct poster cards over separate UI frames. */
     private void renderHomeSection(HomeSection section) {
+        renderHomeSection(section, homeRenderGeneration, false);
+    }
+
+    private void renderHomeSection(HomeSection section, int generation) {
+        renderHomeSection(section, generation, false);
+    }
+
+    /** Build a refreshed row independently of the shared initial-screen card queue. */
+    private void renderHomeSection(HomeSection section, int generation, boolean immediate) {
         if (section == null || section.items.isEmpty()) return;
 
+        int oldRowCards = 0;
+        String expectedTitleTag = "home-title:" + section.path;
+        for (int i = 0; i + 1 < list.getChildCount(); i++) {
+            if (expectedTitleTag.equals(list.getChildAt(i).getTag())
+                    && list.getChildAt(i + 1) instanceof android.widget.HorizontalScrollView) {
+                View oldRow = list.getChildAt(i + 1);
+                if (oldRow instanceof android.widget.HorizontalScrollView) {
+                    View oldStrip = ((android.widget.HorizontalScrollView) oldRow).getChildAt(0);
+                    if (oldStrip instanceof ViewGroup) oldRowCards = ((ViewGroup) oldStrip).getChildCount();
+                }
+                break;
+            }
+        }
+        appendFeedDiagnostic("FEED_UI_APPLY_START",
+                "path=" + section.path + ", title=" + section.title
+                + ", mode=" + (immediate ? "refresh-immediate" : "initial-incremental")
+                + ", oldRenderedCards=" + oldRowCards + ", incomingCards=" + section.items.size()
+                + ", listChildrenBefore=" + list.getChildCount());
+
+        LinearLayout sectionHeader = new LinearLayout(this);
+        sectionHeader.setGravity(Gravity.CENTER_VERTICAL);
+        sectionHeader.setTag("home-title:" + section.path);
+        final String feedGroup = getFeedIndex("collections", section.path) >= 0
+                ? "collections" : "home";
+        Button refreshFeed = button("⟳");
+        // Icon-only refresh control: no button plate, only the glyph changes color on focus.
+        refreshFeed.setTextSize(fontSize(20));
+        refreshFeed.setTextColor(Color.rgb(192, 198, 202)); // Серебристый
+        refreshFeed.setMinWidth(0);
+        refreshFeed.setMinimumWidth(0);
+        refreshFeed.setMinHeight(0);
+        refreshFeed.setMinimumHeight(0);
+        refreshFeed.setGravity(Gravity.CENTER);
+        refreshFeed.setIncludeFontPadding(false);
+        refreshFeed.setPadding(0, 0, 0, 0);
+        refreshFeed.setBackgroundColor(Color.TRANSPARENT);
+        refreshFeed.setTranslationY(-dp(4));
+        refreshFeed.setOnFocusChangeListener((v, focused) -> {
+            refreshFeed.setTextColor(focused ? GOLD : Color.rgb(192, 198, 202));
+            refreshFeed.setBackgroundColor(Color.TRANSPARENT);
+        });
+        refreshFeed.setContentDescription("Обновить ленту " + section.title);
+        refreshFeed.setOnClickListener(v -> {
+            int feedIndex = getFeedIndex(feedGroup, section.path);
+            if (feedIndex < 0) {
+                status.setText("Не найдена лента для обновления: " + section.title);
+                return;
+            }
+            refreshFeedInBrowser(feedGroup, feedIndex, section.path, section.title, false, 1);
+        });
+        LinearLayout.LayoutParams refreshParams = new LinearLayout.LayoutParams(dp(38), dp(38));
+        refreshParams.rightMargin = dp(10);
+        sectionHeader.addView(refreshFeed, refreshParams);
+        String refreshButtonKey = feedButtonKey(feedGroup, section.path);
+        stopFeedRefreshAnimation(refreshButtonKey);
+        feedRefreshButtons.put(refreshButtonKey, refreshFeed);
         TextView sectionTitle = text(section.title, 20, GOLD, true);
-        sectionTitle.setTag("home-title:" + section.path);
+        sectionHeader.addView(sectionTitle, new LinearLayout.LayoutParams(0, dp(38), 1f));
+        String[] firstFeedPaths = feedPaths(feedGroup);
+        if (firstFeedPaths.length > 0 && firstFeedPaths[0].equals(section.path)) {
+            Button refreshAll = button("Обновить всё");
+            refreshAll.setTextSize(fontSize(12));
+            refreshAll.setTranslationY(dp(3));
+            LinearLayout.LayoutParams allParams = new LinearLayout.LayoutParams(-2, dp(36));
+            allParams.leftMargin = dp(8);
+            sectionHeader.addView(refreshAll, allParams);
+            refreshAll.setOnClickListener(v -> refreshAllFeedsInBrowser(feedGroup));
+        }
         LinearLayout.LayoutParams titleParams = new LinearLayout.LayoutParams(-1, dp(38));
         titleParams.topMargin = dp(10);
 
         android.widget.HorizontalScrollView horizontal = new android.widget.HorizontalScrollView(this);
         horizontal.setHorizontalScrollBarEnabled(false);
         horizontal.setFillViewport(false);
+        horizontal.setSmoothScrollingEnabled(true);
+        horizontal.setClipChildren(false);
+        horizontal.setClipToPadding(false);
         horizontal.setTag("home-row:" + section.path);
+        horizontal.setOnScrollChangeListener((View v, int x, int y, int oldX, int oldY) -> scheduleVisibleHomePosterLoad());
         LinearLayout strip = new LinearLayout(this);
         strip.setOrientation(LinearLayout.HORIZONTAL);
-
-        for (HomePoster item : section.items) {
-            LinearLayout card = new LinearLayout(this);
-            card.setOrientation(LinearLayout.VERTICAL);
-            card.setPadding(dp(5), dp(5), dp(5), dp(5));
-            card.setBackground(shape(PANEL, 0));
-            card.setFocusable(true);
-            card.setClickable(true);
-            card.setOnFocusChangeListener((v, focused) ->
-                    v.setBackground(shape(focused ? Color.rgb(57, 68, 70) : PANEL, focused ? GOLD : 0)));
-            ImageView poster = new ImageView(this);
-            poster.setScaleType(ImageView.ScaleType.CENTER_CROP);
-            poster.setBackground(shape(Color.rgb(40, 45, 49), 0));
-            card.addView(poster, new LinearLayout.LayoutParams(dp(126), dp(178)));
-            TextView name = text(item.torrent.title, 12, Color.WHITE, true);
-            name.setMaxLines(2);
-            name.setEllipsize(android.text.TextUtils.TruncateAt.END);
-            name.setPadding(dp(2), dp(6), dp(2), dp(2));
-            card.addView(name, new LinearLayout.LayoutParams(dp(126), dp(42)));
-            LinearLayout.LayoutParams cardParams = new LinearLayout.LayoutParams(dp(138), -2);
-            cardParams.rightMargin = dp(8);
-            strip.addView(card, cardParams);
-            card.setOnClickListener(v -> showTorrent(item.torrent));
-            if (!item.imageUrl.isEmpty()) {
-                loadImageIntoView(item.imageUrl, poster, client.getMirror() + "/" + section.path);
-            } else {
-                loadHomePosterFromDetails(item, poster);
-            }
-        }
+        strip.setGravity(Gravity.CENTER_VERTICAL);
+        strip.setClipChildren(false);
+        strip.setClipToPadding(false);        // Leave enough headroom for the focus zoom and upward translation.
+        strip.setPadding(dp(4), dp(20), dp(12), dp(20));
         horizontal.addView(strip);
-        LinearLayout.LayoutParams rowParams = new LinearLayout.LayoutParams(-1, dp(238));
+        LinearLayout.LayoutParams rowParams = new LinearLayout.LayoutParams(-1, dp(302));
 
-        // If this feed was already shown from cache, replace only its own pair
-        // of views in place. Other feeds and DPAD focus remain untouched.
+        // Replace only this feed's existing views, preserving other rows and DPAD focus.
         String titleTag = "home-title:" + section.path;
+        boolean replaced = false;
         for (int i = 0; i + 1 < list.getChildCount(); i++) {
-            Object tag = list.getChildAt(i).getTag();
-            if (titleTag.equals(tag)) {
+            if (titleTag.equals(list.getChildAt(i).getTag())) {
                 list.removeViewAt(i + 1);
                 list.removeViewAt(i);
-                list.addView(sectionTitle, i, titleParams);
+                list.addView(sectionHeader, i, titleParams);
                 list.addView(horizontal, i + 1, rowParams);
-                animateContentTransition(horizontal);
-                return;
+                replaced = true;
+                break;
             }
         }
-        list.addView(sectionTitle, titleParams);
-        list.addView(horizontal, rowParams);
-        animateContentTransition(horizontal);
+        if (!replaced) {
+            list.addView(sectionHeader, titleParams);
+            list.addView(horizontal, rowParams);
+        }
+        final boolean rowWasReplaced = replaced;
+        horizontal.post(() -> {
+            // Do not inherit a non-zero horizontal offset on the first display.
+            if (!rowWasReplaced) horizontal.scrollTo(0, 0);
+            scheduleVisibleHomePosterLoad();
+        });
+        if (immediate) {
+            // Replace and build only this feed. Other rows and their pending work remain intact.
+            for (HomePoster item : section.items) {
+                strip.addView(createHomePosterCard(item, section));
+            }
+            appendFeedDiagnostic("FEED_UI_APPLY_DONE",
+                    "path=" + section.path + ", action=" + (replaced ? "replace-row" : "append-row")
+                    + ", oldRenderedCards=" + oldRowCards + ", renderedCards=" + strip.getChildCount()
+                    + ", incomingCards=" + section.items.size()
+                    + ", listChildrenAfter=" + list.getChildCount());
+            horizontal.post(this::scheduleVisibleHomePosterLoad);
+        } else {
+            final long[] startedAt = {0L};
+            final int[] cardIndex = {0};
+            final int cardCount = section.items.size();
+            for (HomePoster item : section.items) {
+                homeCardBuildQueue.addLast(() -> {
+                    if (generation != homeRenderGeneration || isFinishing()) return;
+                    long cardStartedAt = android.os.SystemClock.elapsedRealtime();
+                    if (startedAt[0] == 0L) startedAt[0] = cardStartedAt;
+                    strip.addView(createHomePosterCard(item, section));
+                    long cardDuration = android.os.SystemClock.elapsedRealtime() - cardStartedAt;
+                    if (cardDuration >= 32L) {
+                        Log.w("KinozalPerf", "home card build=" + cardDuration
+                                + "ms, title=" + section.title);
+                    }
+                    cardIndex[0]++;
+                    if (cardIndex[0] == cardCount) {
+                        appendFeedDiagnostic("FEED_UI_APPLY_DONE",
+                                "path=" + section.path + ", action=" + (rowWasReplaced ? "replace-row" : "append-row")
+                                + ", mode=initial-incremental, renderedCards=" + strip.getChildCount()
+                                + ", incomingCards=" + cardCount);
+                        long duration = android.os.SystemClock.elapsedRealtime() - startedAt[0];
+                        Log.i("KinozalPerf", "home row complete=" + duration
+                                + "ms, title=" + section.title + ", cards=" + cardCount);
+                        scheduleVisibleHomePosterLoad();
+                    }
+                });
+            }
+            scheduleNextHomeCardBuild(generation);
+        }
+    }
+
+    private int getFeedIndex(String group, String path) {
+        String[] paths = "collections".equals(group) ? COLLECTION_PATHS : HOME_PATHS;
+        for (int i = 0; i < paths.length; i++) if (paths[i].equals(path)) return i;
+        return -1;
+    }
+
+    private View createHomePosterCard(HomePoster item, HomeSection section) {
+        LinearLayout card = new LinearLayout(this);
+        card.setOrientation(LinearLayout.VERTICAL);
+        card.setPadding(dp(5), dp(5), dp(5), dp(5));
+        card.setBackground(shape(PANEL, 0));
+        card.setFocusable(true);
+        card.setClickable(true);
+        card.setClipChildren(false);
+        card.setClipToPadding(false);
+        card.setPivotX(dp(69));
+        card.setPivotY(dp(125));
+        card.setOnFocusChangeListener((v, focused) -> {
+            v.animate().cancel();
+            v.setBackground(shape(focused ? Color.rgb(57, 68, 70) : PANEL, focused ? GOLD : 0));
+            // A restrained zoom makes the active poster obvious without covering its neighbours.
+            v.animate()
+                    .scaleX(focused ? 1.09f : 1f)
+                    .scaleY(focused ? 1.09f : 1f)
+                    .translationY(focused ? -dp(3) : 0f)
+                    .setDuration(focused ? 170L : 130L)
+                    .start();
+            v.setElevation(focused ? dp(10) : dp(1));
+            if (focused) {
+                loadHomePosterForCard(card);
+                android.view.ViewParent parent = card.getParent();
+                if (parent instanceof View) {
+                    View row = (View) parent;
+                    View horizontalParent = row.getParent() instanceof View
+                            ? (View) row.getParent() : null;
+                    if (horizontalParent instanceof android.widget.HorizontalScrollView) {
+                        android.widget.HorizontalScrollView scroller =
+                                (android.widget.HorizontalScrollView) horizontalParent;
+                        scroller.post(() -> {
+                            if (!card.hasFocus()) return;
+                            int cardCenter = card.getLeft() + card.getWidth() / 2;
+                            int targetX = Math.max(0, cardCenter - scroller.getWidth() / 2);
+                            if (Math.abs(scroller.getScrollX() - targetX) > dp(3)) {
+                                scroller.smoothScrollTo(targetX, 0);
+                            }
+                        });
+                    }
+                }
+            }
+        });
+
+        FrameLayout posterFrame = new FrameLayout(this);
+        posterFrame.setBackground(shape(Color.rgb(40, 45, 49), 0));
+        ImageView poster = new ImageView(this);
+        poster.setScaleType(ImageView.ScaleType.CENTER_CROP);
+        poster.setBackground(shape(Color.rgb(40, 45, 49), 0));
+        poster.setImageResource(R.drawable.kinozal_poster_placeholder);
+        posterFrame.addView(poster, new FrameLayout.LayoutParams(-1, -1));
+        card.addView(posterFrame, new LinearLayout.LayoutParams(dp(126), dp(178)));
+
+        List<String> badges = item.preparedBadges != null
+                ? item.preparedBadges : extractHomeBadges(item.torrent.title, section.title);
+        LinearLayout badgeRow = new LinearLayout(this);
+        badgeRow.setOrientation(LinearLayout.HORIZONTAL);
+        badgeRow.setGravity(Gravity.CENTER_VERTICAL);
+        badgeRow.setPadding(0, dp(2), 0, dp(2));
+        for (String badge : badges) {
+            TextView chip = text(badge, 10, GOLD, true);
+            chip.setSingleLine(true);
+            chip.setGravity(Gravity.CENTER);
+            chip.setPadding(dp(8), dp(2), dp(8), dp(2));
+            android.graphics.drawable.GradientDrawable chipBackground =
+                    new android.graphics.drawable.GradientDrawable();
+            chipBackground.setColor(Color.rgb(39, 57, 61));
+            chipBackground.setCornerRadius(dp(4));
+            chipBackground.setStroke(dp(1), TEAL);
+            chip.setBackground(chipBackground);
+            LinearLayout.LayoutParams chipParams = new LinearLayout.LayoutParams(-2, dp(20));
+            chipParams.rightMargin = dp(3);
+            badgeRow.addView(chip, chipParams);
+        }
+        badgeRow.setTranslationY(dp(3));
+        card.addView(badgeRow, new LinearLayout.LayoutParams(dp(126), dp(25)));
+
+        TextView name = text(item.torrent.title, 12, Color.WHITE, true);
+        name.setMaxLines(2);
+        name.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        name.setPadding(dp(2), dp(6), dp(2), dp(2));
+        card.addView(name, new LinearLayout.LayoutParams(dp(126), dp(42)));
+
+        LinearLayout.LayoutParams cardParams = new LinearLayout.LayoutParams(dp(138), -2);
+        cardParams.rightMargin = dp(8);
+        card.setTag("home-card");
+        if (!item.imageUrl.isEmpty()) {
+            poster.setTag(new HomeImageRequest(item.imageUrl, client.getMirror() + "/" + section.path));
+        }
+        card.setOnClickListener(v -> showTorrent(item.torrent));
+        card.setLayoutParams(cardParams);
+        return card;
+    }
+
+    private static class HomeImageRequest {
+        final String url, referer;
+        boolean started;
+        HomeImageRequest(String url, String referer) { this.url = url; this.referer = referer; }
+    }
+
+    private void scheduleVisibleHomePosterLoad() {
+        if (list == null) return;
+        list.post(() -> {
+            if (list == null) return;
+            for (int i = 0; i < list.getChildCount(); i++) {
+                View child = list.getChildAt(i);
+                if (child instanceof android.widget.HorizontalScrollView) {
+                    loadVisibleHomePosters((android.widget.HorizontalScrollView) child);
+                }
+            }
+        });
+    }
+
+    private void loadVisibleHomePosters(android.widget.HorizontalScrollView row) {
+        if (row == null || row.getVisibility() != View.VISIBLE) return;
+        Rect visible = new Rect();
+        for (int i = 0; i < row.getChildCount(); i++) {
+            View strip = row.getChildAt(i);
+            if (!(strip instanceof ViewGroup)) continue;
+            ViewGroup cards = (ViewGroup) strip;
+            for (int j = 0; j < cards.getChildCount(); j++) {
+                View card = cards.getChildAt(j);
+                if (!card.getLocalVisibleRect(visible)) continue;
+                loadHomePosterForCard(card);
+            }
+        }
+    }
+
+    private void loadHomePosterForCard(View card) {
+        if (!(card instanceof ViewGroup) || ((ViewGroup) card).getChildCount() == 0) return;
+        View first = ((ViewGroup) card).getChildAt(0);
+        ImageView poster;
+        if (first instanceof ImageView) poster = (ImageView) first;
+        else if (first instanceof ViewGroup && ((ViewGroup) first).getChildCount() > 0
+                && ((ViewGroup) first).getChildAt(0) instanceof ImageView) {
+            poster = (ImageView) ((ViewGroup) first).getChildAt(0);
+        } else return;
+        Object tag = poster.getTag();
+        if (!(tag instanceof HomeImageRequest)) return;
+        HomeImageRequest request = (HomeImageRequest) tag;
+        if (request.started) return;
+        request.started = true;
+        loadImageIntoView(request.url, poster, request.referer);
     }
 
     /** Subtle content entrance used after a catalogue or home section is rendered. */
@@ -1042,7 +2956,7 @@ public class MainActivity extends Activity {
     }
 
     private TextView text(String value, int size, int color, boolean bold) {
-        TextView t = new TextView(this); t.setText(value); t.setTextSize(size);
+        TextView t = new TextView(this); t.setText(value); t.setTextSize(fontSize(size));
         t.setTextColor(color); if (bold) t.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
         return t;
     }
@@ -1052,7 +2966,7 @@ public class MainActivity extends Activity {
         b.setText(label);
         b.setAllCaps(false);
         b.setTextColor(GOLD);
-        b.setTextSize(14);
+        b.setTextSize(fontSize(14));
         b.setMinWidth(0);
         b.setMinHeight(0);
         b.setIncludeFontPadding(false);
@@ -1079,26 +2993,39 @@ public class MainActivity extends Activity {
         sidebar.setPadding(dp(8), dp(8), dp(8), dp(8)); sidebar.setBackground(shape(PANEL, 0));
         root.addView(sidebar, new LinearLayout.LayoutParams(dp(220), ViewGroup.LayoutParams.MATCH_PARENT));
         LinearLayout main = new LinearLayout(this); main.setOrientation(LinearLayout.VERTICAL);
+        // Keep feed drawing inside the content pane: focused cards may grow
+        // within their row, but must never cover the sidebar or fixed header.
+        main.setClipChildren(true);
+        main.setClipToPadding(true);
+        root.setClipChildren(true);
+        root.setClipToPadding(true);
         main.setPadding(dp(16), dp(8), dp(8), dp(8));
         root.addView(main, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1));
-        LinearLayout brand = new LinearLayout(this); brand.setGravity(Gravity.CENTER);
-        TextView logo = text("KINOZAL", 23, GOLD, true); brand.addView(logo);
+        LinearLayout brand = new LinearLayout(this);
+        brand.setGravity(Gravity.CENTER_VERTICAL | Gravity.LEFT);
+        brand.setPadding(dp(10), 0, dp(4), 0);
+        ImageView logo = new ImageView(this);
+        logo.setImageResource(R.drawable.kinozal_sidebar_logo);
+        logo.setScaleType(ImageView.ScaleType.FIT_START);
+        logo.setAdjustViewBounds(true);
+        brand.addView(logo, new LinearLayout.LayoutParams(dp(158), dp(58)));
         sidebar.addView(brand, new LinearLayout.LayoutParams(-1, dp(58)));
         ScrollView menuScroll = new ScrollView(this);
-        menuScroll.setFillViewport(false);
-        menuScroll.setVerticalScrollBarEnabled(false);
+        menuScroll.setFillViewport(false);        menuScroll.setVerticalScrollBarEnabled(false);
         menuScroll.setScrollbarFadingEnabled(true);
-        menuScroll.setPadding(0, 0, 0, 0);
+        menuScroll.setPadding(0, dp(5), 0, 0);
         menuItems = new LinearLayout(this);
         menuItems.setOrientation(LinearLayout.VERTICAL);
         menuScroll.addView(menuItems, new ScrollView.LayoutParams(-1, -2));
         sidebar.addView(menuScroll, new LinearLayout.LayoutParams(-1, 0, 1));
         addMenu("⌂", "Главная", () -> loadInitialCatalog());
+        addMenu("▤", "Подборки", () -> loadCollections());
         addMenu("⇩", "Все раздачи", () -> load("browse.php", "Все раздачи"));
 
         Button categoriesButton = button("▦   Категории  ▾");
+        categoriesButton.setText(menuIconText("▦   Категории  ▾"));
         categoriesButton.setGravity(Gravity.CENTER_VERTICAL | Gravity.LEFT);
-        categoriesButton.setTextSize(14);
+        categoriesButton.setTextSize(fontSize(14));
         categoriesButton.setPadding(dp(14), 0, dp(8), 0);
         LinearLayout.LayoutParams categoryButtonParams = new LinearLayout.LayoutParams(-1, dp(47));
         categoryButtonParams.rightMargin = dp(5);
@@ -1114,39 +3041,123 @@ public class MainActivity extends Activity {
         addSubMenu(categoryGroup, "▣  Зарубежные сериалы", "browse.php?c=46");
         addSubMenu(categoryGroup, "▣  Российские сериалы", "browse.php?c=45");
 
-        addSubMenu(categoryGroup, "▤  Все фильмы", "browse.php?c=1002");
-        addSubMenu(categoryGroup, "▤  Советские фильмы", "browse.php?c=10");
+        Button moviesButton = button("▤  Фильмы  ▾");
+        moviesButton.setText(menuIconText("▤  Фильмы  ▾"));
+        moviesButton.setGravity(Gravity.CENTER_VERTICAL | Gravity.LEFT);
+        moviesButton.setTextSize(fontSize(12));
+        moviesButton.setPadding(dp(34), 0, dp(8), 0);
+        LinearLayout.LayoutParams moviesButtonParams = new LinearLayout.LayoutParams(-1, dp(39));
+        moviesButtonParams.rightMargin = dp(5);
+        moviesButtonParams.bottomMargin = dp(2);
+        categoryGroup.addView(moviesButton, moviesButtonParams);
+
+        LinearLayout moviesGroup = new LinearLayout(this);
+        moviesGroup.setOrientation(LinearLayout.VERTICAL);
+        moviesGroup.setVisibility(View.GONE);
+        categoryGroup.addView(moviesGroup);
+
+        addSubMenu(moviesGroup, "▣  Все фильмы", "browse.php?c=1002");
+        addSubMenu(moviesGroup, "●  Кино - Комедия", "browse.php?c=8");
+        addSubMenu(moviesGroup, "⚑  Кино - Боевик / Военный", "browse.php?c=6");
+        addSubMenu(moviesGroup, "◈  Кино - Триллер / Детектив", "browse.php?c=15");
+        addSubMenu(moviesGroup, "▰  Кино - Драма", "browse.php?c=17");
+        addSubMenu(moviesGroup, "♥  Кино - Мелодрама", "browse.php?c=35");
+        addSubMenu(moviesGroup, "✿  Кино - Индийское", "browse.php?c=39");
+        addSubMenu(moviesGroup, "✧  Кино - Фантастика", "browse.php?c=13");
+        addSubMenu(moviesGroup, "♢  Кино - Фэнтези", "browse.php?c=14");
+        addSubMenu(moviesGroup, "☾  Кино - Ужас / Мистика", "browse.php?c=24");
+        addSubMenu(moviesGroup, "➤  Кино - Приключения", "browse.php?c=11");
+        addSubMenu(moviesGroup, "⌂  Кино - Наше Кино", "browse.php?c=10");
+        addSubMenu(moviesGroup, "◷  Кино - Исторический", "browse.php?c=9");
+        addSubMenu(moviesGroup, "✿  Кино - Азиатский", "browse.php?c=47");
+        addSubMenu(moviesGroup, "▤  Кино - Документальный", "browse.php?c=18");
+        addSubMenu(moviesGroup, "⚽  Кино - Спорт", "browse.php?c=37");
+        addSubMenu(moviesGroup, "★  Кино - Детский / Семейный", "browse.php?c=12");
+        addSubMenu(moviesGroup, "▥  Кино - Классика", "browse.php?c=7");
+        addSubMenu(moviesGroup, "♫  Кино - Концерт", "browse.php?c=48");
+        addSubMenu(moviesGroup, "▣  Кино - Передачи / ТВ-шоу", "browse.php?c=49");
+        addSubMenu(moviesGroup, "▣  Кино - ТВ-шоу Мир", "browse.php?c=50");
+        addSubMenu(moviesGroup, "♬  Кино - Театр, Опера, Балет", "browse.php?c=38");
+        addSubMenu(moviesGroup, "♥  Кино - Эротика", "browse.php?c=16");
+
+        moviesButton.setOnClickListener(v -> {
+            boolean expand = moviesGroup.getVisibility() != View.VISIBLE;
+            moviesGroup.setVisibility(expand ? View.VISIBLE : View.GONE);
+            moviesButton.setText(menuIconText(expand ? "▤  Фильмы  ▾" : "▤  Фильмы  ▸"));
+            if (expand && moviesGroup.getChildCount() > 0) moviesGroup.getChildAt(0).requestFocus();
+        });
         addSubMenu(categoryGroup, "▧  Мультфильмы", "browse.php?c=1003");
         addSubMenu(categoryGroup, "▧  Российские мульты", "browse.php?c=22");
         addSubMenu(categoryGroup, "▧  Зарубежные мульты", "browse.php?c=21");
         addSubMenu(categoryGroup, "✧  Аниме", "browse.php?c=20");
-        addSubMenu(categoryGroup, "⚑  Спортивные передачи", "browse.php?c=37");
-        addSubMenu(categoryGroup, "▣  Российское ТВ", "browse.php?c=49");
-        addSubMenu(categoryGroup, "▣  Зарубежное ТВ", "browse.php?c=50");
-        addSubMenu(categoryGroup, "♫  Концерты", "browse.php?c=48");
-        addSubMenu(categoryGroup, "▸  Видеоклипы", "browse.php?c=1");
+        addSubMenu(categoryGroup, "Концерты", "browse.php?c=48");
+        addSubMenu(categoryGroup, "Видеоклипы", "browse.php?c=1");
+        addSubMenu(categoryGroup, "Аудиокниги", "browse.php?c=2");
+        addSubMenu(categoryGroup, "Игры", "browse.php?c=23");
         categoriesButton.setOnClickListener(v -> {
             boolean expand = categoryGroup.getVisibility() != View.VISIBLE;
             categoryGroup.setVisibility(expand ? View.VISIBLE : View.GONE);
-            categoriesButton.setText(expand ? "Категории  ▾" : "Категории  ▸");
+            categoriesButton.setText(menuIconText(expand ? "▦   Категории  ▾" : "▦   Категории  ▸"));
             if (expand) categoryGroup.getChildAt(0).requestFocus();
         });
 
-        addMenu("★", "Избранное", () -> showFavorites());
-        addMenu("◷", "Недавно смотрели", () -> showRecentlyViewed());
+        // Premium destinations are omitted entirely for accounts without the feature.
+        addMenu("★", "Избранное", this::showFavorites, true);
+        addMenu("◷", "Недавно смотрели", this::showRecentlyViewed, true);
+        addMenu("⇥", "Авторизация", () -> showLogin());
         addMenu("⚙", "Настройки", () -> showSettings());
-        status = text("Подключение…", 11, TEAL, false);
-        status.setGravity(Gravity.CENTER);
-        status.setLineSpacing(dp(2), 1f);
-        LinearLayout.LayoutParams statusParams = new LinearLayout.LayoutParams(-1, dp(44));
-        statusParams.topMargin = dp(6);
-        sidebar.addView(status, statusParams);
+        // Keep status available for internal progress updates, but do not show
+        // diagnostic counters or connection state in the sidebar.
+        status = text("Показано лент: 0", 10, TEAL, false);
+        status.setVisibility(View.GONE);
+        sidebarConnectionInfo = null;
+        sidebarCategoryInfo = null;
+        sidebarCountryInfo = text("Страна подключения: определяется…", 10, TEAL, false);
+        sidebarLoginInfo = text("Вход: не проверен", 11, TEAL, true);
+        sidebarVersionInfo = text("Версия: " + getAppVersionName(), 10, GOLD, false);
+        TextView[] diagnosticLines = {sidebarCountryInfo, sidebarLoginInfo, sidebarVersionInfo};
+        for (TextView line : diagnosticLines) {
+            line.setGravity(Gravity.CENTER);
+            line.setMaxLines(2);
+            line.setPadding(dp(2), dp(2), dp(2), dp(2));
+            sidebar.addView(line, new LinearLayout.LayoutParams(-1, -2));
+        }
 
         heading = text("Главная", 25, GOLD, true);
         LinearLayout.LayoutParams headingParams = new LinearLayout.LayoutParams(-1, dp(42));
         headingParams.bottomMargin = dp(4);
         main.addView(heading, headingParams);
-
+        localListSearchBar = new LinearLayout(this);
+        localListSearchBar.setGravity(Gravity.CENTER_VERTICAL);
+        localListSearchBar.setPadding(0, 0, 0, dp(8));
+        localListSearchBar.setVisibility(View.GONE);
+        LinearLayout localSearchField = new LinearLayout(this);
+        localSearchField.setGravity(Gravity.CENTER_VERTICAL);
+        localSearchField.setBackground(shape(PANEL, TEAL));
+        localSearchField.setPadding(dp(10), 0, dp(5), 0);
+        localListSearch = new EditText(this);
+        localListSearch.setSingleLine(true);
+        localListSearch.setTextColor(Color.WHITE);
+        localListSearch.setHintTextColor(TEAL);
+        localListSearch.setHint("Поиск в этом списке");
+        localListSearch.setTextSize(fontSize(16));
+        localListSearch.setImeOptions(EditorInfo.IME_ACTION_SEARCH);
+        localListSearch.setBackgroundColor(Color.TRANSPARENT);
+        localSearchField.addView(localListSearch, new LinearLayout.LayoutParams(0, dp(48), 1f));
+        Button clearLocalSearch = button("×");
+        clearLocalSearch.setVisibility(View.GONE);
+        localSearchField.addView(clearLocalSearch, new LinearLayout.LayoutParams(dp(38), dp(40)));
+        clearLocalSearch.setOnClickListener(v -> localListSearch.setText(""));
+        localListSearch.addTextChangedListener(new android.text.TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) { }
+            @Override public void onTextChanged(CharSequence value, int start, int before, int count) {
+                clearLocalSearch.setVisibility(value.length() > 0 ? View.VISIBLE : View.GONE);
+                filterActiveLocalList();
+            }
+            @Override public void afterTextChanged(android.text.Editable value) { }
+        });
+        localListSearchBar.addView(localSearchField, new LinearLayout.LayoutParams(-1, dp(48)));
+        main.addView(localListSearchBar, new LinearLayout.LayoutParams(-1, dp(56)));
         LinearLayout searchBar = new LinearLayout(this); searchBar.setGravity(Gravity.CENTER_VERTICAL);
         search = new EditText(this);
         search.setSingleLine(true);
@@ -1155,7 +3166,7 @@ public class MainActivity extends Activity {
         search.setTextColor(Color.WHITE);
         search.setHintTextColor(TEAL);
         search.setHint("Название фильма или раздачи");
-        search.setTextSize(16);
+        search.setTextSize(fontSize(16));
         search.setImeOptions(EditorInfo.IME_ACTION_SEARCH);
         LinearLayout searchField = new LinearLayout(this);
         searchField.setGravity(Gravity.CENTER_VERTICAL);
@@ -1166,7 +3177,7 @@ public class MainActivity extends Activity {
         searchParams.rightMargin = dp(8);
         search.setBackgroundColor(Color.TRANSPARENT);
         search.setPadding(dp(4), 0, dp(4), 0);
-        View voiceSearch = new View(this) {
+        plusVoiceSearchButton = new View(this) {
             private final android.graphics.Paint iconPaint = new android.graphics.Paint(
                     android.graphics.Paint.ANTI_ALIAS_FLAG);
             @Override protected void onDraw(android.graphics.Canvas canvas) {
@@ -1175,28 +3186,37 @@ public class MainActivity extends Activity {
                 iconPaint.setStyle(android.graphics.Paint.Style.STROKE);
                 iconPaint.setStrokeWidth(dp(2.1f));
                 iconPaint.setStrokeCap(android.graphics.Paint.Cap.ROUND);
-                float cx = getWidth() / 2f - dp(2);
-                float cy = getHeight() / 2f - dp(2);
-                float radius = dp(6);
-                canvas.drawCircle(cx, cy, radius, iconPaint);
-                canvas.drawLine(cx + radius * 0.72f, cy + radius * 0.72f,
-                        cx + dp(10), cy + dp(10), iconPaint);
+                float cx = getWidth() / 2f;
+                canvas.save();
+                canvas.translate(0, -dp(2));
+                canvas.scale(0.72f, 0.72f, cx, getHeight() / 2f);
+                float top = getHeight() / 2f - dp(10);
+                float bottom = getHeight() / 2f + dp(2);
+                float micWidth = dp(6);
+                canvas.drawRoundRect(cx - micWidth, top, cx + micWidth, bottom,
+                        micWidth, micWidth, iconPaint);
+                canvas.drawArc(cx - dp(10), top + dp(3), cx + dp(10), bottom + dp(9),
+                        0, 180, false, iconPaint);
+                canvas.drawLine(cx, bottom + dp(9), cx, bottom + dp(14), iconPaint);
+                canvas.drawLine(cx - dp(6), bottom + dp(14), cx + dp(6), bottom + dp(14), iconPaint);
+                canvas.restore();
             }
         };
-        voiceSearch.setContentDescription("Голосовой поиск");
-        voiceSearch.setFocusable(true);
-        voiceSearch.setFocusableInTouchMode(false);
-        voiceSearch.setBackground(shape(PANEL, 0));
-        voiceSearch.setOnFocusChangeListener((v, focused) ->
+        plusVoiceSearchButton.setContentDescription("Голосовой поиск — Plus");
+        registerPlusFeatureControl(plusVoiceSearchButton, "voice_search");
+        plusVoiceSearchButton.setFocusable(true);
+        plusVoiceSearchButton.setFocusableInTouchMode(false);
+        plusVoiceSearchButton.setBackground(shape(PANEL, 0));
+        plusVoiceSearchButton.setOnFocusChangeListener((v, focused) ->
                 v.setBackground(shape(focused ? Color.rgb(65, 72, 73) : PANEL, focused ? GOLD : 0)));
-        voiceSearch.setNextFocusRightId(View.NO_ID);
+        plusVoiceSearchButton.setNextFocusRightId(View.NO_ID);
         LinearLayout.LayoutParams voiceParams = new LinearLayout.LayoutParams(dp(40), dp(40));
         voiceParams.rightMargin = dp(3);
-        searchField.addView(voiceSearch, voiceParams);
-        voiceSearch.setOnClickListener(v -> startVoiceSearch());
+        searchField.addView(plusVoiceSearchButton, voiceParams);
+        plusVoiceSearchButton.setOnClickListener(v -> { if (requirePlusFeature("voice_search")) startVoiceSearch(); });
         searchField.addView(search, new LinearLayout.LayoutParams(0, -1, 1f));
         Button clearSearch = button("×");
-        clearSearch.setTextSize(23);
+        clearSearch.setTextSize(fontSize(23));
         clearSearch.setContentDescription("Очистить поиск");
         clearSearch.setVisibility(View.GONE);
         searchField.addView(clearSearch, new LinearLayout.LayoutParams(dp(38), dp(40)));
@@ -1209,16 +3229,36 @@ public class MainActivity extends Activity {
             @Override public void afterTextChanged(android.text.Editable s) { }
         });
         searchBar.addView(searchField, searchParams);
+        plusAdvancedSearchButton = button("+");
+        plusAdvancedSearchButton.setTextSize(fontSize(24));
+        plusAdvancedSearchButton.setText("+");
+        plusAdvancedSearchButton.setContentDescription("Расширенный поиск — Plus");
+        registerPlusFeatureControl(plusAdvancedSearchButton, "advanced_search");
+        plusAdvancedSearchButton.setMinWidth(0);
+        plusAdvancedSearchButton.setMinimumWidth(0);
+        plusAdvancedSearchButton.setGravity(Gravity.CENTER);
+        plusAdvancedSearchButton.setPadding(0, 0, 0, 0);
+        LinearLayout.LayoutParams filterButtonParams = new LinearLayout.LayoutParams(dp(48), dp(48));
+        filterButtonParams.rightMargin = dp(7);
+        searchBar.addView(plusAdvancedSearchButton, filterButtonParams);
+        plusAdvancedSearchButton.setOnClickListener(v -> { if (requirePlusFeature("advanced_search")) showTorrentFilter(); });
         Button history = button("История");
-        history.setTextSize(12);
-        LinearLayout.LayoutParams historyParams = new LinearLayout.LayoutParams(dp(82), dp(48));
-        historyParams.rightMargin = dp(6);
+        history.setTextSize(fontSize(12));
+        history.setMinWidth(0);
+        history.setMinimumWidth(0);
+        history.setGravity(Gravity.CENTER);
+        history.setIncludeFontPadding(false);
+        LinearLayout.LayoutParams historyParams = new LinearLayout.LayoutParams(dp(92), dp(52));
+        historyParams.rightMargin = dp(10);
         searchBar.addView(history, historyParams);
         history.setOnClickListener(v -> showSearchHistory());
         Button find = button("Найти");
-        find.setTextSize(12);
+        find.setTextSize(fontSize(12));
         find.setMinWidth(0);
-        LinearLayout.LayoutParams findParams = new LinearLayout.LayoutParams(dp(104), dp(48));
+        find.setMinimumWidth(0);
+        find.setGravity(Gravity.CENTER);
+        find.setIncludeFontPadding(false);
+        LinearLayout.LayoutParams findParams = new LinearLayout.LayoutParams(dp(92), dp(52));
         searchBar.addView(find, findParams);
         find.setOnClickListener(v -> submitSearch());
         search.setOnEditorActionListener((v, action, event) -> {
@@ -1226,6 +3266,7 @@ public class MainActivity extends Activity {
             return false;
         });
         LinearLayout.LayoutParams sbp = new LinearLayout.LayoutParams(-1, dp(52)); sbp.bottomMargin = dp(8);
+        mainSearchBar = searchBar;
         main.addView(searchBar, sbp);
         progress = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
         progress.setIndeterminate(true);
@@ -1234,18 +3275,253 @@ public class MainActivity extends Activity {
         LinearLayout.LayoutParams progressParams = new LinearLayout.LayoutParams(-1, dp(3));
         progressParams.bottomMargin = dp(5);
         main.addView(progress, progressParams);
-        ScrollView scroll = new ScrollView(this); scroll.setFillViewport(true);
+        homeScrollView = new ScrollView(this); homeScrollView.setFillViewport(true);
+        // Clip scaled poster cards to the scrolling viewport so they cannot
+        // paint over the search/header controls above the feed.
+        homeScrollView.setClipChildren(true);
+        homeScrollView.setClipToPadding(true);
+        homeScrollView.setVerticalScrollBarEnabled(false);
         list = new LinearLayout(this); list.setOrientation(LinearLayout.VERTICAL);
-        scroll.addView(list);
-        main.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1));
+        list.setClipChildren(false);
+        list.setClipToPadding(false);
+        homeList = list;
+        homeScrollView.addView(homeList);
+        main.addView(homeScrollView, new LinearLayout.LayoutParams(-1, 0, 1));
+        feedScreenParent = main;
+        activeFeedScrollView = homeScrollView;
+        homeScrollView.setOnScrollChangeListener((View v, int x, int y, int oldX, int oldY) -> {
+            if (y != oldY) scheduleVisibleHomePosterLoad();
+        });
         setContentView(root);
         if (menuItems.getChildCount() > 0) menuItems.getChildAt(0).requestFocus();
     }
 
+    /** Keep Home and Collections as two distinct live view trees. */
+    /** Browse/category pages use their own temporary host and cannot erase feed screens. */
+    private void activateBrowseScreen() {
+        if (mainSearchBar != null) mainSearchBar.setVisibility(View.VISIBLE);
+        if (localListSearchBar != null) localListSearchBar.setVisibility(View.GONE);
+        if (feedScreenParent == null) return;
+        if (browseScrollView == null) {
+            browseList = new LinearLayout(this);
+            browseList.setOrientation(LinearLayout.VERTICAL);
+            browseScrollView = new ScrollView(this);
+            browseScrollView.setFillViewport(true);
+            browseScrollView.setVerticalScrollBarEnabled(false);
+            browseScrollView.addView(browseList);
+        }
+        if (activeFeedScrollView == browseScrollView) {
+            list = browseList;
+            activeFeedScreen = "browse";
+            return;
+        }
+        View current = activeFeedScrollView;
+        ViewGroup.LayoutParams params = current == null ? null : current.getLayoutParams();
+        if (current != null && current.getParent() == feedScreenParent) feedScreenParent.removeView(current);
+        if (params == null) params = new LinearLayout.LayoutParams(-1, 0, 1);
+        if (browseScrollView.getParent() instanceof ViewGroup)
+            ((ViewGroup) browseScrollView.getParent()).removeView(browseScrollView);
+        feedScreenParent.addView(browseScrollView, params);
+        activeFeedScrollView = browseScrollView;
+        activeFeedScreen = "browse";
+        list = browseList;
+    }
+
+    private void activateFeedScreen(String screen) {
+        if (mainSearchBar != null) mainSearchBar.setVisibility(View.VISIBLE);
+        if (localListSearchBar != null) localListSearchBar.setVisibility(View.GONE);
+        if (feedScreenParent == null || homeScrollView == null) return;
+        boolean collections = "collections".equals(screen);
+        if (collections && collectionsScrollView == null) {
+            collectionsList = new LinearLayout(this);
+            collectionsList.setOrientation(LinearLayout.VERTICAL);
+            collectionsList.setClipChildren(false);
+            collectionsList.setClipToPadding(false);
+            collectionsScrollView = new ScrollView(this);
+            collectionsScrollView.setFillViewport(true);
+            collectionsScrollView.setClipChildren(false);
+            collectionsScrollView.setClipToPadding(false);
+            collectionsScrollView.setVerticalScrollBarEnabled(false);
+            collectionsScrollView.addView(collectionsList);
+            collectionsScrollView.setOnScrollChangeListener((View v, int x, int y, int oldX, int oldY) -> {
+                if (y != oldY) scheduleVisibleHomePosterLoad();
+            });
+        }
+        ScrollView target = collections ? collectionsScrollView : homeScrollView;
+        if (target == null) return;
+        View current = activeFeedScrollView;
+        if (current == target) {
+            list = collections ? collectionsList : homeList;
+            activeFeedScreen = screen;
+            return;
+        }
+        ViewGroup.LayoutParams params = current == null ? null : current.getLayoutParams();
+        if (current != null && current.getParent() == feedScreenParent) feedScreenParent.removeView(current);
+        if (params == null) params = new LinearLayout.LayoutParams(-1, 0, 1);
+        if (target.getParent() instanceof ViewGroup) ((ViewGroup) target.getParent()).removeView(target);
+        feedScreenParent.addView(target, params);
+        list = collections ? collectionsList : homeList;
+        activeFeedScrollView = target;
+        activeFeedScreen = screen;
+        scheduleVisibleHomePosterLoad();
+    }
+
+    private java.io.File collectionsModelFile() {
+        return new java.io.File(getFilesDir(), "kinozal_collections_model_v1.json");
+    }
+
+    private void saveCollectionsModel(List<HomeSection> sections) {
+        try {
+            org.json.JSONArray feeds = new org.json.JSONArray();
+            for (HomeSection section : sections) {
+                org.json.JSONObject feed = new org.json.JSONObject();
+                feed.put("title", section.title);
+                feed.put("path", section.path);
+                org.json.JSONArray items = new org.json.JSONArray();
+                for (HomePoster poster : section.items) {
+                    org.json.JSONObject item = new org.json.JSONObject();
+                    item.put("title", poster.torrent.title);
+                    item.put("href", poster.torrent.href);
+                    item.put("size", poster.torrent.size);
+                    item.put("seeds", poster.torrent.seeds);
+                    item.put("leeches", poster.torrent.leeches);
+                    item.put("uploaded", poster.torrent.uploaded);
+                    item.put("image", poster.imageUrl);
+                    items.put(item);
+                }
+                feed.put("items", items);
+                feeds.put(feed);
+            }
+            org.json.JSONObject rootJson = new org.json.JSONObject();
+            rootJson.put("version", 1);
+            rootJson.put("mirror", client.getMirror());
+            rootJson.put("savedAt", System.currentTimeMillis());
+            rootJson.put("feeds", feeds);
+            writeModelAtomically(collectionsModelFile(), rootJson.toString());
+        } catch (Exception ignored) { }
+    }
+
+    private List<HomeSection> readCollectionsModel() {
+        java.io.File file = collectionsModelFile();
+        if (!file.isFile() || file.length() <= 0 || file.length() > 8L * 1024L * 1024L) return null;
+        try {
+            org.json.JSONObject rootJson = new org.json.JSONObject(new String(
+                    java.nio.file.Files.readAllBytes(file.toPath()), StandardCharsets.UTF_8));
+            if (rootJson.optInt("version") != 1 || !client.getMirror().equals(rootJson.optString("mirror"))
+                    || System.currentTimeMillis() - rootJson.optLong("savedAt") > 7L * 24 * 60 * 60 * 1000) return null;
+            org.json.JSONArray feeds = rootJson.optJSONArray("feeds");
+            if (feeds == null) return null;
+            List<HomeSection> result = new ArrayList<>();
+            for (int i = 0; i < feeds.length(); i++) {
+                org.json.JSONObject feed = feeds.optJSONObject(i);
+                if (feed == null) continue;
+                HomeSection section = new HomeSection(feed.optString("title"), feed.optString("path"));
+                org.json.JSONArray items = feed.optJSONArray("items");
+                if (items == null) continue;
+                for (int j = 0; j < items.length(); j++) {
+                    org.json.JSONObject value = items.optJSONObject(j);
+                    if (value == null) continue;
+                    HomePoster poster = new HomePoster();
+                    poster.torrent = new Torrent();
+                    poster.torrent.title = value.optString("title");
+                    poster.torrent.href = value.optString("href");
+                    poster.torrent.size = value.optString("size", "—");
+                    poster.torrent.seeds = value.optString("seeds", "—");
+                    poster.torrent.leeches = value.optString("leeches", "—");
+                    poster.torrent.uploaded = value.optString("uploaded", "");
+                    poster.imageUrl = value.optString("image");
+                    if (!poster.torrent.title.isEmpty() && !poster.torrent.href.isEmpty()) section.items.add(poster);
+                }
+                if (!section.items.isEmpty()) result.add(section);
+            }
+            int beforeDedup = countHomeCards(result);
+            removeHomeDuplicates(result);
+            if (countHomeCards(result) != beforeDedup) saveCollectionsModel(result);
+            return result;
+        } catch (Exception ignored) { return null; }
+    }
+
+    private void writeModelAtomically(java.io.File target, String value) throws Exception {
+        java.io.File temp = new java.io.File(target.getParentFile(), target.getName() + ".tmp");
+        try (java.io.FileOutputStream out = new java.io.FileOutputStream(temp)) {
+            out.write(value.getBytes(StandardCharsets.UTF_8));
+            out.getFD().sync();
+        }
+        java.io.File backup = new java.io.File(target.getParentFile(), target.getName() + ".bak");
+        if (target.exists() && !target.renameTo(backup)) throw new java.io.IOException("Cannot backup model");
+        if (!temp.renameTo(target)) {
+            if (backup.exists()) backup.renameTo(target);
+            throw new java.io.IOException("Cannot commit model");
+        }
+        if (backup.exists()) backup.delete();
+    }
+
+    private String categoryIcon(String label) {
+        String value = label == null ? "" : label.toLowerCase(java.util.Locale.ROOT);
+        if (value.contains("сериал") || value.contains("передач") || value.contains("тв-шоу")) return "▣";
+        if (value.contains("фильм") || value.contains("кино")) return "▰";
+        if (value.contains("комедия")) return "●";
+        if (value.contains("боевик") || value.contains("военный")) return "✦";
+        if (value.contains("триллер") || value.contains("детектив")) return "⌕";
+        if (value.contains("драма")) return "◈";
+        if (value.contains("мелодрама") || value.contains("эрот")) return "♡";
+        if (value.contains("индий")) return "✿";
+        if (value.contains("фантаст") || value.contains("аниме")) return "✧";
+        if (value.contains("фэнтези")) return "✦";
+        if (value.contains("ужас") || value.contains("мистик")) return "◐";
+        if (value.contains("приключ")) return "➤";
+        if (value.contains("истор")) return "◷";
+        if (value.contains("азиат")) return "❖";
+        if (value.contains("документ")) return "▤";
+        if (value.contains("спорт")) return "◇";
+        if (value.contains("детский") || value.contains("семейн")) return "☆";
+        if (value.contains("классик")) return "▥";
+        if (value.contains("концерт")) return "♫";
+        if (value.contains("театр") || value.contains("опера") || value.contains("балет")) return "♟";
+        if (value.contains("мульт")) return "▧";
+        if (value.contains("видеоклип")) return "▶";
+        if (value.contains("аудиокниг")) return "◖";
+        if (value.contains("игр")) return "⌘";
+        return "◆";
+    }
+
+    private CharSequence menuIconText(String value) {
+        int end = value.indexOf("  ");
+        if (end <= 0 || end > 4) return value;
+        float iconScale = 1.05f;
+        if (value.contains("Недавно смотрели") || value.contains("Все раздачи")) {
+            iconScale = 1.5f;
+        }
+        android.text.SpannableString styled = new android.text.SpannableString(value);
+        styled.setSpan(new android.text.style.ForegroundColorSpan(Color.rgb(174, 55, 18)),
+                0, end, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        styled.setSpan(new android.text.style.StyleSpan(android.graphics.Typeface.BOLD),
+                0, end, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        styled.setSpan(new android.text.style.RelativeSizeSpan(iconScale),
+                0, end, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        return styled;
+    }
+
     private void addSubMenu(LinearLayout parent, String label, String path) {
-        Button b = button(label);
+        String displayLabel = label;
+        int existingIconEnd = label.indexOf("  ");
+        if (existingIconEnd <= 0 || existingIconEnd > 3) {
+            displayLabel = categoryIcon(label) + "  " + label;
+        }
+        Button b = button(displayLabel);
+        b.setText(menuIconText(displayLabel));
+        // One uniform icon size and weight across every category row.
+        int iconEnd = displayLabel.indexOf("  ");
+        if (iconEnd > 0 && iconEnd <= 3) {
+            android.text.SpannableString menuLabel = new android.text.SpannableString(displayLabel);
+            menuLabel.setSpan(new android.text.style.RelativeSizeSpan(1.0f),
+                    0, iconEnd, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+            menuLabel.setSpan(new android.text.style.StyleSpan(android.graphics.Typeface.BOLD),
+                    0, iconEnd, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+            b.setText(menuIconText(displayLabel));
+        }
         b.setGravity(Gravity.CENTER_VERTICAL | Gravity.LEFT);
-        b.setTextSize(12);
+        b.setTextSize(fontSize(12));
         b.setPadding(dp(34), 0, dp(8), 0);
         LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(-1, dp(39));
         p.rightMargin = dp(5);
@@ -1254,92 +3530,900 @@ public class MainActivity extends Activity {
         b.setOnClickListener(v -> load(path, label));
     }
 
-    private void showSettings() {
+    private static final int REQUEST_BACKUP_EXPORT = 7510;
+    private static final int REQUEST_TORRENT_SAVE = 7513;
+    private static final int REQUEST_BACKUP_IMPORT = 7511;
+    private static final int REQUEST_FEED_DIAGNOSTICS_EXPORT = 7512;
+    private String pendingFeedDiagnosticsExport;
+    private byte[] pendingTorrentSaveBytes;
+    private EditText torrServeAddressField;
+
+    private int getAccentColor(String key) {
+        if ("silver".equals(key)) return Color.rgb(214, 219, 224);
+        if ("bronze".equals(key)) return Color.rgb(205, 145, 96);
+        if ("olive".equals(key)) return Color.rgb(133, 173, 73);
+        return Color.rgb(251, 226, 173);
+    }
+
+    private float fontSize(float baseSp) {
+        return Math.max(8f, Math.min(36f, baseSp + fontOffsetSp));
+    }
+
+    private void applyFontDelta(View view, int deltaSp) {
+        if (view == null || deltaSp == 0) return;
+        if (view instanceof TextView) {
+            TextView textView = (TextView) view;
+            float scaledDensity = getResources().getDisplayMetrics().scaledDensity;
+            float currentSp = textView.getTextSize() / scaledDensity;
+            float nextSp = Math.max(8f, Math.min(36f, currentSp + deltaSp));
+            textView.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, nextSp);
+        }
+        if (view instanceof ViewGroup) {
+            ViewGroup group = (ViewGroup) view;
+            for (int i = 0; i < group.getChildCount(); i++)
+                applyFontDelta(group.getChildAt(i), deltaSp);
+        }
+    }
+
+    private void changeFontSize(int deltaSp, TextView valueLabel) {
+        int next = Math.max(-12, Math.min(12, fontOffsetSp + deltaSp));
+        if (next == fontOffsetSp) return;
+        int appliedDelta = next - fontOffsetSp;
+        fontOffsetSp = next;
+        getSharedPreferences(PREFS, MODE_PRIVATE).edit()
+                .putInt(FONT_SIZE_OFFSET_KEY, fontOffsetSp).apply();
+        applyFontDelta(getWindow() == null ? null : getWindow().getDecorView(), appliedDelta);
+        if (valueLabel != null) applyFontDelta(valueLabel.getRootView(), appliedDelta);
+        if (settingsDialog != null && settingsDialog.isShowing()
+                && settingsDialog.getWindow() != null)
+            applyFontDelta(settingsDialog.getWindow().getDecorView(), appliedDelta);
+        if (valueLabel != null) valueLabel.setText(fontOffsetSp == 0
+                ? "Размер по умолчанию"
+                : (fontOffsetSp > 0 ? "+" : "") + fontOffsetSp + " sp");
+    }
+
+    private void showFontSizeSettings() {
         LinearLayout panel = new LinearLayout(this);
         panel.setOrientation(LinearLayout.VERTICAL);
         panel.setPadding(dp(18), dp(14), dp(18), dp(12));
         panel.setBackgroundColor(BG);
-        Button login = button("◎   Авторизация / проверка Kinozal");
-        Button mirrorButton = button("◇   Выбрать зеркало");
-        Button updates = button("↻   Проверить обновления");
-        Button diagnostics = button("▤   Диагностика / кэш");
-        Button socks5 = button("◉   SOCKS5 прокси");
-        Button jackett = button("⌕   Поиск Jackett");
-        Button about = button("ⓘ   О приложении");
-        Button close = button("Закрыть");
-        for (Button action : new Button[]{login, mirrorButton, updates, diagnostics, socks5, jackett, about, close}) {
-            action.setTextSize(15);
-            action.setGravity(Gravity.CENTER);
-            LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-1, dp(48));
-            params.bottomMargin = dp(8);
-            panel.addView(action, params);
+        TextView value = text(fontOffsetSp == 0 ? "Размер по умолчанию"
+                : (fontOffsetSp > 0 ? "+" : "") + fontOffsetSp + " sp", 16, GOLD, true);
+        value.setGravity(Gravity.CENTER);
+        value.setPadding(0, dp(4), 0, dp(14));
+        panel.addView(value, new LinearLayout.LayoutParams(-1, dp(48)));
+        LinearLayout controls = new LinearLayout(this);
+        controls.setGravity(Gravity.CENTER);
+        Button smaller = button("А−");
+        smaller.setTextSize(fontSize(20));
+        Button larger = button("А+");
+        larger.setTextSize(fontSize(20));
+        LinearLayout.LayoutParams controlParams = new LinearLayout.LayoutParams(0, dp(52), 1f);
+        controlParams.rightMargin = dp(8);
+        controls.addView(smaller, controlParams);
+        controls.addView(larger, new LinearLayout.LayoutParams(0, dp(52), 1f));
+        panel.addView(controls);
+        TextView hint = text("Каждое нажатие меняет размер на 1 sp. Диапазон: −12…+12 sp.", 12, TEAL, false);
+        hint.setGravity(Gravity.CENTER);
+        hint.setPadding(0, dp(12), 0, 0);
+        panel.addView(hint);
+        AlertDialog dialog = new AlertDialog.Builder(this)
+                .setTitle("Размер шрифта")
+                .setView(panel)
+                .setPositiveButton("Готово", null)
+                .setNeutralButton("Сбросить", null)                .create();
+        smaller.setOnClickListener(v -> changeFontSize(-1, value));
+        larger.setOnClickListener(v -> changeFontSize(1, value));
+        dialog.setOnShowListener(d -> {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setTextColor(GOLD);
+            Button reset = dialog.getButton(AlertDialog.BUTTON_NEUTRAL);
+            reset.setTextColor(GOLD);
+            reset.setOnClickListener(v -> changeFontSize(-fontOffsetSp, value));
+        });
+        dialog.show();
+        if (dialog.getWindow() != null) {
+            dialog.getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(BG));
+            dialog.getWindow().setLayout(Math.min(dp(440),
+                    getResources().getDisplayMetrics().widthPixels - dp(48)),
+                    ViewGroup.LayoutParams.WRAP_CONTENT);
         }
-        login.setOnClickListener(v -> { settingsDialog.dismiss(); showLogin(); });
-        mirrorButton.setOnClickListener(v -> { settingsDialog.dismiss(); chooseMirror(); });
-        updates.setOnClickListener(v -> { settingsDialog.dismiss(); new UpdateManager(this).check(); });
-        diagnostics.setOnClickListener(v -> { settingsDialog.dismiss(); showDiagnostics(); });
-        socks5.setOnClickListener(v -> { settingsDialog.dismiss(); showSocks5Settings(); });
-        jackett.setOnClickListener(v -> showJackettSettings());
-        about.setOnClickListener(v -> showAbout());
-        close.setOnClickListener(v -> settingsDialog.dismiss());
-        settingsDialog = new AlertDialog.Builder(this).setView(panel).create();
+    }
+
+    private void showAccentPicker() {
+        String[] labels = {"Золотистый", "Серебряный", "Бронзовый", "Оливковый"};
+        String[] keys = {"gold", "silver", "bronze", "olive"};
+        String current = getSharedPreferences(PREFS, MODE_PRIVATE).getString("accent_color", "gold");
+        int selected = 0;
+        for (int i = 0; i < keys.length; i++) if (keys[i].equals(current)) selected = i;
+        AlertDialog dialog = new AlertDialog.Builder(this)
+                .setTitle("Цвет акцента")
+                .setSingleChoiceItems(labels, selected, (d, which) -> {
+                    getSharedPreferences(PREFS, MODE_PRIVATE).edit()
+                            .putString("accent_color", keys[which]).apply();
+                    d.dismiss();
+                    recreate();
+                })
+                .setNegativeButton("Отмена", null)
+                .create();
+        dialog.setOnShowListener(d -> {
+            dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setTextColor(GOLD);
+        });
+        dialog.show();
+        dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setTextColor(GOLD);
+    }
+
+    private void showSettings() {
+        LinearLayout page = new LinearLayout(this);
+        page.setOrientation(LinearLayout.VERTICAL);
+        page.setPadding(dp(18), dp(16), dp(18), dp(14));
+        page.setBackgroundColor(BG);
+
+        TextView heading = text("Настройки", 24, GOLD, true);
+        heading.setPadding(dp(4), 0, 0, dp(12));
+        page.addView(heading);
+
+        // Keep mirror and account actions together in the first settings row.
+        LinearLayout topActions = new LinearLayout(this);
+        topActions.setOrientation(LinearLayout.HORIZONTAL);
+        Button mirrorButton = settingsPillButton("Зеркало");
+        Button activationButton = settingsPillButton("Активация и синхронизация");
+        topActions.addView(mirrorButton, new LinearLayout.LayoutParams(0, dp(48), 1f));
+        LinearLayout.LayoutParams activationParams = new LinearLayout.LayoutParams(0, dp(48), 1f);
+        activationParams.leftMargin = dp(10);
+        topActions.addView(activationButton, activationParams);
+        LinearLayout.LayoutParams topActionsParams = new LinearLayout.LayoutParams(-1, dp(54));
+        topActionsParams.bottomMargin = dp(6);
+        page.addView(topActions, topActionsParams);
+        mirrorButton.setOnClickListener(v -> chooseMirror());
+        activationButton.setOnClickListener(v -> showCloudSyncSettings());
+
+        LinearLayout columns = new LinearLayout(this);
+        columns.setOrientation(LinearLayout.HORIZONTAL);
+        LinearLayout left = new LinearLayout(this);
+        LinearLayout right = new LinearLayout(this);
+        left.setOrientation(LinearLayout.VERTICAL);
+        right.setOrientation(LinearLayout.VERTICAL);
+        left.setPadding(0, 0, dp(9), 0);
+        right.setPadding(dp(9), 0, 0, 0);
+        columns.addView(left, new LinearLayout.LayoutParams(0, -2, 1f));
+        columns.addView(right, new LinearLayout.LayoutParams(0, -2, 1f));
+
+        addSettingsAction(left, "Начальный раздел", () -> chooseStartupSource());
+        addSettingsAction(left, "Размер шрифта", () -> showFontSizeSettings());
+        addSettingsAction(left, "Поиск Jackett", () -> showJackettSettings());
+        Button proxyAction = addSettingsAction(left, "Прокси", this::showSocks5Settings);
+        registerPlusFeatureControl(proxyAction, "proxy");
+        addSettingsAction(left, "Очистить кэш", () -> confirmClearCache());
+        addSettingsAction(right, "Сбросить приложение для торрентов", () -> resetTorrentHandlerChoice());
+
+        addSettingsAction(right, "Цвет акцента", () -> showAccentPicker());
+        addSettingsAction(right, "TorrServe", () -> showTorrServeSettings());
+        Button backupAction = addSettingsAction(right, "Резервная копия", () -> {
+            if (!requirePlusFeature("backup")) return;
+            new AlertDialog.Builder(this)
+                    .setItems(new String[]{"Создать резервную копию", "Восстановить из копии"},
+                            (dialog, which) -> {
+                                if (which == 0) exportUserBackup();
+                                else importUserBackup();
+                            }).show();
+        });
+        registerPlusFeatureControl(backupAction, "backup");
+        addSettingsAction(right, "Обновления", () -> showUpdateSettings());
+        addSettingsAction(right, "Диагностика", () -> showCrashDiagnostics());
+
+        LinearLayout bottomRow = new LinearLayout(this);
+        bottomRow.setOrientation(LinearLayout.HORIZONTAL);
+        bottomRow.setPadding(0, dp(8), 0, 0);
+        boolean hasTvChannelsPlus = PlusAccess.hasFeature(this, "android_tv_channels");
+        Button channelsButton = settingsPillButton("Каналы Android TV");
+        registerPlusFeatureControl(channelsButton, "android_tv_channels");
+        boolean channelsOn = PlusAccess.hasFeature(this, "android_tv_channels")
+                && getSharedPreferences(PREFS, MODE_PRIVATE).getBoolean("tv_channels_enabled", false);
+        if (!PlusAccess.hasFeature(this, "android_tv_channels")) {
+            getSharedPreferences(PREFS, MODE_PRIVATE).edit().putBoolean("tv_channels_enabled", false).apply();
+            TvHomeChannels.removeAll(this);
+        }
+        channelsButton.setText(hasTvChannelsPlus
+                ? "Каналы Android TV: " + (channelsOn ? "Вкл." : "Выкл.")
+                : "Каналы Android TV — Доступно в Plus");
+        bottomRow.addView(channelsButton, new LinearLayout.LayoutParams(0, dp(48), 1f));
+        Button aboutButton = settingsPillButton("О приложении");
+        LinearLayout.LayoutParams aboutParams = new LinearLayout.LayoutParams(0, dp(48), 1f);
+        aboutParams.leftMargin = dp(10);
+        bottomRow.addView(aboutButton, aboutParams);
+        page.addView(columns, new LinearLayout.LayoutParams(-1, 0, 1f));
+        page.addView(bottomRow, new LinearLayout.LayoutParams(-1, dp(56)));
+
+        channelsButton.setOnClickListener(v -> {
+            if (!requirePlusFeature("android_tv_channels")) return;
+            String[] actions = {"Включить", "Отключить", "Обновить", "Очистить данные"};
+            new AlertDialog.Builder(this)
+                    .setTitle("Каналы Android TV")
+                    .setItems(actions, (dialog, which) -> {
+                        if (which == 0) {
+                            getSharedPreferences(PREFS, MODE_PRIVATE).edit()
+                                    .putBoolean("tv_channels_enabled", true).apply();
+                            channelsButton.setText("Каналы Android TV: Вкл.");
+                            browserHandler.postDelayed(this::loadTvChannelFeedsInBrowser, 150);
+                            showMessage("Каналы Android TV включены");
+                        } else if (which == 1) {
+                            getSharedPreferences(PREFS, MODE_PRIVATE).edit()
+                                    .putBoolean("tv_channels_enabled", false).apply();
+                            channelsButton.setText("Каналы Android TV: Выкл.");
+                            TvHomeChannels.removeAll(this);
+                            showMessage("Каналы Android TV отключены");
+                        } else if (which == 2) {
+                            boolean enabled = getSharedPreferences(PREFS, MODE_PRIVATE)
+                                    .getBoolean("tv_channels_enabled", false);
+                            if (!enabled) {
+                                showMessage("Сначала включите каналы Android TV");
+                                return;
+                            }
+                            browserHandler.postDelayed(this::loadTvChannelFeedsInBrowser, 150);
+                            TvHomeChannels.refreshNow(this);
+                            showMessage("Запущено обновление каналов Android TV");
+                        } else {
+                            new AlertDialog.Builder(this)
+                                    .setTitle("Очистить данные каналов?")
+                                    .setMessage("Будут удалены каналы и программы Кинозал ТВ с главного экрана Android TV. Настройки приложения и кэш раздач останутся.")
+                                    .setNegativeButton("Отмена", null)
+                                    .setPositiveButton("Очистить", (d, w) -> {
+                                        TvHomeChannels.clearChannelData(this);
+                                        showMessage("Данные каналов очищаются");
+                                    }).show();
+                        }
+                    }).show();
+        });
+        aboutButton.setOnClickListener(v -> showAbout());
+
+        settingsDialog = new AlertDialog.Builder(this).setView(page).create();
         settingsDialog.show();
         if (settingsDialog.getWindow() != null) {
             settingsDialog.getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(BG));
-            settingsDialog.getWindow().setLayout(Math.min(dp(520), getResources().getDisplayMetrics().widthPixels - dp(48)),
-                    ViewGroup.LayoutParams.WRAP_CONTENT);
+            settingsDialog.getWindow().setLayout(ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.MATCH_PARENT);
         }
-        login.requestFocus();
     }
 
-    private void showDiagnostics() {
-        long used = diskCache.getSizeBytes();
-        long limit = diskCache.getMaxBytes();
-        double usedMb = used / (1024d * 1024d);
-        double limitMb = limit / (1024d * 1024d);
-        double percent = limit > 0 ? used * 100d / limit : 0d;
+    private Button settingsPillButton(String title) {
+        Button b = button(title);
+        b.setTextSize(fontSize(13));
+        b.setGravity(Gravity.CENTER_VERTICAL | Gravity.LEFT);
+        b.setPadding(dp(12), 0, dp(8), 0);
+        return b;
+    }
 
+    private void showCloudSyncSettings() {
         LinearLayout panel = new LinearLayout(this);
         panel.setOrientation(LinearLayout.VERTICAL);
-        panel.setPadding(dp(20), dp(14), dp(20), dp(12));
+        panel.setPadding(dp(18), dp(12), dp(18), dp(10));
         panel.setBackgroundColor(BG);
 
-        TextView networkInfo = text("Внешний IP и страна: проверка…", 14, GOLD, false);
-        networkInfo.setLineSpacing(dp(4), 1f);
-        panel.addView(networkInfo);
-        TextView cacheInfo = text(
-                "Дисковый кэш Kinozal\\n"
-                + String.format(java.util.Locale.ROOT, "Занято: %.2f МБ из %.0f МБ (%.1f%%)\\n",
-                        usedMb, limitMb, percent)
-                + String.format(java.util.Locale.ROOT, "Файлов в кэше: %d\\n", diskCache.getEntryCount())
-                + "Расположение: cache/kinozal_cache\\n"
-                + homeCacheDiagnostic,
-                15, Color.WHITE, false);
-        cacheInfo.setLineSpacing(dp(5), 1f);
-        LinearLayout.LayoutParams cacheParams = new LinearLayout.LayoutParams(-1, -2);
-        cacheParams.topMargin = dp(12);
-        panel.addView(cacheInfo, cacheParams);
+        TextView intro = text("Введите серийный номер Plus, чтобы активировать устройство и синхронизировать избранное и историю просмотров.", 14, Color.LTGRAY, false);
+        panel.addView(intro);
 
-        Button refresh = button("Обновить данные");
-        refresh.setGravity(Gravity.CENTER);
-        LinearLayout.LayoutParams refreshParams = new LinearLayout.LayoutParams(-1, dp(44));
-        refreshParams.topMargin = dp(14);
-        panel.addView(refresh, refreshParams);
+        EditText code = new EditText(this);
+        code.setSingleLine(true);
+        code.setHint("Серийный номер");
+        code.setInputType(android.text.InputType.TYPE_CLASS_TEXT
+                | android.text.InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS);
+        styleSettingsEdit(code);
+        LinearLayout.LayoutParams codeParams = new LinearLayout.LayoutParams(-1, dp(48));
+        codeParams.topMargin = dp(10);
+        panel.addView(code, codeParams);
+
+        LinearLayout codeActions = new LinearLayout(this);
+        codeActions.setOrientation(LinearLayout.HORIZONTAL);
+        Button paste = settingsPillButton("Вставить из буфера");
+        Button activate = settingsPillButton("Активировать");
+        codeActions.addView(paste, new LinearLayout.LayoutParams(0, dp(44), 1f));
+        LinearLayout.LayoutParams activateParams = new LinearLayout.LayoutParams(0, dp(44), 1f);
+        activateParams.leftMargin = dp(8);
+        codeActions.addView(activate, activateParams);
+        LinearLayout.LayoutParams codeActionsParams = new LinearLayout.LayoutParams(-1, dp(48));
+        codeActionsParams.topMargin = dp(8);
+        panel.addView(codeActions, codeActionsParams);
+
+        TextView activationTitle = text("АКТИВАЦИЯ", 13, GOLD, true);
+        LinearLayout.LayoutParams titleParams = new LinearLayout.LayoutParams(-1, -2);
+        titleParams.topMargin = dp(14);
+        panel.addView(activationTitle, titleParams);
+        TextView activationState = text("Статус: " + (CloudSyncManager.isActivated(this)
+                ? "проверяем лицензию…" : "не активировано"), 14, TEAL, false);
+        panel.addView(activationState);
+        TextView devicesState = text("Устройства: загрузка…", 13, Color.LTGRAY, false);
+        LinearLayout.LayoutParams devicesStateParams = new LinearLayout.LayoutParams(-1, -2);
+        devicesStateParams.topMargin = dp(4);
+        panel.addView(devicesState, devicesStateParams);
+        LinearLayout devicesList = new LinearLayout(this);
+        devicesList.setOrientation(LinearLayout.VERTICAL);
+        LinearLayout.LayoutParams devicesListParams = new LinearLayout.LayoutParams(-1, -2);
+        devicesListParams.topMargin = dp(6);
+        panel.addView(devicesList, devicesListParams);
+
+        TextView syncTitle = text("СИНХРОНИЗАЦИЯ", 13, GOLD, true);
+        LinearLayout.LayoutParams syncTitleParams = new LinearLayout.LayoutParams(-1, -2);
+        syncTitleParams.topMargin = dp(16);
+        panel.addView(syncTitle, syncTitleParams);
+        TextView syncState = text("Статус: " + CloudSyncManager.status(this), 14, TEAL, false);
+        panel.addView(syncState);
+        Button sync = settingsPillButton("Синхронизировать");
+        LinearLayout.LayoutParams syncParams = new LinearLayout.LayoutParams(-1, dp(46));
+        syncParams.topMargin = dp(8);
+        panel.addView(sync, syncParams);
+
+        AlertDialog dialog = new AlertDialog.Builder(this).setTitle("Активация и синхронизация")
+                .setView(panel).setNegativeButton("Закрыть", null).create();
+
+        final Runnable[] refreshDevices = new Runnable[1];
+        refreshDevices[0] = () -> {
+            if (!CloudSyncManager.isActivated(this)) {
+                activationState.setText("Статус: не активировано");
+                devicesState.setText("Устройства: лицензия не активирована");
+                devicesList.removeAllViews();
+                return;
+            }
+            devicesState.setText("Устройства: обновление списка…");
+            executeSafely(io, () -> {
+                try {
+                    org.json.JSONObject info = CloudSyncManager.licenseInfo(this);
+                    org.json.JSONArray devices = CloudSyncManager.devices(this);
+                    runOnUiThread(() -> {
+                        if (isFinishing() || isDestroyed()) return;
+                        String licenseStatus = info.optString("status", "");
+                        String licensePlan = info.optString("plan", "");
+                        boolean plusActive = "active".equalsIgnoreCase(licenseStatus)
+                                && ("plus_lifetime".equalsIgnoreCase(licensePlan)
+                                || "owner".equalsIgnoreCase(licensePlan));
+                        activationState.setText(plusActive
+                                ? "Статус: Plus активен"
+                                : "Статус: устройство активировано, Plus не активен");
+                        int active = info.optInt("active_devices", devices.length());
+                        int limit = info.optInt("device_limit", 0);
+                        devicesState.setText("Доступно устройств: " + active + " из " + limit
+                                + " (свободно: " + Math.max(0, limit - active) + ")");
+                        devicesList.removeAllViews();
+                        for (int i = 0; i < devices.length(); i++) {
+                            org.json.JSONObject device = devices.optJSONObject(i);
+                            if (device == null) continue;
+                            String id = device.optString("id", "");
+                            String label = device.optString("device_label", "Устройство");
+                            boolean current = device.optBoolean("current", false);
+                            LinearLayout row = new LinearLayout(MainActivity.this);
+                            row.setGravity(Gravity.CENTER_VERTICAL);
+                            row.setPadding(dp(8), dp(3), 0, dp(3));
+                            TextView name = text(label + (current ? " (это устройство)" : ""),
+                                    12, current ? GOLD : Color.LTGRAY, current);
+                            row.addView(name, new LinearLayout.LayoutParams(0, -2, 1f));
+                            if (!id.isEmpty()) {
+                                Button remove = settingsPillButton(current ? "Удалить это" : "Удалить");
+                                remove.setTextSize(fontSize(10));
+                                row.addView(remove, new LinearLayout.LayoutParams(dp(current ? 104 : 88), dp(38)));
+                                remove.setOnClickListener(v -> new AlertDialog.Builder(MainActivity.this)
+                                        .setTitle(current ? "Отключить это устройство?" : "Удалить устройство?")
+                                        .setMessage(current
+                                                ? "Это устройство будет удалено из лицензии, синхронизация отключится, а Plus на этом устройстве перестанет действовать. Локальные избранное и история останутся на устройстве."
+                                                : "Устройство «" + label + "» больше не сможет синхронизироваться.")
+                                        .setNegativeButton("Отмена", null)
+                                        .setPositiveButton(current ? "Отключить" : "Удалить", (d, which) -> {
+                                            remove.setEnabled(false);
+                                            executeSafely(io, () -> {
+                                                try {
+                                                    if (current) {
+                                                        CloudSyncManager.deactivateCurrentDevice(MainActivity.this, id);
+                                                        runOnUiThread(() -> {
+                                                            PlusAccess.refresh(MainActivity.this, () -> onPlusEntitlementsUpdated());
+                                                            syncState.setText("Статус: синхронизация отключена");
+                                                            showMessage("Это устройство удалено из лицензии");
+                                                            refreshDevices[0].run();
+                                                        });
+                                                    } else {
+                                                        CloudSyncManager.removeDevice(MainActivity.this, id);
+                                                        runOnUiThread(() -> {
+                                                            showMessage("Устройство удалено");
+                                                            refreshDevices[0].run();
+                                                        });
+                                                    }
+                                                } catch (Exception e) {
+                                                    String error = safe(e.getMessage());
+                                                    runOnUiThread(() -> {
+                                                        remove.setEnabled(true);
+                                                        showMessage("Не удалось удалить устройство: " + error);
+                                                    });
+                                                }
+                                            });
+                                        }).show());
+                            }
+                            devicesList.addView(row);
+                        }
+                    });
+                } catch (Exception e) {
+                    String error = safe(e.getMessage());
+                    boolean tokenInvalid = "license_not_found".equalsIgnoreCase(error);
+                    runOnUiThread(() -> {
+                        activationState.setText(tokenInvalid
+                                ? "Статус: требуется восстановить токен устройства"
+                                : "Статус: устройство активировано, сервер недоступен");
+                        devicesState.setText(tokenInvalid
+                                ? "Введите тот же серийный номер и нажмите «Активировать» — доступ будет восстановлен"
+                                : "Не удалось загрузить список устройств: " + error);
+                    });
+                }
+            });
+        };
+
+        dialog.setOnDismissListener(ignored -> {
+            if (!plusSettingsRefreshPending) return;
+            plusSettingsRefreshPending = false;
+            if (settingsDialog != null && settingsDialog.isShowing()) {
+                settingsDialog.dismiss();
+                settingsDialog = null;
+                showSettings();
+            }
+        });
+        paste.setOnClickListener(v -> {
+            android.content.ClipboardManager clipboard =
+                    (android.content.ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
+            if (clipboard != null && clipboard.hasPrimaryClip()
+                    && clipboard.getPrimaryClip().getItemCount() > 0) {
+                CharSequence value = clipboard.getPrimaryClip().getItemAt(0).coerceToText(this);
+                if (value != null) code.setText(value.toString().trim());
+                else showMessage("В буфере обмена нет текста");
+            } else showMessage("Буфер обмена пуст");
+        });
+        activate.setOnClickListener(v -> {
+            String serial = code.getText().toString().trim();
+            if (serial.isEmpty()) {
+                showMessage("Введите серийный номер или вставьте его из буфера");
+                code.requestFocus();
+                return;
+            }
+            activate.setEnabled(false);
+            activationState.setText("Статус: выполняется активация…");
+            executeSafely(io, () -> {
+                try {
+                    CloudSyncManager.activate(this, serial);
+                    runOnUiThread(() -> {
+                        PlusAccess.refresh(MainActivity.this, () -> {
+                            plusSettingsRefreshPending = dialog.isShowing();
+                            onPlusEntitlementsUpdated();
+                        });
+                        activate.setEnabled(true);
+                        activationState.setText("Статус: активирована");
+                        showMessage("Устройство активировано");
+                        CloudSyncScheduler.ensureScheduled(MainActivity.this);
+                        scheduleCloudSync();
+                        refreshDevices[0].run();
+                    });
+                } catch (Exception e) {
+                    String error = safe(e.getMessage());
+                    runOnUiThread(() -> {
+                        activate.setEnabled(true);
+                        activationState.setText("Статус: ошибка активации");
+                        showMessage("Не удалось активировать: " + error);
+                    });
+                }
+            });
+        });
+        sync.setOnClickListener(v -> {
+            if (!CloudSyncManager.isActivated(this)) {
+                showMessage("Сначала активируйте устройство");
+                return;
+            }
+            sync.setEnabled(false);
+            syncState.setText("Статус: синхронизация выполняется…");
+            executeSafely(io, () -> {
+                try {
+                    CloudSyncManager.sync(this);
+                    runOnUiThread(() -> {
+                        sync.setEnabled(true);
+                        syncState.setText("Статус: синхронизировано");
+                        if ("local:favorites".equals(currentPath)) showFavorites();
+                        else if ("local:recently-viewed".equals(currentPath)) showRecentlyViewed();
+                        showMessage("Избранное и история синхронизированы");
+                        refreshDevices[0].run();
+                    });
+                } catch (Exception e) {
+                    String error = safe(e.getMessage());
+                    runOnUiThread(() -> {
+                        sync.setEnabled(true);
+                        syncState.setText("Статус: ошибка синхронизации");
+                        showMessage("Синхронизация не выполнена: " + error);
+                    });
+                }
+            });
+        });
+        dialog.show();
+        if (dialog.getWindow() != null) {
+            dialog.getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(BG));
+            dialog.getWindow().setLayout(Math.min(dp(680),
+                    getResources().getDisplayMetrics().widthPixels - dp(48)),
+                    Math.min(getResources().getDisplayMetrics().heightPixels - dp(60), dp(620)));
+        }
+        if (CloudSyncManager.isActivated(this)) refreshDevices[0].run();
+        else {
+            activationState.setText("Статус: не активировано");
+            devicesState.setText("Устройства: требуется активация");
+        }
+        // Revalidate cached Plus rights whenever this screen is opened. If the
+        // device has no activation token, PlusAccess clears stale local rights;
+        // if the server is temporarily unreachable, its bounded offline grace
+        // policy remains in effect.
+        PlusAccess.refresh(this, () -> {
+            plusSettingsRefreshPending = dialog.isShowing();
+            onPlusEntitlementsUpdated();
+        });
+    }
+
+    private void scheduleCloudSync() {
+        // Local edits and Activity starts are coalesced into one delayed request.
+        // The explicit "Синхронизировать сейчас" button still performs an immediate sync.
+        CloudSyncScheduler.scheduleSoon(this);
+    }
+
+    private void showTorrServeSettings() {
+        LinearLayout panel = new LinearLayout(this);
+        panel.setOrientation(LinearLayout.VERTICAL);
+        panel.setPadding(dp(18), dp(12), dp(18), dp(10));
+        panel.setBackgroundColor(BG);
+        torrServeAddressField = new EditText(this);
+        torrServeAddressField.setSingleLine(true);
+        torrServeAddressField.setText(getSharedPreferences(PREFS, MODE_PRIVATE)
+                .getString("torrserve_url", "http://localhost:8090"));
+        torrServeAddressField.setHint("http://адрес:8090");
+        styleSettingsEdit(torrServeAddressField);
+        panel.addView(torrServeAddressField, new LinearLayout.LayoutParams(-1, dp(46)));
+
+        LinearLayout actions = new LinearLayout(this);
+        actions.setOrientation(LinearLayout.HORIZONTAL);
+        LinearLayout.LayoutParams actionsParams = new LinearLayout.LayoutParams(-1, -2);
+        actionsParams.topMargin = dp(10);
+        Button save = settingsPillButton("Сохранить");
+        Button test = settingsPillButton("Проверить соединение");
+        Button clear = settingsPillButton("Очистить");
+        actions.addView(save, new LinearLayout.LayoutParams(0, dp(46), 1f));
+        LinearLayout.LayoutParams testParams = new LinearLayout.LayoutParams(0, dp(46), 1.35f);
+        testParams.leftMargin = dp(8);
+        actions.addView(test, testParams);
+        LinearLayout.LayoutParams clearParams = new LinearLayout.LayoutParams(0, dp(46), 0.85f);
+        clearParams.leftMargin = dp(8);
+        actions.addView(clear, clearParams);
+        panel.addView(actions, actionsParams);
+        clear.setOnClickListener(v -> torrServeAddressField.setText(""));
+
+        AlertDialog dialog = new AlertDialog.Builder(this).setTitle("TorrServe")
+                .setView(panel).create();
+        save.setOnClickListener(v -> {
+            String value = torrServeAddressField.getText().toString().trim().replaceAll("/+$", "");
+            if (!value.isEmpty() && !validJackettBase(value)) {
+                showMessage("Укажите адрес с http:// или https://");
+                return;
+            }
+            getSharedPreferences(PREFS, MODE_PRIVATE).edit().putString("torrserve_url", value).apply();
+            showMessage("Адрес TorrServe сохранён");
+        });
+        test.setOnClickListener(v -> checkTorrServeConnection());
+        dialog.show();
+        if (dialog.getWindow() != null) {
+            dialog.getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(BG));
+            dialog.getWindow().setLayout(Math.min(dp(680),
+                    getResources().getDisplayMetrics().widthPixels - dp(48)), -2);
+        }
+    }
+
+    private void checkTorrServeConnection() {
+        String base = torrServeAddressField == null ? "" : torrServeAddressField.getText().toString()
+                .trim().replaceAll("/+$", "");
+        if (base.isEmpty() || !validJackettBase(base)) {
+            showMessage("Укажите корректный адрес TorrServe");
+            return;
+        }
+        showMessage("Проверяем соединение с TorrServe…");
+        executeSafely(io, () -> {
+            HttpURLConnection connection = null;
+            try {
+                connection = (HttpURLConnection) new URL(base + "/echo").openConnection();
+                connection.setConnectTimeout(7000);
+                connection.setReadTimeout(10000);
+                connection.setRequestMethod("GET");
+                int code = connection.getResponseCode();
+                if (code < 200 || code >= 300) throw new java.io.IOException("HTTP " + code);
+                runOnUiThread(() -> showMessage("Соединение с TorrServe установлено"));
+            } catch (Exception e) {
+                String error = safe(e.getMessage());
+                runOnUiThread(() -> showMessage("Не удалось подключиться к TorrServe: " + error));
+            } finally {
+                if (connection != null) connection.disconnect();
+            }
+        });
+    }
+
+    private void confirmClearCache() {
+        new AlertDialog.Builder(this)
+                .setTitle("Очистить кэш?")
+                .setMessage("Будут удалены сохранённые главная и подборки, кэш страниц и изображений. Авторизация, избранное, история и настройки останутся без изменений.")
+                .setNegativeButton("Отмена", null)
+                .setPositiveButton("Очистить", (dialog, which) -> {
+                    showMessage("Очищаем кэш…");
+                    executeSafely(io, () -> {
+                        if (diskCache != null) diskCache.clear();
+                        boolean homeModelDeleted = homeModelFile().delete();
+                        boolean collectionsModelDeleted = collectionsModelFile().delete();
+                        FeedDiagnostics.log(getApplicationContext(), "all", "CACHE_CLEAR",
+                                "diskCache=cleared, homeModelDeleted=" + homeModelDeleted
+                                        + ", collectionsModelDeleted=" + collectionsModelDeleted);
+                        runOnUiThread(() -> {
+                            pageCache.clear();
+                            if (decodedImageCache != null) decodedImageCache.evictAll();
+                            homeSectionsMemory.clear();
+                            collectionsSectionsMemory.clear();
+                            homeCacheDisplayed = false;
+                            homeCacheLoadFinished = true;
+                            initialHomeFetchPending = false;
+                            collectionsLoadedOnce = false;
+                            if (sessionWebView != null) sessionWebView.clearCache(true);
+                            showMessage("Кэш главной и подборок очищен. Следующее открытие загрузит их заново.");
+                        });
+                    });
+                })
+                .show();
+    }
+
+    private void checkTorrServerViewingHistory() {
+        String base = getSharedPreferences(PREFS, MODE_PRIVATE)
+                .getString("torrserve_url", "http://localhost:8090").trim().replaceAll("/+$", "");
+        if (base.isEmpty()) {
+            showMessage("Сначала укажите адрес TorrServer в настройках.");
+            return;
+        }
+        showMessage("Проверяем историю TorrServer…");
+        executeSafely(io, () -> {
+            HttpURLConnection connection = null;
+            try {
+                connection = (HttpURLConnection) new URL(base + "/viewed").openConnection();
+                connection.setConnectTimeout(7000);
+                connection.setReadTimeout(10000);
+                connection.setRequestMethod("POST");
+                connection.setDoOutput(true);
+                connection.setRequestProperty("Content-Type", "application/json; charset=utf-8");
+                connection.setRequestProperty("Accept", "application/json");
+                byte[] payload = "{\"action\":\"list\"}".getBytes(StandardCharsets.UTF_8);
+                try (java.io.OutputStream out = connection.getOutputStream()) { out.write(payload); }
+                int code = connection.getResponseCode();
+                java.io.InputStream stream = code >= 200 && code < 300
+                        ? connection.getInputStream() : connection.getErrorStream();
+                StringBuilder body = new StringBuilder();
+                if (stream != null) {
+                    try (java.io.BufferedReader reader = new java.io.BufferedReader(
+                            new java.io.InputStreamReader(stream, StandardCharsets.UTF_8))) {
+                        String line;
+                        while ((line = reader.readLine()) != null) body.append(line);
+                    }
+                }
+                if (code < 200 || code >= 300)
+                    throw new java.io.IOException("/viewed: HTTP " + code + " "
+                            + body.toString().substring(0, Math.min(180, body.length())));
+                org.json.JSONArray entries = new org.json.JSONArray(body.toString());
+                final String report = "API /viewed: доступен\n"
+                        + "Записей в истории TorrServer: " + entries.length()
+                        + "\n\nПроверяется только список истории. Временные позиции воспроизведения "
+                        + "не используются.";
+                runOnUiThread(() -> new AlertDialog.Builder(this)
+                        .setTitle("История TorrServer").setMessage(report)
+                        .setPositiveButton("Закрыть", null).show());
+            } catch (Exception e) {
+                final String report = "Не удалось прочитать историю TorrServer: " + safe(e.getMessage())
+                        + "\n\nПроверьте адрес, доступность сервера и авторизацию API.";
+                runOnUiThread(() -> new AlertDialog.Builder(this)
+                        .setTitle("История TorrServer").setMessage(report)
+                        .setPositiveButton("Закрыть", null).show());
+            } finally {
+                if (connection != null) connection.disconnect();
+            }
+        });
+    }
+
+    private void addSettingsSection(LinearLayout parent, String title) {
+        TextView label = text(title, 13, TEAL, true);
+        label.setPadding(dp(4), dp(12), dp(4), dp(5));
+        parent.addView(label);
+        View line = new View(this);
+        line.setBackgroundColor(Color.rgb(65, 70, 74));
+        parent.addView(line, new LinearLayout.LayoutParams(-1, dp(1)));
+    }
+
+    private Button addSettingsAction(LinearLayout parent, String title, Runnable action) {
+        Button button = button(title);
+        button.setTextSize(fontSize(13));
+        button.setGravity(Gravity.CENTER_VERTICAL | Gravity.LEFT);
+        button.setPadding(dp(10), 0, dp(8), 0);
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-1, dp(44));
+        params.topMargin = dp(5);
+        parent.addView(button, params);
+        button.setOnClickListener(v -> action.run());
+        return button;
+    }
+
+    private void styleSettingsEdit(EditText field) {
+        field.setTextColor(Color.WHITE);
+        field.setHintTextColor(TEAL);
+        field.setTextSize(fontSize(13));
+        field.setPadding(dp(10), dp(5), dp(10), dp(5));
+        field.setBackground(shape(PANEL, TEAL));
+    }
+
+    private void chooseStartupSource() {
+        String[] labels = {"Главная (Новинки и топы)", "Подборки", "Все раздачи", "Все фильмы",
+                "Все сериалы", "Зарубежные сериалы", "Российские сериалы"};
+        String[] values = {"home", "collections", "browse.php", "browse.php?c=1002", "browse.php?c=1001",
+                "browse.php?c=46", "browse.php?c=45"};
+        String saved = getSharedPreferences(PREFS, MODE_PRIVATE).getString("startup_source", "home");
+        int selected = 0;
+        for (int i = 0; i < values.length; i++) if (values[i].equals(saved)) selected = i;
+        new AlertDialog.Builder(this).setTitle("Открывать при запуске")
+                .setSingleChoiceItems(labels, selected, (d, which) -> {
+                    getSharedPreferences(PREFS, MODE_PRIVATE).edit()
+                            .putString("startup_source", values[which])
+                            .putBoolean("startup_source_user_set", true).apply();
+                    d.dismiss();
+                    showMessage("Стартовый раздел сохранён");
+                }).setNegativeButton("Отмена", null).show();
+    }
+
+    private org.json.JSONObject buildUserBackup() throws Exception {
+        org.json.JSONObject root = new org.json.JSONObject();
+        root.put("format", "kinozal-client-backup");
+        root.put("version", 1);
+        root.put("created", System.currentTimeMillis());
+        org.json.JSONObject app = new org.json.JSONObject();
+        android.content.SharedPreferences prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
+        String[] keys = {FAVORITES_KEY, RECENTLY_VIEWED_KEY, SEARCH_HISTORY_KEY,
+                "mirror", "startup_source", "torrserve_url"};
+        for (String key : keys) if (prefs.contains(key)) app.put(key, prefs.getAll().get(key));
+        app.put("advanced_search_presets", loadAdvancedSearchPresets().toString());
+        root.put("app", app);
+        org.json.JSONObject jackett = new org.json.JSONObject();
+        for (java.util.Map.Entry<String, ?> entry :
+                getSharedPreferences(JACKETT_PREFS, MODE_PRIVATE).getAll().entrySet())
+            jackett.put(entry.getKey(), entry.getValue());
+        root.put("jackett", jackett);
+        Socks5ProxyBridge.Settings proxy = socks5Bridge.getSettings();
+        org.json.JSONObject socks = new org.json.JSONObject();
+        socks.put("enabled", proxy.enabled);
+        socks.put("host", proxy.host);
+        socks.put("port", proxy.port);
+        socks.put("username", proxy.username);
+        root.put("socks5", socks);
+        return root;
+    }
+
+    private void exportUserBackup() {
+        if (!requirePlusFeature("backup")) return;
+        try {
+            String json = buildUserBackup().toString(2);
+            Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
+            intent.addCategory(Intent.CATEGORY_OPENABLE);
+            intent.setType("application/json");
+            intent.putExtra(Intent.EXTRA_TITLE, "kinozal-client-backup.json");
+            pendingBackupJson = json;
+            startActivityForResult(intent, REQUEST_BACKUP_EXPORT);
+        } catch (Exception e) { showMessage("Не удалось подготовить копию: " + safe(e.getMessage())); }
+    }
+
+    private String pendingBackupJson;
+
+    private void importUserBackup() {
+        if (!requirePlusFeature("backup")) return;
+        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        intent.setType("*/*");
+        startActivityForResult(intent, REQUEST_BACKUP_IMPORT);
+    }
+
+    private void writeBackupToUri(Uri uri) {
+        try (java.io.OutputStream out = getContentResolver().openOutputStream(uri)) {
+            if (out == null) throw new java.io.IOException("Не удалось открыть файл");
+            out.write((pendingBackupJson == null ? "" : pendingBackupJson).getBytes(StandardCharsets.UTF_8));
+            out.flush();
+            pendingBackupJson = null;
+            showMessage("Резервная копия сохранена");
+        } catch (Exception e) { showMessage("Ошибка сохранения копии: " + safe(e.getMessage())); }
+    }
+
+    private void restoreBackupFromUri(Uri uri) {
+        try (java.io.InputStream in = getContentResolver().openInputStream(uri);
+             java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream()) {
+            if (in == null) throw new java.io.IOException("Не удалось открыть файл");
+            byte[] buffer = new byte[8192];
+            int n;
+            while ((n = in.read(buffer)) != -1) out.write(buffer, 0, n);
+            org.json.JSONObject root = new org.json.JSONObject(new String(out.toByteArray(), StandardCharsets.UTF_8));
+            if (!"kinozal-client-backup".equals(root.optString("format"))
+                    || root.optInt("version") != 1) throw new IllegalArgumentException("Неподдерживаемый формат копии");
+            org.json.JSONObject app = root.optJSONObject("app");
+            if (app != null) {
+                android.content.SharedPreferences.Editor editor = getSharedPreferences(PREFS, MODE_PRIVATE).edit();
+                String[] keys = {FAVORITES_KEY, RECENTLY_VIEWED_KEY, SEARCH_HISTORY_KEY,
+                        "mirror", "startup_source", "torrserve_url"};
+                for (String key : keys) if (app.has(key)) {
+                    Object value = app.get(key);
+                    if (value instanceof String) editor.putString(key, (String)value);
+                }
+                editor.commit();
+                if (app.has("advanced_search_presets")) {
+                    Object savedPresets = app.get("advanced_search_presets");
+                    org.json.JSONArray importedPresets = savedPresets instanceof org.json.JSONArray
+                            ? (org.json.JSONArray) savedPresets
+                            : new org.json.JSONArray(String.valueOf(savedPresets));
+                    if (!saveAdvancedSearchPresets(importedPresets))
+                        throw new java.io.IOException("Не удалось восстановить пресеты");
+                }
+                mirror = getSharedPreferences(PREFS, MODE_PRIVATE).getString("mirror", MIRRORS[0]);
+                client.setMirror(mirror);
+            }
+            org.json.JSONObject jackett = root.optJSONObject("jackett");
+            if (jackett != null) {
+                android.content.SharedPreferences.Editor editor = getSharedPreferences(JACKETT_PREFS, MODE_PRIVATE).edit();
+                java.util.Iterator<String> keys = jackett.keys();
+                while (keys.hasNext()) {
+                    String key = keys.next();
+                    Object value = jackett.get(key);
+                    if (value instanceof String) editor.putString(key, (String)value);
+                }
+                editor.apply();
+            }
+            org.json.JSONObject socks = root.optJSONObject("socks5");
+            if (socks != null) {
+                // The SOCKS password is intentionally not exported. Restore the
+                // endpoint disabled; the user re-enters the password before enabling.
+                String host = socks.optString("host", "");
+                int port = socks.optInt("port", 1080);
+                String user = socks.optString("username", "");
+                socks5Bridge.saveSettings(false, host, port, user, "");
+                showMessage("Данные восстановлены. Введите пароль SOCKS5 и включите прокси в настройках.");
+            } else showMessage("Резервная копия восстановлена");
+        } catch (Exception e) { showMessage("Не удалось восстановить копию: " + safe(e.getMessage())); }
+    }
+
+    private void showUpdateSettings() {
+        LinearLayout panel = new LinearLayout(this);
+        panel.setOrientation(LinearLayout.VERTICAL);
+        panel.setPadding(dp(18), dp(14), dp(18), dp(10));
+        panel.setBackgroundColor(BG);
+
+        Button checkButton = settingsPillButton("Проверить обновление");
+        Button automaticButton = settingsPillButton("");
+        LinearLayout.LayoutParams buttonParams = new LinearLayout.LayoutParams(-1, dp(48));
+        panel.addView(checkButton, buttonParams);
+        LinearLayout.LayoutParams automaticParams = new LinearLayout.LayoutParams(-1, dp(48));
+        automaticParams.topMargin = dp(10);
+        panel.addView(automaticButton, automaticParams);
+
+        Runnable updateAutomaticLabel = () -> automaticButton.setText(
+                "Проверка при запуске: "
+                        + (UpdateManager.isAutomaticCheckEnabled(this) ? "Вкл." : "Выкл."));
+        updateAutomaticLabel.run();
+
         AlertDialog dialog = new AlertDialog.Builder(this)
-                .setTitle("Диагностика")
+                .setTitle("Обновления")
                 .setView(panel)
                 .setPositiveButton("Закрыть", null)
                 .create();
-        refresh.setOnClickListener(v -> {
-            long current = diskCache.getSizeBytes();
-            cacheInfo.setText("Дисковый кэш Kinozal\\n"
-                    + String.format(java.util.Locale.ROOT, "Занято: %.2f МБ из %.0f МБ (%.1f%%)\\n",
-                            current / (1024d * 1024d), limitMb, limit > 0 ? current * 100d / limit : 0d)
-                    + String.format(java.util.Locale.ROOT, "Файлов в кэше: %d\\n", diskCache.getEntryCount())
-                    + "Расположение: cache/kinozal_cache\\n"
-                    + homeCacheDiagnostic);
-            loadExternalIpInfo(networkInfo);
-        });;
+        dialog.setOnShowListener(d -> {
+            checkButton.setOnClickListener(v -> {
+                dialog.dismiss();
+                new UpdateManager(this).check();
+            });
+            automaticButton.setOnClickListener(v -> {
+                boolean enabled = !UpdateManager.isAutomaticCheckEnabled(this);
+                UpdateManager.setAutomaticCheckEnabled(this, enabled);
+                updateAutomaticLabel.run();
+                showMessage(enabled
+                        ? "Автоматическая проверка обновлений включена"
+                        : "Автоматическая проверка обновлений отключена");
+            });
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setTextColor(GOLD);
+        });
         dialog.show();
         if (dialog.getWindow() != null) {
             dialog.getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(BG));
@@ -1347,14 +4431,208 @@ public class MainActivity extends Activity {
                     getResources().getDisplayMetrics().widthPixels - dp(48)),
                     ViewGroup.LayoutParams.WRAP_CONTENT);
         }
-        dialog.getButton(AlertDialog.BUTTON_POSITIVE).setTextColor(GOLD);
-        loadExternalIpInfo(networkInfo);
-        refresh.requestFocus();
     }
 
-    private void loadExternalIpInfo(TextView target) {
-        target.setText("Внешний IP и страна: проверка…");
-        io.execute(() -> {
+    private void showCrashDiagnostics() {
+        String report = CrashDiagnostics.read(this);
+        LinearLayout panel = new LinearLayout(this);
+        panel.setOrientation(LinearLayout.VERTICAL);
+        panel.setPadding(dp(18), dp(14), dp(18), dp(10));
+        panel.setBackgroundColor(BG);
+        TextView info = text(report.isEmpty()
+                ? "Сбоев приложения не зафиксировано."
+                : "Последний сбой приложения сохранён. Отчёт не содержит пароли или cookies.",
+                14, Color.WHITE, false);
+        info.setLineSpacing(dp(4), 1f);
+        panel.addView(info);
+
+        Button feedsButton = settingsPillButton("Диагностика лент");
+        Button channelsDiagButton = settingsPillButton("Диагностика каналов Android TV");
+        LinearLayout.LayoutParams channelsDiagParams = new LinearLayout.LayoutParams(-1, dp(46));
+        channelsDiagParams.topMargin = dp(8);
+        panel.addView(channelsDiagButton, channelsDiagParams);
+        LinearLayout.LayoutParams feedsParams = new LinearLayout.LayoutParams(-1, dp(46));
+        feedsParams.topMargin = dp(10);
+        panel.addView(feedsButton, feedsParams);
+
+        AlertDialog dialog = new AlertDialog.Builder(this)
+                .setTitle("Диагностика")
+                .setView(panel)
+                .setPositiveButton("Закрыть", null)
+                .setNeutralButton("Сохранить", null)
+                .create();
+        dialog.setOnShowListener(d -> {
+            channelsDiagButton.setOnClickListener(v -> {
+                dialog.dismiss();
+                showTvChannelDiagnostics();
+            });
+            feedsButton.setOnClickListener(v -> {
+                dialog.dismiss();
+                showFeedDiagnostics();
+            });
+            Button save = dialog.getButton(AlertDialog.BUTTON_NEUTRAL);
+            save.setEnabled(!report.isEmpty());
+            save.setTextColor(GOLD);
+            save.setOnClickListener(v -> saveDiagnosticFile(
+                    "kinozal_crash_diagnostics.txt", report));
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setTextColor(GOLD);
+        });
+        dialog.show();
+        if (dialog.getWindow() != null) {
+            dialog.getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(BG));
+            dialog.getWindow().setLayout(Math.min(dp(520),
+                    getResources().getDisplayMetrics().widthPixels - dp(48)),
+                    ViewGroup.LayoutParams.WRAP_CONTENT);
+        }
+    }
+
+    private void showManualFeedDiagnostic() {
+        String[] choices = {
+                "Главная — Топ раздач месяца",
+                "Подборки — Netflix",
+                "Главная — Новинки кино"
+        };
+        new AlertDialog.Builder(this)
+                .setTitle("Проверить ленту сейчас")
+                .setItems(choices, (dialog, which) -> {
+                    String group;
+                    int index;
+                    String title;
+                    if (which == 0) {
+                        group = "home"; index = 1; title = "Топ раздач месяца";
+                    } else if (which == 1) {
+                        group = "collections"; index = 0; title = "Netflix";
+                    } else {
+                        group = "home"; index = 0; title = "Новинки кино";
+                    }
+                    FeedDiagnostics.log(this, group, "MANUAL_DIAGNOSTIC_REQUEST",
+                            "user requested immediate refresh: " + title);
+                    HomeFeedScheduler.refreshNow(getApplicationContext(), group, index);
+                    showMessage("Запустил проверку «" + title
+                            + "». Обычно результат появляется через 1–2 минуты. "
+                            + "Откройте Настройки → Диагностика лент → Сохранить в файл.");
+                })
+                .setNegativeButton("Отмена", null)
+                .show();
+    }
+
+    private void saveDiagnosticFile(String fileName, String content) {
+        try {
+            android.content.ContentValues values = new android.content.ContentValues();
+            values.put(android.provider.MediaStore.MediaColumns.DISPLAY_NAME, fileName);
+            values.put(android.provider.MediaStore.MediaColumns.MIME_TYPE, "text/plain");
+            values.put(android.provider.MediaStore.MediaColumns.RELATIVE_PATH,
+                    android.os.Environment.DIRECTORY_DOWNLOADS + "/KTV");
+            values.put(android.provider.MediaStore.MediaColumns.IS_PENDING, 1);
+            Uri uri = getContentResolver().insert(
+                    android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI, values);
+            if (uri == null) throw new java.io.IOException("Не удалось создать файл");
+            try (java.io.OutputStream out = getContentResolver().openOutputStream(uri)) {
+                if (out == null) throw new java.io.IOException("Не удалось открыть файл");
+                out.write(content.getBytes(StandardCharsets.UTF_8));
+                out.flush();
+            }
+            android.content.ContentValues ready = new android.content.ContentValues();
+            ready.put(android.provider.MediaStore.MediaColumns.IS_PENDING, 0);
+            getContentResolver().update(uri, ready, null, null);
+            showMessage("Сохранено: Загрузки/KTV/" + fileName);
+        } catch (Exception e) {
+            showMessage("Не удалось сохранить диагностику: " + safe(e.getMessage()));
+        }
+    }
+
+    private void exportFeedDiagnostics() {
+        try {
+            pendingFeedDiagnosticsExport = FeedDiagnostics.read(this);
+            saveDiagnosticFile("kinozal_feed_diagnostics.txt",
+                    pendingFeedDiagnosticsExport == null ? "" : pendingFeedDiagnosticsExport);
+            pendingFeedDiagnosticsExport = null;
+        } catch (Exception e) {
+            showMessage("Не удалось сохранить диагностику: " + safe(e.getMessage()));
+        }
+    }
+
+    private void writeFeedDiagnosticsToUri(Uri uri) {
+        try (java.io.OutputStream out = getContentResolver().openOutputStream(uri)) {
+            if (out == null) throw new java.io.IOException("Не удалось открыть файл");
+            out.write((pendingFeedDiagnosticsExport == null ? "" : pendingFeedDiagnosticsExport)
+                    .getBytes(StandardCharsets.UTF_8));
+            out.flush();
+            showMessage("Диагностика сохранена в файл");
+        } catch (Exception e) {
+            showMessage("Не удалось сохранить диагностику: " + safe(e.getMessage()));
+        } finally {
+            pendingFeedDiagnosticsExport = null;
+        }
+    }
+
+    private void showTvChannelDiagnostics() {
+        String report = TvHomeChannels.readDiagnostics(this);
+        ScrollView scroll = new ScrollView(this);
+        TextView content = text(report.isEmpty()
+                ? "Диагностика каналов пока пуста. Нажмите «Обновить» в меню «Каналы Android TV»."
+                : report, 12, Color.WHITE, false);
+        content.setTextIsSelectable(true);
+        content.setTypeface(android.graphics.Typeface.MONOSPACE);
+        content.setPadding(dp(12), dp(10), dp(12), dp(10));
+        scroll.addView(content);        AlertDialog dialog = new AlertDialog.Builder(this)
+                .setTitle("Диагностика каналов Android TV")
+                .setView(scroll)
+                .setPositiveButton("Закрыть", null)
+                .setNeutralButton("Сохранить", null)
+                .create();
+        dialog.setOnShowListener(d -> {
+            Button save = dialog.getButton(AlertDialog.BUTTON_NEUTRAL);
+            save.setTextColor(GOLD);
+            save.setEnabled(!report.isEmpty());
+            save.setOnClickListener(v -> saveDiagnosticFile(
+                    "kinozal_tv_channels_diagnostics.txt", report));
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setTextColor(GOLD);
+        });
+        dialog.show();
+        if (dialog.getWindow() != null) {
+            dialog.getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(BG));
+            dialog.getWindow().setLayout(Math.min(dp(760),
+                    getResources().getDisplayMetrics().widthPixels - dp(48)),
+                    Math.min(dp(620), getResources().getDisplayMetrics().heightPixels - dp(100)));
+        }
+    }
+    private void showFeedDiagnostics() {
+        String report = FeedDiagnostics.read(this);
+        ScrollView scroll = new ScrollView(this);
+        TextView content = text(report.isEmpty()
+                ? "Диагностика лент пока пуста. Откройте Главную или Подборки и дождитесь завершения загрузки."
+                : report, 12, Color.WHITE, false);
+        content.setTextIsSelectable(true);
+        content.setTypeface(android.graphics.Typeface.MONOSPACE);
+        content.setPadding(dp(12), dp(10), dp(12), dp(10));
+        scroll.addView(content);
+
+        AlertDialog dialog = new AlertDialog.Builder(this)
+                .setTitle("Диагностика лент")
+                .setView(scroll)
+                .setPositiveButton("Закрыть", null)
+                .setNeutralButton("Сохранить в файл", null)
+                .create();
+        dialog.setOnShowListener(d -> {
+            Button save = dialog.getButton(AlertDialog.BUTTON_NEUTRAL);
+            save.setEnabled(!report.isEmpty());
+            save.setTextColor(GOLD);
+            save.setOnClickListener(v -> exportFeedDiagnostics());
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setTextColor(GOLD);
+        });
+        dialog.show();
+        if (dialog.getWindow() != null) {
+            dialog.getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(BG));
+            dialog.getWindow().setLayout(Math.min(dp(760),
+                    getResources().getDisplayMetrics().widthPixels - dp(48)),
+                    Math.min(dp(620), getResources().getDisplayMetrics().heightPixels - dp(100)));
+        }
+    }
+
+    private void loadExternalCountryInfo(TextView target) {
+        target.setText("Страна подключения: определяется…");
+        executeSafely(io, () -> {
             HttpURLConnection connection = null;
             try {
                 Socks5ProxyBridge.Settings cfg = socks5Bridge.getSettings();
@@ -1380,19 +4658,10 @@ public class MainActivity extends Activity {
                 }
                 org.json.JSONObject json = new org.json.JSONObject(body.toString());
                 if (!json.optBoolean("success", false)) throw new java.io.IOException(json.optString("message", "Не удалось определить страну"));
-                String ip = json.optString("ip", "—");
                 String country = json.optString("country", "не определена");
-                String codeCountry = json.optString("country_code", "");
-                org.json.JSONObject connectionInfo = json.optJSONObject("connection");
-                String isp = connectionInfo == null ? "" : connectionInfo.optString("isp", "");
-                String result = "Маршрут: " + (cfg.enabled ? "SOCKS5" : "напрямую")
-                        + (cfg.enabled ? "\\nSOCKS5: подключение активно (" + cfg.host + ":" + cfg.port + ")" : "")
-                        + "\\nВнешний IP: " + ip
-                        + "\\nСтрана выхода: " + country + (codeCountry.isEmpty() ? "" : " (" + codeCountry + ")")
-                        + (isp.isEmpty() ? "" : "\\nПровайдер: " + isp);
-                runOnUiThread(() -> target.setText(result));
+                runOnUiThread(() -> target.setText("Страна подключения: " + country));
             } catch (Exception e) {
-                String message = "Не удалось определить внешний IP/страну: " + safe(e.getMessage());
+                String message = "Страна подключения: не определена";
                 runOnUiThread(() -> target.setText(message));
             } finally {
                 if (connection != null) connection.disconnect();
@@ -1407,7 +4676,7 @@ public class MainActivity extends Activity {
         panel.setBackgroundColor(BG);
 
         TextView description = text(
-                "Kinozal Client — приложение для удобного просмотра каталога Kinozal на Android и Android TV.",
+                "Кинозал ТВ — приложение для удобного просмотра каталога Кинозал на Android и Android TV.",
                 15, Color.WHITE, false);
         description.setLineSpacing(dp(3), 1f);
         panel.addView(description);
@@ -1417,9 +4686,9 @@ public class MainActivity extends Activity {
         Button homepage = button("⌂   Домашняя страница");
         Button github = button("⌘   GitHub");
         for (Button action : new Button[]{homepage, github}) {
+            // Use the same PANEL background, GOLD text and focus treatment
+            // as the ordinary settings rows via button().
             action.setTextSize(14);
-            action.setTextColor(linkColor);
-            action.setGravity(Gravity.CENTER);
             LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT, dp(46));
             params.topMargin = dp(8);
@@ -1431,9 +4700,8 @@ public class MainActivity extends Activity {
                 "https://github.com/Goblin-Mini/KinozalClient", "Не удалось открыть GitHub."));
 
         Button support = button("♥   Поддержать проект");
+        // Keep the default settings-row appearance from button(). 
         support.setTextSize(14);
-        support.setTextColor(linkColor);
-        support.setGravity(Gravity.CENTER);
         LinearLayout.LayoutParams supportParams = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, dp(46));
         supportParams.topMargin = dp(8);
@@ -1443,7 +4711,7 @@ public class MainActivity extends Activity {
 
         LinearLayout authorsRow = new LinearLayout(this);
         authorsRow.setOrientation(LinearLayout.HORIZONTAL);
-        authorsRow.setGravity(Gravity.CENTER_VERTICAL);
+        authorsRow.setGravity(Gravity.CENTER);
         authorsRow.setPadding(0, dp(12), 0, dp(2));
         TextView copyright = text("© ", 14, GOLD, true);
         authorsRow.addView(copyright);
@@ -1463,7 +4731,8 @@ public class MainActivity extends Activity {
         chatgptAuthor.setOnClickListener(v -> openAboutLink(
                 "https://chatgpt.com/", "Не удалось открыть ChatGPT."));
         authorsRow.addView(chatgptAuthor);
-        panel.addView(authorsRow);
+        panel.addView(authorsRow, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
         AlertDialog aboutDialog = new AlertDialog.Builder(this)
                 .setTitle("О приложении")
@@ -1479,7 +4748,7 @@ public class MainActivity extends Activity {
         }
         aboutDialog.getButton(AlertDialog.BUTTON_POSITIVE).setTextColor(GOLD);
         github.setOnFocusChangeListener((v, focused) ->
-                github.setTextColor(focused ? GOLD : TEAL));
+                github.setTextColor(focused ? GOLD : linkColor));
         github.requestFocus();
     }
 
@@ -1526,6 +4795,8 @@ public class MainActivity extends Activity {
         EditText[] fields = {primary, backup, custom, key};
         String[] labels = {"Основной сервер", "Резервный сервер", "Свой сервер (необязательно)", "API Key"};
         String[] values = {jackettPrimary(), jackettBackup(), jackettCustom(), jackettApiKey()};
+        TextView[] indicators = new TextView[3];
+        Button[] checks = new Button[3];
         for (int i = 0; i < fields.length; i++) {
             TextView label = text(labels[i], 13, TEAL, true);
             label.setPadding(0, dp(5), 0, dp(2));
@@ -1535,12 +4806,35 @@ public class MainActivity extends Activity {
             field.setText(values[i]);
             field.setTextColor(Color.WHITE);
             field.setHintTextColor(TEAL);
-            field.setTextSize(14);
+            field.setTextSize(fontSize(14));
             field.setPadding(dp(10), dp(7), dp(10), dp(7));
             field.setBackground(shape(PANEL, TEAL));
-            if (i == 3) field.setInputType(android.text.InputType.TYPE_CLASS_TEXT
-                    | android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD);
-            panel.addView(field, new LinearLayout.LayoutParams(-1, dp(44)));
+            if (i == 3) {
+                field.setInputType(android.text.InputType.TYPE_CLASS_TEXT
+                        | android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD);
+                panel.addView(field, new LinearLayout.LayoutParams(-1, dp(44)));
+            } else {
+                final int index = i;
+                LinearLayout row = new LinearLayout(this);
+                row.setOrientation(LinearLayout.HORIZONTAL);
+                row.setGravity(Gravity.CENTER_VERTICAL);
+                row.addView(field, new LinearLayout.LayoutParams(0, dp(44), 1f));
+                Button check = settingsPillButton("Проверить");
+                LinearLayout.LayoutParams checkParams =
+                        new LinearLayout.LayoutParams(dp(112), dp(44));
+                checkParams.leftMargin = dp(8);
+                row.addView(check, checkParams);
+                TextView result = text("—", 23, Color.LTGRAY, true);
+                result.setGravity(Gravity.CENTER);
+                LinearLayout.LayoutParams resultParams =
+                        new LinearLayout.LayoutParams(dp(30), dp(44));
+                resultParams.leftMargin = dp(4);
+                row.addView(result, resultParams);
+                panel.addView(row, new LinearLayout.LayoutParams(-1, dp(46)));
+                indicators[index] = result;
+                checks[index] = check;
+                check.setOnClickListener(v -> checkJackettCustomServer(field, key, check, result));
+            }
         }
         TextView note = text("Используется Torznab API. Для указанных публичных серверов API Key не требуется. Для своего сервера ключ можно оставить пустым или указать при необходимости.",
                 12, Color.LTGRAY, false);
@@ -1575,10 +4869,63 @@ public class MainActivity extends Activity {
         dialog.show();
         if (dialog.getWindow() != null) {
             dialog.getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(BG));
-            dialog.getWindow().setLayout(Math.min(dp(560),
+            dialog.getWindow().setLayout(Math.min(dp(820),
                     getResources().getDisplayMetrics().widthPixels - dp(48)),
                     ViewGroup.LayoutParams.WRAP_CONTENT);
         }
+    }
+
+    private void checkJackettCustomServer(EditText addressField, EditText keyField,
+                                           Button checkButton, TextView resultView) {
+        String base = addressField.getText().toString().trim().replaceAll("/+$", "");
+        if (!validJackettBase(base)) {
+            resultView.setText("✕");
+            resultView.setTextColor(Color.RED);
+            showMessage("Укажите корректный адрес сервера");
+            return;
+        }
+        checkButton.setEnabled(false);
+        resultView.setText("…");
+        resultView.setTextColor(TEAL);
+        String apiKey = keyField.getText().toString().trim();
+        executeSafely(io, () -> {
+            HttpURLConnection connection = null;
+            boolean success = false;
+            String error = "";
+            try {
+                String endpoint = base + "/api/v2.0/indexers/all/results/torznab/api?t=caps"
+                        + (apiKey.isEmpty() ? "" : "&apikey=" + URLEncoder.encode(apiKey, "UTF-8"));
+                connection = (HttpURLConnection) new URL(endpoint).openConnection();
+                connection.setConnectTimeout(8000);
+                connection.setReadTimeout(10000);
+                connection.setRequestMethod("GET");
+                int code = connection.getResponseCode();
+                if (code >= 200 && code < 300) {
+                    try (java.io.InputStream input = connection.getInputStream();
+                         java.io.ByteArrayOutputStream output = new java.io.ByteArrayOutputStream()) {
+                        byte[] buffer = new byte[2048];
+                        int read;
+                        while ((read = input.read(buffer)) != -1) output.write(buffer, 0, read);
+                        String body = output.toString("UTF-8");
+                        success = body.contains("<caps") || body.contains(":caps");
+                        if (!success) error = "Ответ не похож на Torznab API";
+                    }
+                } else error = "HTTP " + code;
+            } catch (Exception e) {
+                error = safe(e.getMessage());
+            } finally {
+                if (connection != null) connection.disconnect();
+            }
+            final boolean passed = success;
+            final String failure = error;
+            runOnUiThread(() -> {
+                checkButton.setEnabled(true);
+                resultView.setText(passed ? "✓" : "✕");
+                resultView.setTextColor(passed ? Color.GREEN : Color.RED);
+                if (!passed) showMessage("Проверка сервера не пройдена: " + failure);
+                else showMessage("Сервер Jackett доступен");
+            });
+        });
     }
 
     private boolean validJackettBase(String value) {
@@ -1596,6 +4943,10 @@ public class MainActivity extends Activity {
         panel.setOrientation(LinearLayout.VERTICAL);
         panel.setPadding(dp(12), dp(8), dp(12), dp(8));
         panel.setBackgroundColor(BG);
+        TextView dialogTitle = text("Другие трекеры", 20, GOLD, true);
+        dialogTitle.setTypeface(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.BOLD);
+        dialogTitle.setPadding(dp(4), dp(6), dp(4), dp(10));
+        panel.addView(dialogTitle);
         TextView mainRelease = text(query == null ? "" : query.trim(), 16, Color.WHITE, true);
         mainRelease.setMaxLines(2);
         mainRelease.setEllipsize(android.text.TextUtils.TruncateAt.END);
@@ -1604,6 +4955,20 @@ public class MainActivity extends Activity {
         TextView status = text("Поиск по: " + searchTitle + "\nПодключение к Jackett…", 13, TEAL, false);
         status.setPadding(dp(4), 0, dp(4), dp(8));
         panel.addView(status);
+        LinearLayout sortBar = new LinearLayout(this);
+        sortBar.setGravity(Gravity.CENTER_VERTICAL);
+        sortBar.setPadding(dp(4), dp(2), dp(4), dp(8));
+        Button dateSort = button("Дата ↓");
+        Button sizeSort = button("Размер");
+        Button seedsSort = button("Сиды");
+        Button[] sortButtons = {dateSort, sizeSort, seedsSort};
+        for (Button b : sortButtons) {
+            b.setTextSize(fontSize(12));
+            LinearLayout.LayoutParams bp = new LinearLayout.LayoutParams(0, dp(38), 1f);
+            bp.rightMargin = dp(5);
+            sortBar.addView(b, bp);
+        }
+        panel.addView(sortBar);
         ScrollView scroll = new ScrollView(this);
         scroll.setFocusable(false);
         scroll.setDescendantFocusability(ViewGroup.FOCUS_AFTER_DESCENDANTS);
@@ -1611,15 +4976,14 @@ public class MainActivity extends Activity {
         results.setOrientation(LinearLayout.VERTICAL);
         scroll.addView(results);
         panel.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1));
-        AlertDialog dialog = new AlertDialog.Builder(this).setTitle("Другие раздачи")
-                .setView(panel).setNegativeButton("Закрыть", null).create();
+        AlertDialog dialog = new AlertDialog.Builder(this).setView(panel).create();
         dialog.show();
         if (dialog.getWindow() != null) {
             dialog.getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(BG));
             dialog.getWindow().setLayout(ViewGroup.LayoutParams.MATCH_PARENT,
                     ViewGroup.LayoutParams.MATCH_PARENT);
         }
-        io.execute(() -> {
+        executeSafely(io, () -> {
             String[] servers = !jackettCustom().isEmpty()
                     ? new String[]{jackettCustom()}
                     : new String[]{jackettPrimary(), jackettBackup()};
@@ -1650,7 +5014,8 @@ public class MainActivity extends Activity {
                     StringBuilder xml = new StringBuilder();
                     byte[] buffer = new byte[8192];
                     int count;
-                    while ((count = input.read(buffer)) != -1) xml.append(new String(buffer, 0, count, StandardCharsets.UTF_8));
+                    while ((count = input.read(buffer)) != -1)
+                        xml.append(new String(buffer, 0, count, StandardCharsets.UTF_8));
                     input.close();
                     connection.disconnect();
                     Document rss = Jsoup.parse(xml.toString(), "", org.jsoup.parser.Parser.xmlParser());
@@ -1669,69 +5034,129 @@ public class MainActivity extends Activity {
                 if (serverUsed == null) {
                     status.setText("Не удалось выполнить поиск. " + failure
                             + "\nПроверьте доступность сервера и адрес API.");
+                    for (Button b : sortButtons) b.setVisibility(View.GONE);
                     return;
                 }
                 status.setText("Найдено: " + items.size() + " · " + serverUsed);
                 if (items.isEmpty()) {
+                    for (Button b : sortButtons) b.setVisibility(View.GONE);
                     results.addView(text("По этому названию ничего не найдено.", 14, Color.LTGRAY, false));
                     return;
                 }
-                View firstResult = null;
-                for (Element item : items) {
-                    String name = item.selectFirst("title") == null ? "Без названия" : item.selectFirst("title").text();
-                    String size = jackettAttribute(item, "size");
-                    if ("—".equals(size)) {
-                        Element enclosure = item.selectFirst("enclosure");
-                        if (enclosure != null) size = enclosure.attr("length");
-                    }
-                    size = formatJackettSize(size);
-                    String seeders = jackettAttribute(item, "seeders");
-                    String peers = jackettAttribute(item, "peers");
-                    String tracker = jackettAttribute(item, "jackettindexer");
-                    if ("—".equals(tracker)) tracker = "";
-                    Element link = item.selectFirst("link");
-                    String target = link == null ? "" : link.text().trim();
-                    if (target.isEmpty() && link != null) target = link.attr("href");
-                    if (target.isEmpty()) {
-                        Element enclosure = item.selectFirst("enclosure");
-                        if (enclosure != null) target = enclosure.attr("url");
-                    }
-                    final String resultUrl = target;
-                    LinearLayout row = new LinearLayout(this);
-                    row.setOrientation(LinearLayout.VERTICAL);
-                    row.setPadding(dp(14), dp(10), dp(14), dp(10));
-                    row.setBackground(shape(PANEL, 0));
-                    row.setFocusable(true);
-                    row.setFocusableInTouchMode(true);
-                    row.setClickable(true);
-                    row.setOnFocusChangeListener((view, focused) ->
-                            view.setBackground(shape(focused ? Color.rgb(65, 72, 73) : PANEL, focused ? GOLD : 0)));
-                    TextView titleView = text(name, 15, Color.WHITE, true);
-                    row.addView(titleView);
-                    TextView meta = text((tracker.isEmpty() ? "" : tracker + "  ·  ")
-                            + "Размер: " + size + "  ·  Сиды: " + seeders + "  ·  Пиры: " + peers,
-                            12, TEAL, false);
-                    meta.setPadding(0, dp(4), 0, 0);
-                    row.addView(meta);
-                    if (!resultUrl.isEmpty()) row.setOnClickListener(v -> {
-                        try {
-                            Intent open = new Intent(Intent.ACTION_VIEW, Uri.parse(resultUrl));
-                            open.putExtra("poster", posterUrl == null ? "" : posterUrl);
-                            open.putExtra("title", name);
-                            startActivity(open);
-                        } catch (Exception e) { showMessage("Не удалось открыть ссылку результата."); }
+                final String[] sortKey = {"date"};
+                final boolean[] descending = {true};
+                Runnable render = () -> {
+                    results.removeAllViews();
+                    dateSort.setText("Дата" + ("date".equals(sortKey[0]) ? (descending[0] ? " ↓" : " ↑") : ""));
+                    sizeSort.setText("Размер" + ("size".equals(sortKey[0]) ? (descending[0] ? " ↓" : " ↑") : ""));
+                    seedsSort.setText("Сиды" + ("seeds".equals(sortKey[0]) ? (descending[0] ? " ↓" : " ↑") : ""));
+                    List<Element> sorted = new ArrayList<>(items);
+                    java.util.Collections.sort(sorted, (left, right) -> {
+                        int cmp;
+                        if ("size".equals(sortKey[0])) {
+                            cmp = Double.compare(sizeValue(jackettAttribute(left, "size")),
+                                    sizeValue(jackettAttribute(right, "size")));
+                        } else if ("seeds".equals(sortKey[0])) {
+                            cmp = Integer.compare(parseInt(jackettAttribute(left, "seeders")),
+                                    parseInt(jackettAttribute(right, "seeders")));
+                        } else {
+                            cmp = Long.compare(jackettPubDateValue(left), jackettPubDateValue(right));
+                        }
+                        return descending[0] ? -cmp : cmp;
                     });
-                    LinearLayout.LayoutParams rowParams = new LinearLayout.LayoutParams(-1, -2);
-                    rowParams.bottomMargin = dp(6);
-                    results.addView(row, rowParams);
-                    if (firstResult == null && !resultUrl.isEmpty()) firstResult = row;
+                    View firstResult = null;
+                    for (Element item : sorted) {
+                        String name = item.selectFirst("title") == null ? "Без названия" : item.selectFirst("title").text();
+                        String size = jackettAttribute(item, "size");
+                        if ("—".equals(size)) {
+                            Element enclosure = item.selectFirst("enclosure");
+                            if (enclosure != null) size = enclosure.attr("length");
+                        }
+                        size = formatJackettSize(size);
+                        String seeders = jackettAttribute(item, "seeders");
+                        String peers = jackettAttribute(item, "peers");
+                        String tracker = jackettAttribute(item, "jackettindexer");
+                        if ("—".equals(tracker)) tracker = "";
+                        Element link = item.selectFirst("link");
+                        String target = link == null ? "" : link.text().trim();
+                        if (target.isEmpty() && link != null) target = link.attr("href");
+                        if (target.isEmpty()) {
+                            Element enclosure = item.selectFirst("enclosure");
+                            if (enclosure != null) target = enclosure.attr("url");
+                        }
+                        final String resultUrl = target;
+                        LinearLayout row = new LinearLayout(this);
+                        row.setOrientation(LinearLayout.VERTICAL);
+                        row.setPadding(dp(14), dp(10), dp(14), dp(10));
+                        row.setBackground(shape(PANEL, 0));
+                        row.setFocusable(true);
+                        row.setFocusableInTouchMode(true);
+                        row.setClickable(true);
+                        row.setOnFocusChangeListener((view, focused) ->
+                                view.setBackground(shape(focused ? Color.rgb(65, 72, 73) : PANEL, focused ? GOLD : 0)));
+                        row.addView(text(name, 15, Color.WHITE, true));
+                        String metaValue = (tracker.isEmpty() ? "" : tracker + "  ·  ")
+                                + "Размер: " + size + "  ·  Сиды: " + seeders + "  ·  Пиры: " + peers;
+                        android.text.SpannableString metaText = new android.text.SpannableString(metaValue);
+                        if (!tracker.isEmpty()) metaText.setSpan(new android.text.style.ForegroundColorSpan(
+                                Color.rgb(231, 186, 134)), 0, tracker.length(),
+                                android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+                        int seedsStart = metaValue.indexOf("Сиды:");
+                        int seedsEnd = metaValue.indexOf("  ·  Пиры:");
+                        if (seedsStart >= 0 && seedsEnd > seedsStart) metaText.setSpan(
+                                new android.text.style.ForegroundColorSpan(TEAL), seedsStart, seedsEnd,
+                                android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+                        int peersStart = metaValue.indexOf("Пиры:");
+                        if (peersStart >= 0) metaText.setSpan(new android.text.style.ForegroundColorSpan(RED),
+                                peersStart, metaValue.length(), android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+                        TextView meta = text("", 12, TEAL, false);
+                        meta.setText(metaText);
+                        meta.setPadding(0, dp(4), 0, 0);
+                        row.addView(meta);
+                        if (!resultUrl.isEmpty()) row.setOnClickListener(v -> {
+                            try {
+                                Intent open = new Intent(Intent.ACTION_VIEW, Uri.parse(resultUrl));
+                                open.putExtra("poster", posterUrl == null ? "" : posterUrl);
+                                open.putExtra("title", name);
+                                startActivity(open);
+                            } catch (Exception e) { showMessage("Не удалось открыть ссылку результата."); }
+                        });
+                        LinearLayout.LayoutParams rowParams = new LinearLayout.LayoutParams(-1, -2);
+                        rowParams.bottomMargin = dp(6);
+                        results.addView(row, rowParams);
+                        if (firstResult == null && !resultUrl.isEmpty()) firstResult = row;
+                    }
+                    if (firstResult != null) {
+                        View focusTarget = firstResult;
+                        focusTarget.post(focusTarget::requestFocus);
+                    }
+                };
+                for (int i = 0; i < sortButtons.length; i++) {
+                    final String key = i == 0 ? "date" : i == 1 ? "size" : "seeds";
+                    sortButtons[i].setOnClickListener(v -> {
+                        if (key.equals(sortKey[0])) descending[0] = !descending[0];
+                        else { sortKey[0] = key; descending[0] = true; }
+                        render.run();
+                    });
                 }
-                if (firstResult != null) {
-                    View focusTarget = firstResult;
-                    focusTarget.post(focusTarget::requestFocus);
-                }
+                render.run();
             });
         });
+    }
+
+    private long jackettPubDateValue(Element item) {
+        String value = item.selectFirst("pubDate") == null ? "" : item.selectFirst("pubDate").text().trim();
+        if (value.isEmpty()) return 0L;
+        String[] patterns = {"EEE, dd MMM yyyy HH:mm:ss Z", "dd MMM yyyy HH:mm:ss Z",
+                "yyyy-MM-dd'T'HH:mm:ss'Z'", "yyyy-MM-dd"};
+        for (String pattern : patterns) {
+            try {
+                java.text.SimpleDateFormat format = new java.text.SimpleDateFormat(pattern, java.util.Locale.US);
+                format.setLenient(true);
+                return format.parse(value).getTime();
+            } catch (Exception ignored) { }
+        }
+        return 0L;
     }
 
     private String extractJackettSearchTitle(String fullTitle) {
@@ -1809,17 +5234,24 @@ public class MainActivity extends Activity {
     }
 
     private void addMenu(String icon, String label, Runnable action) {
-        Button b = button(icon + "   " + label);
-        if ("Недавно смотрели".equals(label)) {
-            android.text.SpannableString menuText =
-                    new android.text.SpannableString(icon + "   " + label);
-            menuText.setSpan(new android.text.style.RelativeSizeSpan(1.2f),
-                    0, icon.length(), android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-            b.setText(menuText);
-        }
+        addMenu(icon, label, action, false);
+    }
+
+    private void addMenu(String icon, String label, Runnable action, boolean premium) {
+
+        String displayLabel = icon + "   " + label;
+        Button b = button(displayLabel);
+        b.setText(menuIconText(displayLabel));
+        b.setText(menuIconText(displayLabel));
         b.setGravity(Gravity.CENTER_VERTICAL | Gravity.LEFT);
-        b.setTextSize(14);
+        b.setTextSize(fontSize(14));
         b.setPadding(dp(14), 0, dp(8), 0);
+        final String feature = "Избранное".equals(label) ? "favorites"
+                : "Недавно смотрели".equals(label) ? "viewing_history" : null;
+        if (premium) {
+            b.setTag("plus_menu_item");
+            if (feature != null) registerPlusFeatureControl(b, feature);
+        }
         b.setMaxLines(1);
         b.setEllipsize(android.text.TextUtils.TruncateAt.END);
         LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(
@@ -1827,7 +5259,57 @@ public class MainActivity extends Activity {
         // Make the focused button frame 5dp narrower on the scrollbar side.
         p.rightMargin = dp(5);
         p.bottomMargin = dp(3);
-        menuItems.addView(b, p); b.setOnClickListener(v -> action.run());
+        menuItems.addView(b, p);
+        b.setOnClickListener(v -> {
+            if (feature != null && !requirePlusFeature(feature)) return;
+            action.run();
+        });
+    }
+
+    private void onPlusEntitlementsUpdated() {
+        if (isFinishing() || isDestroyed()) return;
+        refreshPlusFeatureControls();
+        // Do not destroy and recreate an open torrent dialog from an asynchronous
+        // entitlement callback. The card reads Plus gates when it is next opened;
+        // rebuilding a live dialog can race its window attachment, DPAD focus,
+        // poster loading and WebView prefetch callbacks.
+        if (!plusSettingsRefreshPending && settingsDialog != null && settingsDialog.isShowing()) {
+            settingsDialog.dismiss();
+            settingsDialog = null;
+            showSettings();
+        }
+    }
+
+    private void registerPlusFeatureControl(View view, String feature) {
+        if (view == null || feature == null) return;
+        plusFeatureControls.put(view, feature);
+        updatePlusFeatureControl(view, feature);
+    }
+
+    private void updatePlusFeatureControl(View view, String feature) {
+        boolean enabled = PlusAccess.hasFeature(this, feature);
+        // Keep Plus controls reachable with the TV remote even when locked.
+        // Their click handlers enforce the entitlement and show the upgrade message.
+        view.setEnabled(true);
+        view.setAlpha(enabled ? 1.0f : 0.42f);
+        view.setFocusable(true);
+        view.setFocusableInTouchMode(false);
+    }
+
+    private void refreshPlusFeatureControls() {
+        java.util.Iterator<java.util.Map.Entry<View, String>> iterator = plusFeatureControls.entrySet().iterator();
+        while (iterator.hasNext()) {
+            java.util.Map.Entry<View, String> entry = iterator.next();
+            View view = entry.getKey();
+            if (view == null || view.getParent() == null) { iterator.remove(); continue; }
+            updatePlusFeatureControl(view, entry.getValue());
+        }
+    }
+
+    private boolean requirePlusFeature(String feature) {
+        if (PlusAccess.hasFeature(this, feature)) return true;
+        showMessage("Доступно в Plus");
+        return false;
     }
 
     private void focusSearch() { search.requestFocus(); }
@@ -1842,42 +5324,197 @@ public class MainActivity extends Activity {
 
     private void load(String path, String title) { load(path, title, null); }
 
-    private void load(String path, String title, String postBody) {
-        currentPath = path; currentTitle = title; heading.setText(title);
-        String cacheKey = (postBody == null ? "GET|" + path : "POST|" + path + "|" + postBody);
-        String scopedCacheKey = client.getMirror() + "|" + cacheKey;
-        String cachedPage;
-        synchronized (pageCache) { cachedPage = pageCache.get(cacheKey); }
-        if (cachedPage == null && postBody == null) {
-            byte[] saved = diskCache.get("page|" + scopedCacheKey, 3L * 60L * 1000L);
-            if (saved != null) {
-                cachedPage = new String(saved, StandardCharsets.UTF_8);
-                synchronized (pageCache) { pageCache.put(cacheKey, cachedPage); }
-            }
+    /**
+     * Restore an expired Kinozal session inside the existing WebView.
+     * This preserves the browser's Cloudflare clearance and cookie attributes.
+     */
+    private void restoreExpiredSessionAndRetry(String path, String postBody,
+            java.util.function.Consumer<String> callback) {
+        if (autoSessionRestoreInProgress) {
+            callback.accept(null);
+            return;
         }
-        if (cachedPage != null) { showLoadedPage(cachedPage); return; }
+        final String[] credentials = client.getSavedCredentials();
+        if (credentials == null || credentials.length < 2
+                || credentials[0] == null || credentials[0].trim().isEmpty()
+                || credentials[1] == null || credentials[1].isEmpty()) {
+            lastBrowserError = "Сессия Kinozal истекла. Откройте Настройки → Авторизация.";
+            callback.accept(null);
+            return;
+        }
+        final WebView web = sessionWebView;
+        if (web == null) {
+            lastBrowserError = "Браузерная сессия недоступна. Откройте Настройки → Авторизация.";
+            callback.accept(null);
+            return;
+        }
+        autoSessionRestoreInProgress = true;
+        status.setText("Сессия истекла. Повторный вход через браузер…");
+        FeedDiagnostics.log(this, "auth", "SESSION_RESTORE_START",
+                "transport=WebView, mirror=" + client.getMirror());
+
+        if (browserRequestTimeout != null) browserHandler.removeCallbacks(browserRequestTimeout);
+        if (pendingBrowserCallback != null) {
+            pendingBrowserCallback = null;
+            browserRequestTimeout = null;
+        }
+
+        final long startedAt = android.os.SystemClock.elapsedRealtime();
+        final boolean[] submitted = {false};
+        final boolean[] finished = {false};
+        final Runnable[] poll = new Runnable[1];
+
+        Runnable finishFailure = () -> {
+            if (finished[0]) return;
+            finished[0] = true;
+            autoSessionRestoreInProgress = false;
+            String message = "Не удалось автоматически восстановить авторизацию. "
+                    + "Проверьте логин и пароль в Настройки → Авторизация.";
+            lastBrowserError = message;
+            status.setText(message);
+            updateSidebarLoginStatus(false);
+            FeedDiagnostics.log(this, "auth", "SESSION_RESTORE_FAILED",
+                    "durationMs=" + (android.os.SystemClock.elapsedRealtime() - startedAt));
+            callback.accept(null);
+        };
+
+        poll[0] = () -> {
+            if (finished[0] || isFinishing() || isDestroyed()) return;
+            if (android.os.SystemClock.elapsedRealtime() - startedAt > 25000L) {
+                finishFailure.run();
+                return;
+            }
+            String script;
+            if (!submitted[0]) {
+                script = "(function(){try{var p=document.querySelector('input[type=password]');"
+                        + "if(!p)return 'WAIT';var f=p.closest('form');"
+                        + "var scope=f||p.parentElement&&p.parentElement.parentElement||document;"
+                        + "var all=[].slice.call(scope.querySelectorAll('input'));"
+                        + "var u=all.find(function(e){var t=(e.type||'text').toLowerCase();"
+                        + "var n=((e.name||'')+' '+(e.id||'')+' '+(e.placeholder||'')+' '+"
+                        + "(e.getAttribute('autocomplete')||'')).toLowerCase();"
+                        + "return e!==p&&!e.disabled&&t!=='search'&&['text','email'].indexOf(t)>=0&&"
+                        + "(/login|user|name|nick|email/.test(n)||!n);});"
+                        + "if(!u)return 'NO_USER_FIELD';"
+                        + "function put(e,v){var d=Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value');"
+                        + "d.set.call(e,v);e.dispatchEvent(new Event('input',{bubbles:true}));"
+                        + "e.dispatchEvent(new Event('change',{bubbles:true}));}"
+                        + "put(u," + org.json.JSONObject.quote(credentials[0]) + ");"
+                        + "put(p," + org.json.JSONObject.quote(credentials[1]) + ");"
+                        + "if(f){if(f.requestSubmit)f.requestSubmit();else f.submit();return 'SUBMITTED';}"
+                        + "var b=scope.querySelector('input[type=submit],button[type=submit],button');"
+                        + "if(b){b.click();return 'SUBMITTED';}return 'NO_SUBMIT';"
+                        + "}catch(e){return 'ERROR';}})()";
+                web.evaluateJavascript(script, value -> {
+                    String result = value == null ? "" : value.replace("\"", "");
+                    if (result.contains("SUBMITTED")) submitted[0] = true;
+                    else if (result.contains("NO_USER_FIELD") || result.contains("NO_SUBMIT")
+                            || result.contains("ERROR")) finishFailure.run();
+                    else browserHandler.postDelayed(poll[0], 350);
+                });
+                return;
+            }
+            web.evaluateJavascript("(function(){var p=document.querySelector('input[type=password]');"
+                    + "var u=(location.href||'').toLowerCase();var challenge=document.querySelector('#challenge-form,.cf-challenge,iframe[src*=challenge],input[name=cf-turnstile-response]');"
+                    + "return p||u.indexOf('login.php')>=0||u.indexOf('takelogin.php')>=0?'LOGIN':(challenge?'CHALLENGE':'OK');})()", value -> {
+                String result = value == null ? "" : value.replace("\"", "");
+                if (result.contains("OK")) {
+                    CookieManager manager = CookieManager.getInstance();
+                    manager.flush();
+                    String cookies = manager.getCookie(client.getMirror());
+                    if (cookies != null && !cookies.trim().isEmpty()) {
+                        try {
+                            client.saveBrowserCookies(cookies);
+                            client.importBrowserCookies(cookies);
+                        } catch (Exception e) {
+                            finishFailure.run();
+                            return;
+                        }
+                    }
+                    finished[0] = true;
+                    FeedDiagnostics.log(this, "auth", "SESSION_RESTORE_OK",
+                            "durationMs=" + (android.os.SystemClock.elapsedRealtime() - startedAt));
+                    fetchBrowserPage(path, postBody, html -> {
+                        autoSessionRestoreInProgress = false;
+                        if (html == null || html.isEmpty()) {
+                            lastBrowserError = "Вход выполнен, но запрошенная страница не загрузилась.";
+                            updateSidebarLoginStatus(false);
+                        } else {
+                            lastKinozalConnectionStatus = "установлено";
+                            updateSidebarConnectionInfo();
+                            updateSidebarLoginStatus(true);
+                        }
+                        callback.accept(html);
+                    });
+                } else {
+                    browserHandler.postDelayed(poll[0], result.contains("CHALLENGE") ? 1200 : 500);
+                }
+            });
+        };
+
+        web.stopLoading();
+        web.loadUrl(client.getMirror() + "/login.php?m=5");
+        browserHandler.postDelayed(poll[0], 500);
+    }
+
+    private void load(String path, String title, String postBody) {
+        if (deferBrowserNavigationIfBusy(() -> load(path, title, postBody))) return;
+        activateBrowseScreen();
+        currentPath = path; currentTitle = title; heading.setText(title);
+        browsePerfPath = path;
+        browsePerfStartedAtMs = android.os.SystemClock.elapsedRealtime();
+        Log.i("KinozalPerf", "browse start path=" + path + " transport="
+                + (sessionWebView != null ? "WebView" : "native-http"));
+
+        // Browse/category pages change frequently. Always request the current
+        // page from Kinozal; only Home feeds, posters and torrent details use
+        // their dedicated caches.
         showPageLoading("Загрузка каталога…");
         if (sessionWebView != null) {
             fetchBrowserPage(path, postBody, html -> {
                 if (html != null && !html.isEmpty()) {
-                    synchronized (pageCache) { pageCache.put(cacheKey, html); }
-                    if (postBody == null) diskCache.put("page|" + scopedCacheKey, html.getBytes(StandardCharsets.UTF_8));
+                    lastKinozalConnectionStatus = "установлено";
+                    updateSidebarConnectionInfo();
                     showLoadedPage(html);
+                } else if (lastBrowserError != null
+                        && lastBrowserError.contains("перенаправил на авторизацию")) {
+                    restoreExpiredSessionAndRetry(path, postBody, restoredHtml -> {
+                        if (restoredHtml != null && !restoredHtml.isEmpty()) {
+                            lastKinozalConnectionStatus = "установлено";
+                            updateSidebarConnectionInfo();
+                            showLoadedPage(restoredHtml);
+                        } else {
+                            lastKinozalConnectionStatus = "нет соединения";
+                            if (sidebarConnectionInfo != null)
+                                sidebarConnectionInfo.setText("Подключение к Kinozal: нет соединения");
+                            progress.setVisibility(View.GONE);
+                            status.setText(lastBrowserError);
+                            addEmpty("Не удалось восстановить авторизацию автоматически. "
+                                    + "Откройте Настройки → Авторизация.");
+                        }
+                    });
                 } else {
+                    lastKinozalConnectionStatus = "нет соединения";
+                    if (sidebarConnectionInfo != null) sidebarConnectionInfo.setText("Подключение к Kinozal: нет соединения");
                     progress.setVisibility(View.GONE);
                     status.setText("Нет соединения");
                     addEmpty("Не удалось загрузить каталог через браузерную сессию.");
                 }
             });
         } else {
-            io.execute(() -> {
+            executeSafely(io, () -> {
                 try {
                     String html = postBody == null ? client.fetch(path) : client.fetchPost(path, postBody);
-                    synchronized (pageCache) { pageCache.put(cacheKey, html); }
-                    if (postBody == null) diskCache.put("page|" + scopedCacheKey, html.getBytes(StandardCharsets.UTF_8));
-                    runOnUiThread(() -> showLoadedPage(html));
+                    runOnUiThread(() -> {
+                        lastKinozalConnectionStatus = "установлено";
+                        updateSidebarConnectionInfo();
+                        showLoadedPage(html);
+                    });
                 } catch (Exception e) {
-                    runOnUiThread(() -> { progress.setVisibility(View.GONE); status.setText("Нет соединения");
+                    runOnUiThread(() -> {
+                        lastKinozalConnectionStatus = "нет соединения";
+                        if (sidebarConnectionInfo != null) sidebarConnectionInfo.setText("Подключение к Kinozal: нет соединения");
+                        progress.setVisibility(View.GONE); status.setText("Нет соединения");
                         addEmpty("Не удалось загрузить каталог. " + safe(e.getMessage())); });
                 }
             });
@@ -1892,16 +5529,16 @@ public class MainActivity extends Activity {
         web.getSettings().setDomStorageEnabled(true);
         web.getSettings().setLoadsImagesAutomatically(false);
         web.getSettings().setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
+        // Cloudflare clearance is bound to the browser User-Agent. Persist the exact
+        // WebView UA so WorkManager does not present a different native fingerprint.
+        client.setUserAgent(web.getSettings().getUserAgentString());
         CookieManager manager = CookieManager.getInstance();
         manager.setAcceptCookie(true);
         manager.setAcceptThirdPartyCookies(web, true);
         String[] pairs = cookieHeader.split(";");
         final int[] remaining = {0};
         for (String pair : pairs) if (pair.trim().contains("=")) remaining[0]++;
-        if (remaining[0] == 0) {
-            markStartupCatalogReady();
-            return;
-        }
+        final boolean noCookies = remaining[0] == 0;
         final boolean[] started = {false};
         android.webkit.ValueCallback<Boolean> callback = accepted -> {
             remaining[0]--;
@@ -1911,16 +5548,17 @@ public class MainActivity extends Activity {
                 markStartupCatalogReady();
             }
         };
-        for (String pair : pairs) {
-            String item = pair.trim();
-            if (!item.contains("=")) continue;
-            manager.setCookie(client.getMirror(), item + "; Path=/; Secure; SameSite=Lax", callback);
+        if (!noCookies) {
+            for (String pair : pairs) {
+                String item = pair.trim();
+                if (!item.contains("=")) continue;
+                manager.setCookie(client.getMirror(), item + "; Path=/; Secure; SameSite=Lax", callback);
+            }
         }
         web.setWebViewClient(new WebViewClient() {
             private boolean isMirror(Uri uri) {
                 return uri != null && uri.getHost() != null
-                        && uri.getHost().equalsIgnoreCase(Uri.parse(client.getMirror()).getHost());
-            }
+                        && uri.getHost().equalsIgnoreCase(Uri.parse(client.getMirror()).getHost());            }
             @Override public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
                 return request.isForMainFrame() && !isMirror(request.getUrl());
             }
@@ -1939,6 +5577,14 @@ public class MainActivity extends Activity {
                     android.webkit.WebResourceResponse response) {
                 super.onReceivedHttpError(view, request, response);
                 if (request.isForMainFrame() && pendingBrowserCallback != null) {
+                    // Cloudflare commonly serves its JavaScript challenge with HTTP 403.
+                    // Do not discard that document: onPageFinished must inspect it and
+                    // give the existing WebView time to complete the browser challenge.
+                    if (response.getStatusCode() == 403) {
+                        appendFeedDiagnostic("CLOUDFLARE_HTTP_403",
+                                "allowing WebView challenge document; url=" + request.getUrl());
+                        return;
+                    }
                     lastBrowserError = "HTTP " + response.getStatusCode() + " "
                             + response.getReasonPhrase() + "; URL: " + request.getUrl();
                     BrowserPageCallback cb = pendingBrowserCallback;
@@ -1959,9 +5605,15 @@ public class MainActivity extends Activity {
             @Override public void onPageFinished(WebView view, String url) {
                 super.onPageFinished(view, url);
                 if (pendingBrowserCallback != null) {
+                    long pageFinishedAt = android.os.SystemClock.elapsedRealtime();
+                    logBrowsePerf("webview-page-finished",
+                            browsePerfStartedAtMs > 0 ? pageFinishedAt - browsePerfStartedAtMs : -1,
+                            "url=" + url);
                     BrowserPageCallback cb = pendingBrowserCallback;
                     pendingBrowserCallback = null;
+                    final long evaluateStartedAt = android.os.SystemClock.elapsedRealtime();
                     view.evaluateJavascript("(document.documentElement ? document.documentElement.outerHTML : '')", value -> {
+                        long evaluateDuration = android.os.SystemClock.elapsedRealtime() - evaluateStartedAt;
                         String html = "";
                         try { html = new org.json.JSONArray("[" + value + "]").getString(0); }
                         catch (Exception ignored) { }
@@ -1970,16 +5622,14 @@ public class MainActivity extends Activity {
                             cb.onPage(null, lastBrowserError);
                             return;
                         }
-                        Document loaded = Jsoup.parse(html);
-                        boolean loginForm = !loaded.select("form:has(input[type=password])").isEmpty();
-                        String pageUrl = view.getUrl() == null ? "" : view.getUrl().toLowerCase(java.util.Locale.ROOT);
-                        if (loginForm || pageUrl.contains("login.php") || pageUrl.contains("takelogin.php")) {
-                            lastBrowserError = "Сайт перенаправил на авторизацию. URL: " + view.getUrl();
-                            cb.onPage(null, lastBrowserError);
+                        if (isCloudflareChallengeHtml(html)) {
+                            appendFeedDiagnostic("CLOUDFLARE_CHALLENGE",
+                                    "real WebView navigation waiting for challenge completion; url=" + url);
+                            waitForCloudflarePage(view, url, cb,
+                                    android.os.SystemClock.elapsedRealtime(), 0);
                             return;
                         }
-                        lastBrowserError = "Первичная страница загружена: " + url + ", HTML=" + html.length() + " символов";
-                        cb.onPage(html, null);
+                        deliverBrowserPage(view, url, html, cb, evaluateDuration);
                     });
                 }
                 String currentCookies = manager.getCookie(client.getMirror());
@@ -1992,6 +5642,126 @@ public class MainActivity extends Activity {
             }
         });
         web.setWebChromeClient(new WebChromeClient());
+        if (noCookies) markStartupCatalogReady();
+    }
+
+    private void waitForCloudflarePage(WebView view, String requestedUrl,
+            BrowserPageCallback callback, long startedAt, int attempt) {
+        if (view != sessionWebView || isFinishing() || isDestroyed()) {
+            callback.onPage(null, "Проверка Cloudflare прервана: браузерная сессия закрыта.");
+            return;
+        }
+        if (android.os.SystemClock.elapsedRealtime() - startedAt > 80000L) {
+            lastBrowserError = "Cloudflare не завершил проверку за 80 секунд. Откройте Kinozal в браузере и завершите проверку.";
+            appendFeedDiagnostic("CLOUDFLARE_WAIT_TIMEOUT", "url=" + requestedUrl);
+            callback.onPage(null, lastBrowserError);
+            return;
+        }
+        browserHandler.postDelayed(() -> view.evaluateJavascript(
+                "(function(){var h=document.documentElement?document.documentElement.outerHTML:'';"
+                + "var t=(document.title||'')+' '+(document.body?document.body.innerText:'');"
+                + "var l=(location.href||'').toLowerCase();"
+                + "var c=/just a moment|checking your browser|enable javascript and cookies|attention required/i.test(t)"
+                + "||!!document.querySelector('#challenge-form,.cf-challenge,iframe[src*=challenge],input[name=cf-turnstile-response]');"
+                + "var login=!!document.querySelector('form input[type=password]')||/login\\.php|takelogin\\.php/.test(l);"
+                + "return JSON.stringify({html:h,url:l,challenge:c,login:login});})()",
+                value -> {
+                    try {
+                        String json = new org.json.JSONArray("[" + value + "]").getString(0);
+                        org.json.JSONObject state = new org.json.JSONObject(json);
+                        String html = state.optString("html", "");
+                        if (!state.optBoolean("challenge", true) && html.length() > 1000) {
+                            CookieManager manager = CookieManager.getInstance();
+                            String currentCookies = manager.getCookie(client.getMirror());
+                            if (currentCookies != null && !currentCookies.isEmpty()) {
+                                try {
+                                    manager.flush();
+                                    client.saveBrowserCookies(currentCookies);
+                                    client.importBrowserCookies(currentCookies);
+                                } catch (Exception cookieError) {
+                                    FeedDiagnostics.log(MainActivity.this, "auth",
+                                            "CLOUDFLARE_COOKIE_SYNC_FAILED",
+                                            cookieError.getClass().getSimpleName());
+                                }
+                            }
+                            appendFeedDiagnostic("CLOUDFLARE_RESOLVED",
+                                    "url=" + view.getUrl() + ", waitMs="
+                                    + (android.os.SystemClock.elapsedRealtime() - startedAt));
+                            deliverBrowserPage(view, view.getUrl(), html, callback, 0L);
+                            return;
+                        }
+                        if (state.optBoolean("login", false)) {
+                            lastBrowserError = "Kinozal перенаправил на авторизацию после проверки Cloudflare.";
+                            callback.onPage(null, lastBrowserError);
+                            return;
+                        }
+                    } catch (Exception ignored) { }
+                    waitForCloudflarePage(view, requestedUrl, callback, startedAt, attempt + 1);
+                }), attempt == 0 ? 1000 : 1200);
+    }
+
+    private void deliverBrowserPage(WebView view, String url, String html,
+            BrowserPageCallback callback, long evaluateDuration) {
+        String pageUrl = view.getUrl() == null ? "" : view.getUrl().toLowerCase(java.util.Locale.ROOT);
+        final String loadedHtml = html;
+        final String loadedUrl = pageUrl;
+        logBrowsePerf("dom-extract", evaluateDuration, "htmlChars=" + loadedHtml.length());
+        // Validate login redirects away from the WebView/UI thread.
+        executeSafely(io, () -> {
+            long loginCheckStartedAt = android.os.SystemClock.elapsedRealtime();
+            boolean loginForm = containsLoginPasswordInput(loadedHtml);
+            logBrowsePerf("login-check",
+                    android.os.SystemClock.elapsedRealtime() - loginCheckStartedAt,
+                    "htmlChars=" + loadedHtml.length());
+            final boolean redirectedToLogin = loginForm
+                    || loadedUrl.contains("login.php")
+                    || loadedUrl.contains("takelogin.php");
+            runOnUiThread(() -> {
+                updateSidebarLoginStatus(!redirectedToLogin);
+                if (redirectedToLogin) {
+                    lastBrowserError = "Сайт перенаправил на авторизацию. URL: " + view.getUrl();
+                    callback.onPage(null, lastBrowserError);
+                    return;
+                }
+                lastBrowserError = "Первичная страница загружена: " + url
+                        + ", HTML=" + loadedHtml.length() + " символов";
+                callback.onPage(loadedHtml, null);
+            });
+        });
+    }
+
+    // Fast equivalent of form:has(input[type=password]) for login detection.
+    // Avoid building a second Jsoup Document for every catalogue response.
+    private boolean containsLoginPasswordInput(String html) {
+        if (html == null || html.isEmpty()) return false;
+        String lower = html.toLowerCase(java.util.Locale.ROOT);
+        int formStart = 0;
+        while ((formStart = lower.indexOf("<form", formStart)) >= 0) {
+            int formEnd = lower.indexOf("</form", formStart);
+            if (formEnd < 0) formEnd = lower.length();
+            int inputStart = formStart;
+            while ((inputStart = lower.indexOf("<input", inputStart)) >= 0
+                    && inputStart < formEnd) {
+                int tagEnd = lower.indexOf(">", inputStart);
+                if (tagEnd < 0 || tagEnd > formEnd) break;
+                String inputTag = lower.substring(inputStart, tagEnd + 1);
+                if (LOGIN_PASSWORD_TYPE.matcher(inputTag).find()) return true;
+                inputStart = tagEnd + 1;
+            }
+            formStart = formEnd + 6;
+        }
+        return false;
+    }
+
+    private boolean isCloudflareChallengeHtml(String html) {
+        if (html == null || html.isEmpty()) return false;
+        String lower = html.toLowerCase(java.util.Locale.ROOT);
+        return lower.contains("just a moment")
+                || lower.contains("cf-chl-")
+                || lower.contains("challenge-platform")
+                || lower.contains("checking your browser")
+                || lower.contains("enable javascript and cookies")
+                || lower.contains("attention required");
     }
 
     private void fetchBrowserPage(String path, String postBody,
@@ -2014,7 +5784,20 @@ public class MainActivity extends Activity {
         pendingBrowserCallback = (html, error) -> {
             if (browserRequestTimeout != null) browserHandler.removeCallbacks(browserRequestTimeout);
             browserRequestTimeout = null;
-            runOnUiThread(() -> callback.accept(error == null ? html : null));
+            runOnUiThread(() -> {
+                String result = error == null ? html : null;
+                boolean loginRedirect = result == null && lastBrowserError != null
+                        && lastBrowserError.contains("перенаправил на авторизацию");
+                // Feed requests and catalogue navigation must recover an expired
+                // session in the same way. Previously only load() did this, so
+                // a long-idle session could leave Home/Collections empty.
+                if (loginRedirect && !autoSessionRestoreInProgress
+                        && client.getSavedCredentials() != null) {
+                    restoreExpiredSessionAndRetry(path, postBody, callback);
+                } else {
+                    callback.accept(result);
+                }
+            });
         };
         browserRequestTimeout = () -> {
             if (pendingBrowserCallback == null) return;
@@ -2022,9 +5805,10 @@ public class MainActivity extends Activity {
             pendingBrowserCallback = null;
             browserRequestTimeout = null;
             web.stopLoading();
-            timedOut.onPage(null, "Тайм-аут ожидания ответа Kinozal (30 секунд). Проверьте соединение или авторизацию.");
+            timedOut.onPage(null, "Тайм-аут ожидания ответа Kinozal (90 секунд). Проверьте соединение или авторизацию.");
         };
-        browserHandler.postDelayed(browserRequestTimeout, 30000);
+        // Cloudflare may need extra time to run its browser challenge scripts.
+        browserHandler.postDelayed(browserRequestTimeout, 90000);
         if (postBody == null) {
             web.loadUrl(target);
         } else {
@@ -2033,61 +5817,167 @@ public class MainActivity extends Activity {
     }
 
     private void showLoadedPage(String html) {
+        if (html == null || html.isEmpty()) return;
+        final String requestedPath = currentPath;
+        final long parseStartedAt = android.os.SystemClock.elapsedRealtime();
+
+        // The authenticated WebView already owns the live category DOM. Extract
+        // the 50 visible rows there instead of rebuilding the same DOM with Jsoup.
+        WebView web = sessionWebView;
+        if (web != null && "browse".equals(activeFeedScreen)) {
+            parseCatalogInWebView(web, html, requestedPath, parseStartedAt);
+            return;
+        }
+        parseCatalogWithJsoup(html, requestedPath, parseStartedAt);
+    }
+
+    private void parseCatalogInWebView(WebView web, String html, String requestedPath,
+            long parseStartedAt) {
+        final boolean[] completed = {false};
+        final Runnable[] timeoutHolder = {null};
+        timeoutHolder[0] = () -> {
+            if (completed[0]) return;
+            completed[0] = true;
+            Log.w("KinozalPerf", "catalog JS extraction timed out; using Jsoup fallback");
+            parseCatalogWithJsoup(html, requestedPath, parseStartedAt);
+        };
+        browserHandler.postDelayed(timeoutHolder[0], 4000);
+
+        String script = "(function(){try{"
+                + "var rows=document.querySelectorAll('table.t_peer tr'),out=[],seen=Object.create(null);"
+                + "for(var i=0;i<rows.length;i++){var row=rows[i],cells=row.children,nameCell=null;"
+                + "for(var c=0;c<cells.length;c++){var cell=cells[c];"
+                + "if(cell.tagName==='TD'&&cell.classList.contains('nam')){nameCell=cell;break;}}"
+                + "if(!nameCell)continue;var links=nameCell.children;"
+                + "for(var a=0;a<links.length;a++){var link=links[a];"
+                + "if(link.tagName!=='A'||(link.getAttribute('href')||'').indexOf('details.php?id=')<0)continue;"
+                + "var title=(link.innerText||link.textContent||'').trim(),href=link.href||link.getAttribute('href'),releaseType=/^r[012]$/.test(link.className)?link.className:'r0';"
+                + "if(title.length<3||!href||seen[href])continue;seen[href]=1;"
+                + "function cellText(n){return cells.length>n?(cells[n].innerText||cells[n].textContent||'').trim():'—';}"
+                + "out.push({title:title,href:href,releaseType:releaseType,size:cellText(3),seeds:cellText(4),"
+                + "leeches:cellText(5),uploaded:cellText(6)});}}"
+                + "return JSON.stringify(out);"
+                + "}catch(e){return '[]';}})()";
+
+        web.evaluateJavascript(script, value -> {
+            if (completed[0]) return;
+            completed[0] = true;
+            if (timeoutHolder[0] != null) browserHandler.removeCallbacks(timeoutHolder[0]);
+            try {
+                String json = new org.json.JSONArray("[" + value + "]").getString(0);
+                org.json.JSONArray array = new org.json.JSONArray(json);
+                List<Torrent> parsed = new ArrayList<>(array.length());
+                for (int i = 0; i < array.length(); i++) {
+                    org.json.JSONObject item = array.optJSONObject(i);
+                    if (item == null) continue;
+                    Torrent torrent = new Torrent();
+                    torrent.title = item.optString("title", "").trim();
+                    torrent.href = item.optString("href", "").trim();
+                    torrent.releaseType = normalizeReleaseType(item.optString("releaseType", "r0"));
+                    if (torrent.title.length() < 3 || torrent.href.isEmpty()) continue;
+                    torrent.size = item.optString("size", "—");
+                    torrent.seeds = item.optString("seeds", "—");
+                    torrent.leeches = item.optString("leeches", "—");
+                    torrent.uploaded = item.optString("uploaded", "—");
+                    parsed.add(torrent);
+                }
+                logBrowsePerf("catalog-js-extract",
+                        android.os.SystemClock.elapsedRealtime() - parseStartedAt,
+                        "htmlChars=" + html.length() + " torrents=" + parsed.size());
+                if (parsed.isEmpty()) {
+                    Log.w("KinozalPerf", "catalog JS returned no rows; using Jsoup fallback");
+                    parseCatalogWithJsoup(html, requestedPath, parseStartedAt);
+                } else {
+                    finishCatalogLoad(html, requestedPath, parsed);
+                }
+            } catch (Exception e) {
+                Log.w("KinozalPerf", "catalog JS result failed; using Jsoup fallback", e);
+                parseCatalogWithJsoup(html, requestedPath, parseStartedAt);
+            }
+        });
+    }
+
+    private void parseCatalogWithJsoup(String html, String requestedPath, long parseStartedAt) {
+        executeSafely(io, () -> {
+            try {
+                long domStartedAt = android.os.SystemClock.elapsedRealtime();
+                Document document = Jsoup.parse(html, client.getMirror());
+                long domDuration = android.os.SystemClock.elapsedRealtime() - domStartedAt;
+                long extractStartedAt = android.os.SystemClock.elapsedRealtime();
+                List<Torrent> parsed = parseTorrents(document);
+                long extractDuration = android.os.SystemClock.elapsedRealtime() - extractStartedAt;
+                logBrowsePerf("catalog-dom-parse", domDuration, "htmlChars=" + html.length());
+                logBrowsePerf("catalog-extract", extractDuration, "torrents=" + parsed.size());
+                logBrowsePerf("catalog-parse",
+                        android.os.SystemClock.elapsedRealtime() - parseStartedAt,
+                        "htmlChars=" + html.length() + " torrents=" + parsed.size() + " fallback=jsoup");
+                runOnUiThread(() -> finishCatalogLoad(html, requestedPath, parsed));
+            } catch (Exception e) {
+                runOnUiThread(() -> {
+                    if (!java.util.Objects.equals(currentPath, requestedPath)) return;
+                    progress.setVisibility(View.GONE);
+                    status.setText("Ошибка обработки каталога");
+                    addEmpty("Не удалось обработать список раздач: " + safe(e.getMessage()));
+                });
+            }
+        });
+    }
+
+    private void finishCatalogLoad(String html, String requestedPath, List<Torrent> parsed) {
+        if (!java.util.Objects.equals(currentPath, requestedPath)
+                || !"browse".equals(activeFeedScreen)) return;
         lastHtml = html;
-        List<Torrent> parsed = parseTorrents(Jsoup.parse(html, client.getMirror()));
         progress.setVisibility(View.GONE);
-        torrents.clear(); torrents.addAll(parsed);
+        torrents.clear();
+        torrents.addAll(parsed);
         setCatalogStatus("Раздач", parsed.size());
+        long renderStartedAt = android.os.SystemClock.elapsedRealtime();
         renderTorrents(parsed);
+        long renderDuration = android.os.SystemClock.elapsedRealtime() - renderStartedAt;
+        long totalDuration = browsePerfStartedAtMs > 0
+                ? android.os.SystemClock.elapsedRealtime() - browsePerfStartedAtMs : -1;
+        logBrowsePerf("catalog-render", renderDuration,
+                "totalSinceTap=" + totalDuration + "ms torrents=" + parsed.size());
+        browsePerfStartedAtMs = 0L;
         if (parsed.isEmpty()) addEmpty("Страница загружена, но раздачи не найдены. Возможно, фильтр не применился.");
     }
+
     private List<Torrent> parseTorrents(Document doc) {
         List<Torrent> out = new ArrayList<>();
-
-        // On Kinozal, uploader profiles use userdetails.php?id=...
-        // A broad "details.php?id=" selector also matched those links,
-        // causing usernames to appear as separate torrent cards.
-        // Torrent titles live specifically in the "nam" table cell.
-        Elements anchors = doc.select("table.t_peer td.nam > a[href*=details.php?id=]");
-        for (Element a : anchors) {
-            String name = a.text().trim();
-            if (name.length() < 3) continue;
-
-            Element row = a.closest("tr");
-            String href = a.absUrl("href");
-            if (href.isEmpty()) href = a.attr("href");
-
-            Torrent t = new Torrent();
-            t.title = name;
-            t.href = href;
-
-            if (row != null) {
-                Elements cells = row.select("td");
-                // Kinozal columns: icon, title, comments, size, seeds, peers, uploaded, uploader.
-                t.size = cells.size() > 3 ? cells.get(3).text().trim() : "—";
-                t.seeds = cells.size() > 4 ? cells.get(4).text().trim() : "—";
-                t.leeches = cells.size() > 5 ? cells.get(5).text().trim() : "—";
-                t.uploaded = cells.size() > 6 ? cells.get(6).text().trim() : "—";
-            } else {
-                t.size = "—";
-                t.seeds = "—";
-                t.leeches = "—";
-                t.uploaded = "—";
-            }
-
-            boolean duplicate = false;
-            for (Torrent old : out) {
-                if (old.href.equals(t.href)) {
-                    duplicate = true;
-                    break;
+        java.util.HashSet<String> seenHrefs = new java.util.HashSet<>();
+        for (Element table : doc.select("table.t_peer")) {
+            for (Element row : table.getElementsByTag("tr")) {
+                Elements cells = row.children();
+                Element nameCell = null;
+                for (Element cell : cells) {
+                    if ("td".equals(cell.tagName()) && cell.hasClass("nam")) {
+                        nameCell = cell;
+                        break;
+                    }
+                }
+                if (nameCell == null) continue;
+                for (Element anchor : nameCell.children()) {
+                    if (!"a".equals(anchor.tagName())
+                            || !anchor.attr("href").contains("details.php?id=")) continue;
+                    String name = anchor.text().trim();
+                    if (name.length() < 3) continue;
+                    String href = anchor.absUrl("href");
+                    if (href.isEmpty()) href = anchor.attr("href");
+                    if (!seenHrefs.add(href)) continue;
+                    Torrent torrent = new Torrent();
+                    torrent.title = name;
+                    torrent.href = href;
+                    torrent.releaseType = normalizeReleaseType(anchor.className());
+                    torrent.size = cells.size() > 3 ? cells.get(3).text().trim() : "—";
+                    torrent.seeds = cells.size() > 4 ? cells.get(4).text().trim() : "—";
+                    torrent.leeches = cells.size() > 5 ? cells.get(5).text().trim() : "—";
+                    torrent.uploaded = cells.size() > 6 ? cells.get(6).text().trim() : "—";
+                    out.add(torrent);
                 }
             }
-            if (!duplicate) out.add(t);
         }
         return out;
     }
-
-
 
     private void setSearchSort(String key) {
         if (key.equals(searchSort)) searchSortDescending = !searchSortDescending;
@@ -2095,6 +5985,25 @@ public class MainActivity extends Activity {
         // Keep the sort controls attached: rebuilding the whole list steals DPAD
         // focus for a frame on Android TV. Only the result rows are refreshed.
         renderTorrents(torrents);
+    }
+
+    private void setLocalSort(String key) {
+        if (key.equals(localSort)) localSortDescending = !localSortDescending;
+        else {
+            localSort = key;
+            localSortDescending = true;
+        }
+        if ("local:favorites".equals(currentPath)) {
+            java.util.List<Torrent> values = new ArrayList<>(readFavorites().values());
+            java.util.Collections.reverse(values);
+            activeLocalItems = new ArrayList<>(values);
+            renderTorrents(filterLocalItems(values));
+        } else if ("local:recently-viewed".equals(currentPath)) {
+            java.util.List<Torrent> values = new ArrayList<>(readRecentlyViewed().values());
+            java.util.Collections.sort(values, (a, b) -> Long.compare(b.viewedAt, a.viewedAt));
+            activeLocalItems = new ArrayList<>(values);
+            renderTorrents(filterLocalItems(values));
+        }
     }
 
     private double sizeValue(String value) {
@@ -2162,6 +6071,52 @@ public class MainActivity extends Activity {
             searchSortBar = null;
             sortDateButton = sortSizeButton = sortSeedsButton = null;
         }
+        boolean recentList = "local:recently-viewed".equals(currentPath);
+        boolean favoritesList = "local:favorites".equals(currentPath);
+        boolean localManageList = recentList || favoritesList;
+        if (localManageList) {
+            LinearLayout localSortBar = new LinearLayout(this);
+            localSortBar.setGravity(Gravity.CENTER_VERTICAL);
+            localSortBar.setPadding(dp(8), dp(4), dp(8), dp(8));
+            Button localDateButton = button("");
+            Button localSizeButton = button("");
+            Button localSeedsButton = button("");
+            Button[] localSortButtons = {localDateButton, localSizeButton, localSeedsButton};
+            String[] localSortKeys = recentList
+                    ? new String[]{"viewed", "size", "seeds"}
+                    : new String[]{"date", "size", "seeds"};
+            String[] localSortTitles = recentList
+                    ? new String[]{"Просмотр", "Размер", "Сиды"}
+                    : new String[]{"Дата", "Размер", "Сиды"};
+            for (int i = 0; i < localSortButtons.length; i++) {
+                final String key = localSortKeys[i];
+                Button b = localSortButtons[i];
+                b.setText(localSortTitles[i] + (key.equals(localSort)
+                        ? (localSortDescending ? " ↓" : " ↑") : ""));
+                LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(0, dp(38), 1f);
+                p.rightMargin = dp(5);
+                localSortBar.addView(b, p);
+                b.setOnClickListener(v -> setLocalSort(key));
+            }
+            list.addView(localSortBar);
+            if (recentList) {
+                java.util.Collections.sort(displayItems, (a, b) -> Long.compare(a.viewedAt, b.viewedAt));
+                if (localSortDescending) java.util.Collections.reverse(displayItems);
+            } else if (!"recent".equals(localSort)) {
+                java.util.Collections.sort(displayItems, (a, b) -> {
+                    int cmp;
+                    if ("size".equals(localSort)) cmp = Double.compare(sizeValue(a.size), sizeValue(b.size));
+                    else if ("seeds".equals(localSort)) cmp = Integer.compare(parseInt(a.seeds), parseInt(b.seeds));
+                    else cmp = dateValue(a.uploaded).compareTo(dateValue(b.uploaded));
+                    return localSortDescending ? -cmp : cmp;
+                });
+            }
+        }
+        if (recentList) addHistoryClearButton();
+        if (favoritesList) addFavoritesClearButton();
+
+        LinearLayout headerRow = new LinearLayout(this);
+        headerRow.setGravity(Gravity.CENTER_VERTICAL);
         LinearLayout header = new LinearLayout(this);
         header.setGravity(Gravity.CENTER_VERTICAL);
         header.setPadding(dp(14), dp(8), dp(14), dp(8));
@@ -2170,8 +6125,7 @@ public class MainActivity extends Activity {
         TextView sizeHeader = text("РАЗМЕР", 11, TEAL, true);
         sizeHeader.setGravity(Gravity.CENTER);
         header.addView(sizeHeader, new LinearLayout.LayoutParams(dp(85), -2));
-        TextView dateHeader = text("ДАТА", 11, TEAL, true);
-        dateHeader.setGravity(Gravity.CENTER);
+        TextView dateHeader = text(recentList ? "ПРОСМОТРЕНО" : "ДАТА", 11, TEAL, true);        dateHeader.setGravity(Gravity.CENTER);
         header.addView(dateHeader, new LinearLayout.LayoutParams(dp(96), -2));
         TextView seedsHeader = text("СИДЫ", 11, TEAL, true);
         seedsHeader.setGravity(Gravity.CENTER);
@@ -2179,35 +6133,118 @@ public class MainActivity extends Activity {
         TextView leechesHeader = text("ЛИЧИ", 11, TEAL, true);
         leechesHeader.setGravity(Gravity.CENTER);
         header.addView(leechesHeader, new LinearLayout.LayoutParams(dp(55), -2));
-        list.addView(header);
+        headerRow.addView(header, new LinearLayout.LayoutParams(0, -2, 1f));
+        if (localManageList) headerRow.addView(new View(this), new LinearLayout.LayoutParams(dp(52), dp(1)));
+        list.addView(headerRow);
 
         for (Torrent t : displayItems) {
-            LinearLayout row = new LinearLayout(this); row.setGravity(Gravity.CENTER_VERTICAL);
-            row.setPadding(dp(14), dp(8), dp(14), dp(8)); row.setBackground(shape(PANEL, 0));
-            LinearLayout.LayoutParams rp = new LinearLayout.LayoutParams(-1, dp(66)); rp.bottomMargin = dp(5);
-            TextView name = text(t.title, 16, Color.WHITE, true); name.setMaxLines(2);
-            row.addView(name, new LinearLayout.LayoutParams(0, -2, 1f));
-            TextView size = text(t.size, 13, GOLD, false);
+            LinearLayout card = new LinearLayout(this);
+            card.setGravity(Gravity.CENTER_VERTICAL);
+            card.setPadding(dp(14), dp(8), dp(14), dp(8));
+            card.setBackground(shape(PANEL, 0));
+            LinearLayout.LayoutParams cardParams = new LinearLayout.LayoutParams(0, dp(66), 1f);
+            TextView name = text(t.title, 16, releaseTypeColor(t.releaseType), true); name.setMaxLines(2);
+            card.addView(name, new LinearLayout.LayoutParams(0, -2, 1f));
+            TextView size = text(displayTorrentValue(t.size), 13, GOLD, false);
             size.setGravity(Gravity.CENTER);
-            row.addView(size, new LinearLayout.LayoutParams(dp(85), -2));
-            TextView uploaded = text(t.uploaded == null ? "—" : t.uploaded, 12, Color.rgb(170, 205, 180), false);
+            card.addView(size, new LinearLayout.LayoutParams(dp(85), -2));
+            TextView uploaded = text(recentList ? formatViewedAt(t.viewedAt)
+                    : displayTorrentValue(t.uploaded), 12, Color.rgb(170, 205, 180), false);
             uploaded.setGravity(Gravity.CENTER);
             uploaded.setMaxLines(2);
-            row.addView(uploaded, new LinearLayout.LayoutParams(dp(96), -2));
-            TextView seeds = text(t.seeds, 13, TEAL, true);
+            card.addView(uploaded, new LinearLayout.LayoutParams(dp(96), -2));
+            TextView seeds = text(displayTorrentValue(t.seeds), 13, TEAL, true);
             seeds.setGravity(Gravity.CENTER);
-            row.addView(seeds, new LinearLayout.LayoutParams(dp(55), -2));
-            TextView leeches = text(t.leeches, 13, RED, true);
+            card.addView(seeds, new LinearLayout.LayoutParams(dp(55), -2));
+            TextView leeches = text(displayTorrentValue(t.leeches), 13, RED, true);
             leeches.setGravity(Gravity.CENTER);
-            row.addView(leeches, new LinearLayout.LayoutParams(dp(55), -2));
-            row.setFocusable(true); row.setOnFocusChangeListener((v, f) -> v.setBackground(shape(f ? Color.rgb(57, 68, 70) : PANEL, f ? GOLD : 0)));
-            row.setOnClickListener(v -> showTorrent(t)); list.addView(row, rp);
+            card.addView(leeches, new LinearLayout.LayoutParams(dp(55), -2));
+            card.setFocusable(true);
+            final Runnable[] prefetchTask = {null};
+            card.setOnFocusChangeListener((v, focused) -> {
+                v.setBackground(shape(focused ? Color.rgb(57, 68, 70) : PANEL, focused ? GOLD : 0));
+                if (prefetchTask[0] != null) browserHandler.removeCallbacks(prefetchTask[0]);
+                if (focused) {
+                    // Do not start WebView prefetch while the user is moving
+                    // through the list. Wait until this row remains focused.
+                    prefetchTask[0] = () -> {
+                        if (card.hasFocus() && card.isAttachedToWindow()) {
+                            prefetchTorrentDetails(t);
+                        }
+                    };
+                    browserHandler.postDelayed(prefetchTask[0], 850);
+                }
+            });
+            card.setOnClickListener(v -> showTorrent(t));
+
+            LinearLayout itemRow = new LinearLayout(this);
+            itemRow.setGravity(Gravity.CENTER_VERTICAL);
+            LinearLayout.LayoutParams itemParams = new LinearLayout.LayoutParams(-1, dp(66));
+            itemParams.bottomMargin = dp(5);
+            itemRow.addView(card, cardParams);
+            if (localManageList) {
+                View delete = new View(this) {
+                    private final android.graphics.Paint paint = new android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG);
+                    @Override protected void onDraw(android.graphics.Canvas canvas) {
+                        super.onDraw(canvas);
+                        paint.setColor(GOLD);
+                        paint.setStyle(android.graphics.Paint.Style.STROKE);
+                        paint.setStrokeWidth(dp(3.2f));
+                        paint.setStrokeCap(android.graphics.Paint.Cap.ROUND);
+                        paint.setStrokeJoin(android.graphics.Paint.Join.ROUND);
+                        float cx = getWidth() / 2f;
+                        canvas.save();
+                        canvas.scale(0.70f, 0.70f, cx, getHeight() / 2f);
+                        float top = dp(7), bottom = getHeight() - dp(7);
+                        float w = dp(29), left = cx - w / 2f, right = cx + w / 2f;
+                        canvas.drawRoundRect(cx - dp(8), top, cx + dp(8), top + dp(7), dp(3), dp(3), paint);
+                        canvas.drawRoundRect(left - dp(5), top + dp(10), right + dp(5), top + dp(18), dp(7), dp(7), paint);
+                        android.graphics.Path body = new android.graphics.Path();
+                        body.moveTo(left - dp(2), top + dp(18));
+                        body.lineTo(left + dp(1), bottom - dp(5));
+                        body.quadTo(left + dp(2), bottom, left + dp(8), bottom);
+                        body.lineTo(right - dp(8), bottom);
+                        body.quadTo(right - dp(2), bottom, right - dp(1), bottom - dp(5));
+                        body.lineTo(right + dp(2), top + dp(18));
+                        canvas.drawPath(body, paint);
+                        for (int i = -1; i <= 1; i++) {
+                            float x = cx + i * dp(8);
+                            canvas.drawLine(x, top + dp(28), x, bottom - dp(5), paint);
+                        }
+                        canvas.restore();
+                    }
+                };
+                delete.setContentDescription(recentList ? "Удалить из истории" : "Удалить из избранного");
+                delete.setFocusable(true);
+                delete.setClickable(true);
+                delete.setOnFocusChangeListener((v, focused) ->
+                        v.setBackground(shape(focused ? Color.rgb(65, 72, 73) : Color.TRANSPARENT,
+                                focused ? GOLD : 0)));
+                delete.setOnClickListener(v -> {
+                    if (recentList) removeRecentlyViewed(t.href);
+                    else removeFavorite(t.href);
+                });
+                LinearLayout.LayoutParams deleteParams = new LinearLayout.LayoutParams(dp(52), dp(54));
+                deleteParams.leftMargin = dp(10);
+                itemRow.addView(delete, deleteParams);
+            }
+            list.addView(itemRow, itemParams);
         }
-        LinearLayout pages = new LinearLayout(this); pages.setGravity(Gravity.RIGHT);
-        Button prev = button("← Назад"); Button next = button("Далее →");
-        pages.addView(prev); pages.addView(next);
-        LinearLayout.LayoutParams pp = new LinearLayout.LayoutParams(-1, dp(52)); pp.topMargin = dp(10); list.addView(pages, pp);
-        prev.setOnClickListener(v -> changePage(-1)); next.setOnClickListener(v -> changePage(1));
+        if (!recentList) {
+            LinearLayout pages = new LinearLayout(this); pages.setGravity(Gravity.RIGHT);
+            Button prev = button("← Назад"); Button next = button("Далее →");
+            LinearLayout.LayoutParams prevParams = new LinearLayout.LayoutParams(-2, -1);
+            prevParams.rightMargin = dp(10);
+            pages.addView(prev, prevParams);
+            pages.addView(next, new LinearLayout.LayoutParams(-2, -1));
+            LinearLayout.LayoutParams pp = new LinearLayout.LayoutParams(-1, dp(52)); pp.topMargin = dp(10); list.addView(pages, pp);
+            if (favoritesList) {
+                prev.setOnClickListener(v -> showMessage("В избранном отображаются все сохранённые раздачи."));
+                next.setOnClickListener(v -> showMessage("В избранном отображаются все сохранённые раздачи."));
+            } else {
+                prev.setOnClickListener(v -> changePage(-1)); next.setOnClickListener(v -> changePage(1));
+            }
+        }
         animateContentTransition(list);
     }
 
@@ -2288,17 +6325,422 @@ public class MainActivity extends Activity {
 
     @Override protected void onActivityResult(int requestCode, int resultCode, android.content.Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
-        if (requestCode != REQUEST_VOICE_SEARCH || resultCode != RESULT_OK || data == null) return;
-        java.util.ArrayList<String> results = data.getStringArrayListExtra(
-                android.speech.RecognizerIntent.EXTRA_RESULTS);
-        if (results != null && !results.isEmpty()) {
-            String recognized = results.get(0);
-            if (recognized != null && !recognized.trim().isEmpty()) {
-                search.setText(recognized.trim());
-                search.setSelection(search.length());
-                submitSearch();
+        TvHomeChannels.onBrowsableRequestResult(this, requestCode);
+
+        if (requestCode == REQUEST_VOICE_SEARCH) {
+            if (resultCode != RESULT_OK || data == null) return;
+            java.util.ArrayList<String> results = data.getStringArrayListExtra(
+                    android.speech.RecognizerIntent.EXTRA_RESULTS);
+            if (results != null && !results.isEmpty()) {
+                String recognized = results.get(0);
+                if (recognized != null && !recognized.trim().isEmpty() && search != null) {
+                    String query = recognized.trim();
+                    search.setText(query);
+                    search.setSelection(search.length());
+                    submitSearch();
+                }
+            }
+            return;
+        }
+
+        if (resultCode != RESULT_OK || data == null || data.getData() == null) return;
+        if (requestCode == REQUEST_BACKUP_EXPORT) {
+            writeBackupToUri(data.getData());
+            return;
+        }
+        if (requestCode == REQUEST_FEED_DIAGNOSTICS_EXPORT) {
+            writeFeedDiagnosticsToUri(data.getData());
+            return;
+        }
+        if (requestCode == REQUEST_TORRENT_SAVE) {
+            writeTorrentToUri(data.getData());
+            return;
+        }
+        if (requestCode == REQUEST_BACKUP_IMPORT) {
+            new AlertDialog.Builder(this).setTitle("Восстановить резервную копию?")
+                    .setMessage("Избранное, история и сохранённые настройки будут заменены данными из файла. Текущие данные рекомендуется предварительно сохранить.")
+                    .setNegativeButton("Отмена", null)
+                    .setPositiveButton("Восстановить", (dialog, which) -> restoreBackupFromUri(data.getData()))
+                    .show();
+        }
+    }
+
+    private static class FilterOption {
+        final String label;
+        final String value;
+        FilterOption(String label, String value) { this.label = label; this.value = value; }
+        @Override public String toString() { return label; }
+    }
+
+    private android.widget.Spinner addFilterSpinner(LinearLayout parent, String label,
+            FilterOption[] options, int selectedIndex) {
+        TextView caption = text(label, 13, GOLD, true);
+        LinearLayout.LayoutParams captionParams = new LinearLayout.LayoutParams(-1, -2);
+        captionParams.topMargin = dp(9);
+        captionParams.bottomMargin = dp(3);
+        parent.addView(caption, captionParams);
+        android.widget.Spinner spinner = new android.widget.Spinner(this);
+        ArrayAdapter<FilterOption> adapter = new ArrayAdapter<>(this,
+                android.R.layout.simple_spinner_item, options);
+        adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+        spinner.setAdapter(adapter);
+        spinner.setSelection(Math.max(0, Math.min(selectedIndex, options.length - 1)));
+        spinner.setFocusable(true);
+        spinner.setFocusableInTouchMode(false);
+        parent.addView(spinner, new LinearLayout.LayoutParams(-1, dp(43)));
+        return spinner;
+    }
+
+    private void showTorrentFilter() {
+        final FilterOption[] categories = {
+            new FilterOption("Поиск по разделам", "0"),
+            new FilterOption("Все сериалы", "1001"),
+            new FilterOption("Сериал - Русский", "45"),
+            new FilterOption("Сериал - Буржуйский", "46"),
+            new FilterOption("Все фильмы", "1002"),
+            new FilterOption("Кино - Комедия", "8"),
+            new FilterOption("Кино - Боевик / Военный", "6"),
+            new FilterOption("Кино - Триллер / Детектив", "15"),
+            new FilterOption("Кино - Драма", "17"),
+            new FilterOption("Кино - Мелодрама", "35"),
+            new FilterOption("Кино - Индийское", "39"),
+            new FilterOption("Кино - Фантастика", "13"),
+            new FilterOption("Кино - Фэнтези", "14"),
+            new FilterOption("Кино - Ужас / Мистика", "24"),
+            new FilterOption("Кино - Приключения", "11"),
+            new FilterOption("Кино - Наше Кино", "10"),
+            new FilterOption("Кино - Исторический", "9"),
+            new FilterOption("Кино - Азиатский", "47"),
+            new FilterOption("Кино - Документальный", "18"),
+            new FilterOption("Кино - Спорт", "37"),
+            new FilterOption("Кино - Детский / Семейный", "12"),
+            new FilterOption("Кино - Классика", "7"),
+            new FilterOption("Кино - Концерт", "48"),
+            new FilterOption("Кино - Передачи / ТВ-шоу", "49"),
+            new FilterOption("Кино - ТВ-шоу Мир", "50"),
+            new FilterOption("Кино - Театр, Опера, Балет", "38"),
+            new FilterOption("Кино - Эротика", "16"),
+            new FilterOption("Все мульты", "1003"),
+            new FilterOption("Мульт - Буржуйский", "21"),
+            new FilterOption("Мульт - Русский", "22"),
+            new FilterOption("Мульт - Аниме", "20"),
+            new FilterOption("Вся музыка", "1004"),
+            new FilterOption("Музыка - Буржуйская", "3"),
+            new FilterOption("Музыка - Русская", "4"),
+            new FilterOption("Музыка - Сборники", "5"),
+            new FilterOption("Музыка - Классическая", "42"),
+            new FilterOption("Шоу, концерты, спорт", "1006"),
+            new FilterOption("Другое - АудиоКниги", "2"),
+            new FilterOption("Другое - Видеоклипы", "1"),
+            new FilterOption("Другое - Игры", "23"),
+            new FilterOption("Другое - Программы", "32"),
+            new FilterOption("Другое - Дизайн / Графика", "40"),
+            new FilterOption("Другое - Библиотека", "41")
+        };
+        final FilterOption[] formats = {
+            new FilterOption("Все форматы", "0"),
+            new FilterOption("Рипы HD (1080/720)", "3"),
+            new FilterOption("1080", "3001"),
+            new FilterOption("720", "3002"),
+            new FilterOption("Рипы DVD и BD (HD)", "1"),
+            new FilterOption("HD Blu-Ray и Remux", "4"),
+            new FilterOption("DVD-5 и DVD-9", "2"),
+            new FilterOption("Рипы TV", "5"),
+            new FilterOption("3D", "6"),
+            new FilterOption("4K", "7"),
+            new FilterOption("Lossless", "51"),
+            new FilterOption("MP3 и AAC", "52"),
+            new FilterOption("Компьютер", "61"),
+            new FilterOption("Приставка", "62"),
+            new FilterOption("Мобильные устройства", "63"),
+            new FilterOption("Навигация", "64")
+        };
+        final FilterOption[] periods = {
+            new FilterOption("Не выбран", "0"),
+            new FilterOption("Сегодня", "1"),
+            new FilterOption("Вчера", "2"),
+            new FilterOption("За 3 дня", "3"),
+            new FilterOption("За неделю", "4"),
+            new FilterOption("За месяц", "5"),            new FilterOption("Менее 3 ГБ", "6"),
+            new FilterOption("3–10 ГБ", "7"),
+            new FilterOption("10–50 ГБ", "8"),
+            new FilterOption("50–250 ГБ", "9"),
+            new FilterOption("250 ГБ и выше", "10"),
+            new FilterOption("Золотая раздача", "11"),
+            new FilterOption("Серебряная раздача", "12")
+        };
+        final FilterOption[] searchIn = {
+            new FilterOption("В названии", "0"),
+            new FilterOption("Персона", "1"),
+            new FilterOption("Жанры", "2"),
+            new FilterOption("Формула", "3")
+        };
+        final FilterOption[] sortBy = {
+            new FilterOption("Залит", "0"), new FilterOption("Сидам", "1"),
+            new FilterOption("Пирам", "2"), new FilterOption("Размер", "3"),
+            new FilterOption("Комментарии", "4"), new FilterOption("Скачали", "5"),
+            new FilterOption("Последний комментарий", "6")
+        };
+        final FilterOption[] direction = {
+            new FilterOption("По убыванию", "0"), new FilterOption("По возрастанию", "1")
+        };
+        FilterOption[] years = new FilterOption[128];
+        years[0] = new FilterOption("Все года", "0");
+        for (int i = 1; i < years.length; i++) {
+            int year = 2026 - (i - 1);
+            years[i] = new FilterOption(String.valueOf(year), String.valueOf(year));
+        }
+
+        ScrollView scroll = new ScrollView(this);
+        scroll.setFillViewport(false);
+        scroll.setVerticalScrollBarEnabled(true);
+        LinearLayout panel = new LinearLayout(this);
+        panel.setOrientation(LinearLayout.VERTICAL);
+        panel.setPadding(dp(18), dp(8), dp(18), dp(12));
+        panel.setBackgroundColor(BG);
+        scroll.addView(panel);
+        TextView searchLabel = text("Поисковый запрос", 13, GOLD, true);
+        panel.addView(searchLabel);
+        EditText query = new EditText(this);
+        query.setSingleLine(true);
+        query.setTextColor(Color.WHITE);
+        query.setHintTextColor(TEAL);
+        query.setHint("Название раздачи");
+        query.setText(search == null ? "" : search.getText().toString());
+        query.setTextSize(fontSize(16));
+        query.setSelectAllOnFocus(false);
+        query.setImeOptions(EditorInfo.IME_ACTION_DONE);
+        query.setBackground(shape(PANEL, TEAL));
+        query.setPadding(dp(10), 0, dp(10), 0);
+        LinearLayout.LayoutParams queryParams = new LinearLayout.LayoutParams(-1, dp(46));
+        queryParams.bottomMargin = dp(5);
+        panel.addView(query, queryParams);
+
+        // Saved search templates are stored locally on this device.
+        android.widget.Spinner presetList = new android.widget.Spinner(this);
+        presetList.setPrompt("Список пресетов");
+        List<String> presetLabels = new ArrayList<>();
+        List<Integer> presetIndexes = new ArrayList<>();
+        final org.json.JSONArray storedPresets = loadAdvancedSearchPresets();
+        for (int i = 0; i < storedPresets.length(); i++) {
+            try {
+                presetLabels.add(storedPresets.getJSONObject(i).optString("name", "Пресет " + (i + 1)));
+                presetIndexes.add(i);
+            } catch (Exception ignored) { }
+        }
+        presetLabels.add(0, "Список пресетов");
+        ArrayAdapter<String> presetAdapter = new ArrayAdapter<>(this,
+                android.R.layout.simple_spinner_item, presetLabels);
+        presetAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+        presetList.setAdapter(presetAdapter);
+        presetList.setBackground(shape(PANEL, TEAL));
+        panel.addView(presetList, new LinearLayout.LayoutParams(-1, dp(43)));
+
+        CheckBox remember = new CheckBox(this);
+        remember.setText("Запомнить параметры фильтра");
+        remember.setTextColor(Color.WHITE);
+        remember.setButtonTintList(android.content.res.ColorStateList.valueOf(GOLD));
+        remember.setChecked(getSharedPreferences(PREFS, MODE_PRIVATE)
+                .getBoolean("advanced_search_remember", true));
+        panel.addView(remember);
+
+        Button addPreset = button("+  Добавить пресет");
+        addPreset.setTextSize(fontSize(14));
+        panel.addView(addPreset, new LinearLayout.LayoutParams(-1, dp(42)));
+        Button deletePreset = button("Удалить выбранный пресет");
+        deletePreset.setTextSize(fontSize(13));
+        LinearLayout.LayoutParams deletePresetParams = new LinearLayout.LayoutParams(-1, dp(40));
+        deletePresetParams.topMargin = dp(5);
+        panel.addView(deletePreset, deletePresetParams);
+
+        android.widget.Spinner where = addFilterSpinner(panel, "Где искать", searchIn, 0);
+        android.widget.Spinner category = addFilterSpinner(panel, "Раздел", categories, 0);
+        android.widget.Spinner format = addFilterSpinner(panel, "Формат", formats, 0);
+        android.widget.Spinner year = addFilterSpinner(panel, "Год выхода", years, 0);
+        android.widget.Spinner period = addFilterSpinner(panel, "Фильтр поиска", periods, 0);
+        android.widget.Spinner sort = addFilterSpinner(panel, "Сортировка результата", sortBy, 0);
+        android.widget.Spinner order = addFilterSpinner(panel, "Направление сортировки", direction, 0);
+
+        android.widget.Spinner[] filterSpinners = {where, category, format, year, period, sort, order};
+        FilterOption[][] filterOptions = {searchIn, categories, formats, years, periods, sortBy, direction};
+        java.util.function.Consumer<org.json.JSONObject> restorePreset = preset -> {
+            query.setText(preset.optString("q", ""));
+            String[] keys = {"g", "c", "v", "d", "w", "t", "f"};
+            for (int i = 0; i < keys.length; i++) {
+                String value = preset.optString(keys[i], "0");
+                for (int j = 0; j < filterOptions[i].length; j++) {
+                    if (value.equals(filterOptions[i][j].value)) {
+                        filterSpinners[i].setSelection(j);
+                        break;
+                    }
+                }
+            }
+        };
+        if (remember.isChecked()) {
+            try {
+                String last = getSharedPreferences(PREFS, MODE_PRIVATE)
+                        .getString("advanced_search_last", "");
+                if (!last.isEmpty()) restorePreset.accept(new org.json.JSONObject(last));
+            } catch (Exception ignored) { }
+        }
+        presetList.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener() {
+            @Override public void onNothingSelected(android.widget.AdapterView<?> parent) { }
+            @Override public void onItemSelected(android.widget.AdapterView<?> parent, View view,
+                    int position, long id) {
+                if (position <= 0) return;
+                try {
+                    int storedIndex = presetIndexes.get(position - 1);
+                    restorePreset.accept(storedPresets.getJSONObject(storedIndex));
+                } catch (Exception e) { showMessage("Не удалось открыть пресет поиска."); }
+            }
+        });
+        addPreset.setOnClickListener(v -> {
+            EditText nameInput = new EditText(this);
+            nameInput.setSingleLine(true);
+            nameInput.setHint("Название пресета");
+            nameInput.setTextColor(Color.WHITE);
+            nameInput.setHintTextColor(TEAL);
+            nameInput.setBackground(shape(PANEL, TEAL));
+            new AlertDialog.Builder(this).setTitle("Новый пресет")
+                    .setView(nameInput).setNegativeButton("Отмена", null)
+                    .setPositiveButton("Сохранить", (d, whichButton) -> {
+                        String enteredName = nameInput.getText().toString().trim();
+                        final String name = enteredName.isEmpty()
+                                ? "Поиск " + (storedPresets.length() + 1) : enteredName;
+                        try {
+                            org.json.JSONObject preset = new org.json.JSONObject();
+                            preset.put("name", name);
+                            preset.put("q", query.getText().toString().trim());
+                            String[] keys = {"g", "c", "v", "d", "w", "t", "f"};
+                            for (int i = 0; i < keys.length; i++)
+                                preset.put(keys[i], ((FilterOption) filterSpinners[i].getSelectedItem()).value);
+                            storedPresets.put(preset);
+                            presetIndexes.add(storedPresets.length() - 1);
+                            presetAdapter.add(name);
+                            presetAdapter.notifyDataSetChanged();
+                            if (!saveAdvancedSearchPresets(storedPresets))
+                                throw new IllegalStateException("Не удалось записать пресеты на диск");
+                            presetList.setSelection(presetAdapter.getCount() - 1);
+                            showMessage("Пресет «" + name + "» сохранён");
+                        } catch (Exception e) { showMessage("Не удалось сохранить пресет."); }
+                    }).show();
+        });
+        deletePreset.setOnClickListener(v -> {
+            int selectedPosition = presetList.getSelectedItemPosition();
+            if (selectedPosition <= 0 || selectedPosition > presetIndexes.size()) {
+                showMessage("Сначала выберите пресет для удаления");
+                return;
+            }
+            int storedIndex = presetIndexes.get(selectedPosition - 1);
+            String presetName = presetLabels.get(selectedPosition);
+            new AlertDialog.Builder(this).setTitle("Удалить пресет?")
+                    .setMessage("Пресет «" + presetName + "» будет удалён.")
+                    .setNegativeButton("Отмена", null)
+                    .setPositiveButton("Удалить", (d, which) -> {
+                        try {
+                            storedPresets.remove(storedIndex);
+                            presetIndexes.clear();
+                            presetLabels.clear();
+                            presetLabels.add("Список пресетов");
+                            for (int i = 0; i < storedPresets.length(); i++) {
+                                presetLabels.add(storedPresets.getJSONObject(i)
+                                        .optString("name", "Пресет " + (i + 1)));
+                                presetIndexes.add(i);
+                            }
+                            presetAdapter.notifyDataSetChanged();
+                            if (!saveAdvancedSearchPresets(storedPresets))
+                                throw new IllegalStateException("Не удалось записать пресеты на диск");
+                            presetList.setSelection(0);
+                            showMessage("Пресет удалён");
+                        } catch (Exception e) { showMessage("Не удалось удалить пресет."); }
+                    }).show();
+        });
+
+        AlertDialog dialog = new AlertDialog.Builder(this)
+                .setTitle("Фильтр раздач")
+                .setView(scroll)
+                .setNegativeButton("Отмена", null)
+                .setNeutralButton("Сбросить", null)
+                .setPositiveButton("Найти", null)
+                .create();
+        dialog.setOnShowListener(ignored -> {
+            Button apply = dialog.getButton(AlertDialog.BUTTON_POSITIVE);
+            apply.setOnClickListener(v -> {
+                String q = query.getText().toString().trim();
+                try {
+                    StringBuilder path = new StringBuilder("browse.php?");
+                    appendFilterParam(path, "s", q);
+                    appendFilterParam(path, "g", ((FilterOption) where.getSelectedItem()).value);
+                    appendFilterParam(path, "c", ((FilterOption) category.getSelectedItem()).value);
+                    appendFilterParam(path, "v", ((FilterOption) format.getSelectedItem()).value);
+                    appendFilterParam(path, "d", ((FilterOption) year.getSelectedItem()).value);
+                    appendFilterParam(path, "w", ((FilterOption) period.getSelectedItem()).value);
+                    appendFilterParam(path, "t", ((FilterOption) sort.getSelectedItem()).value);
+                    appendFilterParam(path, "f", ((FilterOption) order.getSelectedItem()).value);
+                    getSharedPreferences(PREFS, MODE_PRIVATE).edit()
+                            .putBoolean("advanced_search_remember", remember.isChecked()).apply();
+                    if (remember.isChecked()) {
+                        org.json.JSONObject last = new org.json.JSONObject();
+                        last.put("q", q);
+                        String[] keys = {"g", "c", "v", "d", "w", "t", "f"};
+                        for (int i = 0; i < keys.length; i++)
+                            last.put(keys[i], ((FilterOption) filterSpinners[i].getSelectedItem()).value);
+                        getSharedPreferences(PREFS, MODE_PRIVATE).edit()
+                                .putString("advanced_search_last", last.toString()).apply();
+                    }
+                    if (search != null) search.setText(q);
+                    page = 0;
+                    String title = q.isEmpty() ? "Фильтр раздач" : "Поиск: " + q;
+                    load(path.toString(), title);
+                    dialog.dismiss();
+                } catch (Exception e) {
+                    showMessage("Не удалось сформировать параметры поиска: " + safe(e.getMessage()));
+                }
+            });
+            dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener(v -> {
+                query.setText("");
+                where.setSelection(0); category.setSelection(0); format.setSelection(0);
+                year.setSelection(0); period.setSelection(0); sort.setSelection(0); order.setSelection(0);
+            });
+        });
+        dialog.show();
+    }
+
+    private org.json.JSONArray loadAdvancedSearchPresets() {
+        android.content.SharedPreferences presetPrefs =
+                getSharedPreferences("kinozal_search_presets", MODE_PRIVATE);
+        String raw = presetPrefs.getString("presets", null);
+        if (raw == null) {
+            // One-time migration from the original settings file used by earlier builds.
+            raw = getSharedPreferences(PREFS, MODE_PRIVATE)
+                    .getString("advanced_search_presets", "[]");
+            try {
+                org.json.JSONArray migrated = new org.json.JSONArray(raw);
+                presetPrefs.edit().putString("presets", migrated.toString()).commit();
+                return migrated;
+            } catch (Exception e) {
+                android.util.Log.w("KinozalPresets", "Legacy presets could not be parsed", e);
+                return new org.json.JSONArray();
             }
         }
+        try {
+            return new org.json.JSONArray(raw);
+        } catch (Exception e) {
+            android.util.Log.e("KinozalPresets", "Saved presets could not be parsed", e);
+            return new org.json.JSONArray();
+        }
+    }
+
+    private boolean saveAdvancedSearchPresets(org.json.JSONArray presets) {
+        if (presets == null) return false;
+        return getSharedPreferences("kinozal_search_presets", MODE_PRIVATE).edit()
+                .putString("presets", presets.toString()).commit();
+    }
+
+    private void appendFilterParam(StringBuilder path, String key, String value) throws Exception {
+        if (path.length() > "browse.php?".length()) path.append('&');
+        path.append(URLEncoder.encode(key, "UTF-8")).append('=')
+                .append(URLEncoder.encode(value == null ? "" : value, "UTF-8"));
     }
 
     private void submitSearch() {
@@ -2319,7 +6761,7 @@ public class MainActivity extends Activity {
             return;
         }
         progress.setVisibility(View.VISIBLE);
-        io.execute(() -> {
+        executeSafely(io, () -> {
             try {
                 Document d = Jsoup.parse(cached, client.getMirror() + "/");
                 List<Category> found = new ArrayList<>();
@@ -2451,9 +6893,23 @@ public class MainActivity extends Activity {
      */
     private void openCloudflareWindow() {
         final String base = client.getMirror();
-        final String allowedHost;
-        try { allowedHost = java.net.URI.create(base).getHost().toLowerCase(java.util.Locale.ROOT); }
-        catch (Exception e) { showMessage("Некорректный адрес зеркала."); return; }
+        final java.util.Set<String> allowedHosts = new java.util.HashSet<>();
+        try {
+            for (String mirrorUrl : MIRRORS) {
+                String host = java.net.URI.create(mirrorUrl).getHost();
+                if (host != null) {
+                    host = host.toLowerCase(java.util.Locale.ROOT);
+                    allowedHosts.add(host);
+                    allowedHosts.add("www." + host);
+                }
+            }
+            String selectedHost = java.net.URI.create(base).getHost();
+            if (selectedHost != null) {
+                selectedHost = selectedHost.toLowerCase(java.util.Locale.ROOT);
+                allowedHosts.add(selectedHost);
+                allowedHosts.add("www." + selectedHost);
+            }
+        } catch (Exception e) { showMessage("Некорректный адрес зеркала."); return; }
 
         LinearLayout panel = new LinearLayout(this);
         panel.setOrientation(LinearLayout.VERTICAL);
@@ -2491,6 +6947,8 @@ public class MainActivity extends Activity {
         final boolean[] textEntryOpen = {false};
         final String[] submittedLogin = {null};
         final String[] submittedPassword = {null};
+        final boolean[] loginVerified = {false};
+        final String[] loginVerificationDetail = {"Ожидается подтверждение входа на Kinozal."};
 
         String[] saved = client.getSavedCredentials();
         EditText loginField = new EditText(this);
@@ -2527,17 +6985,21 @@ public class MainActivity extends Activity {
         web.setWebViewClient(new WebViewClient() {
             private boolean allowed(Uri uri) {
                 String host = uri == null ? null : uri.getHost();
-                return host != null && host.equalsIgnoreCase(allowedHost);
+                if (host == null) return false;
+                host = host.toLowerCase(java.util.Locale.ROOT);
+                return allowedHosts.contains(host);
             }
             @Override public boolean shouldOverrideUrlLoading(WebView view, String url) {
-                if (allowed(Uri.parse(url))) return false;
+                try {
+                    if (allowed(Uri.parse(url))) return false;
+                } catch (Exception ignored) { }
                 showMessage("Переход на посторонний сайт заблокирован.");
                 return true;
             }
             @Override public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
                 if (!request.isForMainFrame()) return false;
                 if (allowed(request.getUrl())) return false;
-                showMessage("Рекламный переход заблокирован.");
+                showMessage("Переход на посторонний сайт заблокирован.");
                 return true;
             }
             @Override public void onPageFinished(WebView view, String url) {
@@ -2569,13 +7031,30 @@ public class MainActivity extends Activity {
                         + "var f=document.querySelector('iframe[title*=Widget],iframe[title*=challenge],#challenge-form iframe');"
                         + "if(f){f.setAttribute('tabindex','0');f.focus();}"
                         + "})();", null);
-                String cookie = browserCookies.getCookie(base);
-                if (cookie != null && !cookie.isEmpty()) {
-                    try {
-                        client.importBrowserCookies(cookie);
-                        client.saveBrowserCookies(cookie);
-                    } catch (Exception ignored) { }
-                }
+                view.evaluateJavascript("(function(){"
+                        + "var u=(location.href||'').toLowerCase();"
+                        + "var p=!!document.querySelector('form input[type=password]');"
+                        + "if(p||u.indexOf('login.php')>=0||u.indexOf('takelogin.php')>=0)return 'LOGIN_REQUIRED';"
+                        + "var links=[].slice.call(document.querySelectorAll('a'));"
+                        + "var logout=links.some(function(a){var t=(a.innerText||a.textContent||'').trim().toLowerCase();"
+                        + "var h=(a.getAttribute('href')||'').toLowerCase();"
+                        + "return /выход|выйти|logout|logoff/.test(t+' '+h);});"
+                        + "var body=(document.body&&document.body.innerText||'').toLowerCase();"
+                        + "if(!logout&&/личный кабинет|мой профиль|редактировать профиль/.test(body))logout=true;"
+                        + "return logout?'AUTHENTICATED':'NO_LOGIN_FORM';})()",
+                        verification -> {
+                    String result = verification == null ? "" : verification.replace("\"", "");
+                    if (result.contains("AUTHENTICATED")) {
+                        loginVerified[0] = true;
+                        loginVerificationDetail[0] = "Аккаунт подтверждён сайтом Kinozal.";
+                    } else if (result.contains("LOGIN_REQUIRED")) {
+                        loginVerified[0] = false;
+                        loginVerificationDetail[0] = "Kinozal всё ещё показывает форму входа.";
+                    } else {
+                        loginVerified[0] = false;
+                        loginVerificationDetail[0] = "Не найден признак авторизованного аккаунта. Проверьте, завершился ли вход.";
+                    }
+                });
             }
         });
 
@@ -2606,15 +7085,36 @@ public class MainActivity extends Activity {
         LinearLayout actions = new LinearLayout(this);
         actions.setGravity(Gravity.CENTER_VERTICAL);
         actions.setPadding(0, dp(6), 0, dp(6));
+        Button cursorToggle = button("Курсор");
         Button refresh = button("Обновить");
-        Button close = button("Закрыть");
         LinearLayout.LayoutParams actionParams = new LinearLayout.LayoutParams(0, dp(46), 1f);
-        actions.addView(refresh, actionParams);
-        LinearLayout.LayoutParams closeParams = new LinearLayout.LayoutParams(0, dp(46), 1f);
-        closeParams.leftMargin = dp(6);
-        actions.addView(close, closeParams);
+        actions.addView(cursorToggle, actionParams);
+        LinearLayout.LayoutParams refreshParams = new LinearLayout.LayoutParams(0, dp(46), 1f);
+        refreshParams.leftMargin = dp(6);
+        actions.addView(refresh, refreshParams);
         panel.addView(actions, new LinearLayout.LayoutParams(-1, -2));
-        panel.addView(web, new LinearLayout.LayoutParams(-1, 0, 1f));
+
+        FrameLayout webContainer = new FrameLayout(this);
+        webContainer.setFocusable(false);
+        TvWebCursorView tvCursor = new TvWebCursorView(this, web);
+        tvCursor.setVisibility(View.GONE);
+        webContainer.addView(web, new FrameLayout.LayoutParams(-1, -1));
+        webContainer.addView(tvCursor, new FrameLayout.LayoutParams(-1, -1));
+        panel.addView(webContainer, new LinearLayout.LayoutParams(-1, 0, 1f));
+        cursorToggle.setOnClickListener(v -> {
+            boolean enabled = tvCursor.getVisibility() != View.VISIBLE;
+            tvCursor.setVisibility(enabled ? View.VISIBLE : View.GONE);
+            cursorToggle.setText("Курсор");
+            if (enabled) {
+                tvCursor.requestFocus();
+                showMessage("Курсор включён: перемещай стрелками, нажми OK для клика.");
+            } else {
+                web.requestFocus();
+            }
+        });
+        webContainer.post(() -> tvCursor.setCursorPosition(
+                webContainer.getWidth() * 0.12f,
+                webContainer.getHeight() * 0.18f + dp(36)));
 
         AlertDialog dialog = new AlertDialog.Builder(this)
                 .setView(panel)
@@ -2626,11 +7126,13 @@ public class MainActivity extends Activity {
             web.setVisibility(View.INVISIBLE);
             if (web.getParent() == null) root.addView(web, new LinearLayout.LayoutParams(1, 1));
         };
-        close.setOnClickListener(v -> { detachWeb.run(); dialog.dismiss(); });
         refresh.setOnClickListener(v -> {
+            status.setText("Обновляем страницу Kinozal…");
             web.stopLoading();
-            web.reload();
-            status.setText("Обновление проверки Kinozal…");
+            web.post(() -> {
+                web.loadUrl(base + "/login.php?m=5");
+                showMessage("Страница Kinozal обновляется.");
+            });
         });
         insert.setOnClickListener(v -> {
             String username = loginField.getText().toString();
@@ -2657,8 +7159,6 @@ public class MainActivity extends Activity {
                 else {
                     submittedLogin[0] = username;
                     submittedPassword[0] = password;
-                    try { client.saveCredentials(username, password); }
-                    catch (Exception e) { showMessage("Не удалось сохранить данные входа: " + safe(e.getMessage())); }
                 }
             });
         });
@@ -2690,14 +7190,45 @@ public class MainActivity extends Activity {
                     showMessage("Не удалось определить поля или кнопку входа на странице.");
                     return;
                 }
-                try { client.saveCredentials(username, password); }
-                catch (Exception e) { showMessage("Не удалось сохранить данные входа: " + safe(e.getMessage())); }
+                submittedLogin[0] = username;
+                submittedPassword[0] = password;
+                showMessage("Запрос входа отправлен. Дождитесь ответа Kinozal, затем нажмите «Готово».");
             });
         });
         done.setOnClickListener(v -> {
-            browserCookies.flush();
-            String cookie = browserCookies.getCookie(base);
-            if (cookie != null && !cookie.isEmpty()) {
+            done.setEnabled(false);
+            web.evaluateJavascript("(function(){"
+                    + "var u=(location.href||'').toLowerCase();"
+                    + "var p=!!document.querySelector('form input[type=password]');"
+                    + "if(p||u.indexOf('login.php')>=0||u.indexOf('takelogin.php')>=0)return 'LOGIN_REQUIRED';"
+                    + "var links=[].slice.call(document.querySelectorAll('a'));"
+                    + "var logout=links.some(function(a){var t=(a.innerText||a.textContent||'').trim().toLowerCase();"
+                    + "var h=(a.getAttribute('href')||'').toLowerCase();"
+                    + "return /выход|выйти|logout|logoff/.test(t+' '+h);});"
+                    + "var body=(document.body&&document.body.innerText||'').toLowerCase();"
+                    + "if(!logout&&/личный кабинет|мой профиль|редактировать профиль/.test(body))logout=true;"
+                    + "return logout?'AUTHENTICATED':'NO_LOGIN_FORM';})()", result -> {
+                String verification = result == null ? "" : result.replace("\"", "");
+                // Some Kinozal mirrors do not expose a visible logout/profile link.
+                // A page without the login form is still a valid post-login state.
+                if (verification.contains("LOGIN_REQUIRED") || verification.isEmpty()) {
+                    loginVerified[0] = false;
+                    done.setEnabled(true);
+                    String reason = verification.contains("LOGIN_REQUIRED")
+                            ? "Kinozal всё ещё показывает форму входа. Проверьте логин, пароль и капчу."
+                            : "Не удалось подтвердить вход: на странице не найден признак авторизованного аккаунта. Окно оставлено открытым.";
+                    loginVerificationDetail[0] = reason;
+                    showMessage(reason);
+                    return;
+                }
+                loginVerified[0] = true;
+                browserCookies.flush();
+                String cookie = browserCookies.getCookie(base);
+                if (cookie == null || cookie.trim().isEmpty()) {
+                    done.setEnabled(true);
+                    showMessage("Аккаунт подтверждён, но сайт не выдал cookies сессии. Окно оставлено открытым.");
+                    return;
+                }
                 try {
                     client.importBrowserCookies(cookie);
                     client.saveBrowserCookies(cookie);
@@ -2706,15 +7237,23 @@ public class MainActivity extends Activity {
                         client.saveCredentials(submittedLogin[0], submittedPassword[0]);
                     }
                 } catch (Exception e) {
-                    showMessage("Не удалось сохранить сессию: " + safe(e.getMessage()));
+                    done.setEnabled(true);
+                    showMessage("Не удалось сохранить подтверждённую сессию: " + safe(e.getMessage()));
                     return;
                 }
-            }
-            detachWeb.run();
-            dialog.dismiss();
-            showMessage("Браузерная сессия сохранена. Загружаю каталог через WebView.");
-            status.setText("Браузерная сессия активна");
-            load("browse.php", "Все раздачи");
+                boolean wasFirstLaunchAuthorization = firstLaunchAuthorizationShown;
+                firstLaunchAuthorizationShown = false;
+                detachWeb.run();
+                dialog.dismiss();
+                showMessage("Вход в Kinozal подтверждён. Загружаю каталог.");
+                status.setText("Вход в Kinozal выполнен");
+                updateSidebarLoginStatus(true);
+                if (wasFirstLaunchAuthorization) {
+                    markStartupCatalogReady();
+                } else {
+                    load("browse.php", "Все раздачи");
+                }
+            });
         });
         dialog.setOnDismissListener(d -> {
             if (web.getParent() == panel) {
@@ -2722,16 +7261,114 @@ public class MainActivity extends Activity {
                 web.setVisibility(View.INVISIBLE);
                 if (web.getParent() == null) root.addView(web, new LinearLayout.LayoutParams(1, 1));
             }
+            // If the user closes the first-launch authorization window without
+            // completing it, don't leave the application on an empty screen.
+            // The next launch will follow the saved startup section normally.
+            if (firstLaunchAuthorizationShown && !startupCatalogReady) {
+                firstLaunchAuthorizationShown = false;
+                markStartupCatalogReady();
+            }
         });
         dialog.show();
         dialog.getWindow().setLayout(
                 (int)(getResources().getDisplayMetrics().widthPixels * 0.90f),
                 (int)(getResources().getDisplayMetrics().heightPixels * 0.90f));
+        cursorToggle.setFocusable(true);
+        cursorToggle.setFocusableInTouchMode(true);
+        cursorToggle.post(cursorToggle::requestFocus);
         web.post(() -> {
             web.requestLayout();
-            web.requestFocus();
             web.loadUrl(base + "/login.php?m=5");
+            cursorToggle.post(cursorToggle::requestFocus);
         });
+    }
+
+    /**
+     * On-screen pointer for Android TV WebView pages that require mouse-like
+     * interaction (for example Cloudflare Turnstile). DPAD moves the pointer;
+     * OK/ENTER sends a real touch sequence to the underlying WebView.
+     */
+    private final class TvWebCursorView extends View {
+        private final WebView target;
+        private final android.graphics.Paint paint = new android.graphics.Paint(
+                android.graphics.Paint.ANTI_ALIAS_FLAG);
+        private float cursorX = dp(45);
+        private float cursorY = dp(45);
+
+        void setCursorPosition(float x, float y) {
+            cursorX = Math.max(dp(14), Math.min(getWidth() - dp(14), x));
+            cursorY = Math.max(dp(14), Math.min(getHeight() - dp(14), y));
+            invalidate();
+        }
+        private final float step = dp(22);
+
+        TvWebCursorView(android.content.Context context, WebView target) {
+            super(context);
+            this.target = target;
+            setFocusable(true);
+            setFocusableInTouchMode(true);
+            setClickable(true);
+        }
+
+        @Override protected void onDraw(android.graphics.Canvas canvas) {
+            super.onDraw(canvas);
+            if (getVisibility() != View.VISIBLE) return;
+            paint.setStyle(android.graphics.Paint.Style.STROKE);
+            paint.setStrokeWidth(dp(2));
+            paint.setColor(Color.BLACK);
+            canvas.drawCircle(cursorX, cursorY, dp(13), paint);
+            paint.setColor(Color.rgb(0, 255, 210));
+            paint.setStrokeWidth(dp(4));
+            canvas.drawCircle(cursorX, cursorY, dp(12), paint);
+            paint.setStyle(android.graphics.Paint.Style.FILL);
+            paint.setColor(Color.rgb(255, 235, 0));
+            android.graphics.Path pointer = new android.graphics.Path();
+            pointer.moveTo(cursorX - dp(5), cursorY - dp(9));
+            pointer.lineTo(cursorX - dp(5), cursorY + dp(10));
+            pointer.lineTo(cursorX, cursorY + dp(5));
+            pointer.lineTo(cursorX + dp(5), cursorY + dp(13));
+            pointer.lineTo(cursorX + dp(9), cursorY + dp(11));
+            pointer.lineTo(cursorX + dp(4), cursorY + dp(3));
+            pointer.lineTo(cursorX + dp(11), cursorY + dp(3));
+            pointer.close();
+            paint.setStyle(android.graphics.Paint.Style.STROKE);
+            paint.setStrokeWidth(dp(2));
+            paint.setColor(Color.rgb(255, 0, 180));
+            canvas.drawPath(pointer, paint);
+            paint.setStyle(android.graphics.Paint.Style.FILL);
+            paint.setColor(Color.rgb(255, 235, 0));
+            canvas.drawPath(pointer, paint);
+        }
+
+        @Override public boolean onKeyDown(int keyCode, KeyEvent event) {
+            float maxX = Math.max(dp(12), getWidth() - dp(12));
+            float maxY = Math.max(dp(12), getHeight() - dp(12));
+            switch (keyCode) {
+                case KeyEvent.KEYCODE_DPAD_LEFT: cursorX = Math.max(dp(12), cursorX - step); break;
+                case KeyEvent.KEYCODE_DPAD_RIGHT: cursorX = Math.min(maxX, cursorX + step); break;
+                case KeyEvent.KEYCODE_DPAD_UP: cursorY = Math.max(dp(12), cursorY - step); break;
+                case KeyEvent.KEYCODE_DPAD_DOWN: cursorY = Math.min(maxY, cursorY + step); break;
+                case KeyEvent.KEYCODE_DPAD_CENTER:
+                case KeyEvent.KEYCODE_ENTER:
+                case KeyEvent.KEYCODE_NUMPAD_ENTER:
+                    long now = android.os.SystemClock.uptimeMillis();
+                    android.view.MotionEvent down = android.view.MotionEvent.obtain(now, now,
+                            android.view.MotionEvent.ACTION_DOWN, cursorX, cursorY, 0);
+                    android.view.MotionEvent up = android.view.MotionEvent.obtain(now, now + 90,
+                            android.view.MotionEvent.ACTION_UP, cursorX, cursorY, 0);
+                    target.dispatchTouchEvent(down);
+                    target.dispatchTouchEvent(up);
+                    down.recycle();
+                    up.recycle();
+                    return true;
+                case KeyEvent.KEYCODE_BACK:
+                    return super.onKeyDown(keyCode, event);
+                default:
+                    return super.onKeyDown(keyCode, event);
+            }
+            invalidate();
+            return true;
+        }
     }
 
     private void styleCompactCredentialField(EditText field, String hint) {
@@ -2739,7 +7376,7 @@ public class MainActivity extends Activity {
         field.setTextColor(Color.WHITE);
         field.setHintTextColor(TEAL);
         field.setHint(hint);
-        field.setTextSize(14);
+        field.setTextSize(fontSize(14));
         field.setSelectAllOnFocus(true);
         field.setFocusable(true);
         field.setFocusableInTouchMode(true);
@@ -2816,11 +7453,44 @@ public class MainActivity extends Activity {
     }
 
     private void chooseMirror() {
-        String[] labels = {"Kinozal CloudNS", "Kinozal Guru", "Kinozal TV", "Kinozal Me"};
+        String[] labels = {"Kinozal Me", "Kinozal Guru", "Kinozal Jumpingcrab"};
         new AlertDialog.Builder(this).setTitle("Зеркало").setItems(labels, (d, which) -> {
-            mirror = MIRRORS[which]; getSharedPreferences(PREFS, MODE_PRIVATE).edit().putString("mirror", mirror).apply();
-            client.setMirror(mirror); load("browse.php", "Все раздачи");
-        }).setNegativeButton("Отмена", null).show();
+            applyMirror(MIRRORS[which]);
+        }).setNeutralButton("Ввести адрес вручную", (d, which) -> showCustomMirrorDialog())
+                .setNegativeButton("Отмена", null).show();
+    }
+
+    private void showCustomMirrorDialog() {
+        EditText address = new EditText(this);
+        address.setSingleLine(true);
+        address.setInputType(android.text.InputType.TYPE_CLASS_TEXT | android.text.InputType.TYPE_TEXT_VARIATION_URI);
+        address.setHint("https://example.com");
+        address.setText(client.getMirror());
+        int pad = dp(18);
+        LinearLayout content = new LinearLayout(this);
+        content.setOrientation(LinearLayout.VERTICAL);
+        content.setPadding(pad, dp(8), pad, 0);
+        content.addView(address, new LinearLayout.LayoutParams(-1, dp(48)));
+        new AlertDialog.Builder(this).setTitle("Своё зеркало").setView(content)
+                .setPositiveButton("Сохранить", (d, which) -> {
+                    String value = address.getText().toString().trim();
+                    if (!value.matches("(?i)^https://[^/\\s]+/?$")) {
+                        showMessage("Введите полный HTTPS-адрес зеркала, например https://kinozal.me");
+                        return;
+                    }
+                    applyMirror(value.replaceAll("/+$", ""));
+                }).setNegativeButton("Отмена", null).show();
+    }
+
+    private void applyMirror(String value) {
+        try {
+            client.setMirror(value);
+            mirror = client.getMirror();
+            getSharedPreferences(PREFS, MODE_PRIVATE).edit().putString("mirror", mirror).apply();
+            load("browse.php", "Все раздачи");
+        } catch (IllegalArgumentException e) {
+            showMessage("Некорректный адрес зеркала. Требуется HTTPS.");
+        }
     }
 
 
@@ -2839,6 +7509,8 @@ public class MainActivity extends Activity {
                 t.seeds = o.optString("seeds", "—");
                 t.leeches = o.optString("leeches", "—");
                 t.uploaded = o.optString("uploaded", "—");
+                t.poster = o.optString("poster", "");
+                t.releaseType = normalizeReleaseType(o.optString("releaseType", "r0"));
                 if (!t.href.isEmpty()) result.put(t.href, t);
             }
         } catch (Exception ignored) { }
@@ -2846,16 +7518,19 @@ public class MainActivity extends Activity {
     }
 
     private void writeFavorites(java.util.LinkedHashMap<String, Torrent> favorites) {
+        if (!PlusAccess.hasFeature(this, "favorites")) return;
         org.json.JSONArray array = new org.json.JSONArray();
         for (Torrent t : favorites.values()) {
             org.json.JSONObject o = new org.json.JSONObject();
             try {
                 o.put("title", t.title); o.put("href", t.href); o.put("size", t.size);
-                o.put("seeds", t.seeds); o.put("leeches", t.leeches); o.put("uploaded", t.uploaded);
+                o.put("seeds", t.seeds); o.put("leeches", t.leeches); o.put("uploaded", t.uploaded); o.put("poster", t.poster == null ? "" : t.poster); o.put("releaseType", normalizeReleaseType(t.releaseType));
                 array.put(o);
             } catch (Exception ignored) { }
         }
         getSharedPreferences(PREFS, MODE_PRIVATE).edit().putString(FAVORITES_KEY, array.toString()).apply();
+        TvHomeChannels.refreshFavorites(this);
+        scheduleCloudSync();
     }
 
     private boolean isFavorite(Torrent torrent) {
@@ -2863,6 +7538,7 @@ public class MainActivity extends Activity {
     }
 
     private void toggleFavorite(Torrent torrent) {
+        if (!requirePlusFeature("favorites")) return;
         if (torrent == null || torrent.href == null || torrent.href.isEmpty()) return;
         java.util.LinkedHashMap<String, Torrent> favorites = readFavorites();
         if (favorites.containsKey(torrent.href)) {
@@ -2876,14 +7552,21 @@ public class MainActivity extends Activity {
     }
 
     private void showFavorites() {
+        if (!requirePlusFeature("favorites")) return;
+        activateBrowseScreen();
+        if (mainSearchBar != null) mainSearchBar.setVisibility(View.GONE);
+        if (localListSearchBar != null) localListSearchBar.setVisibility(View.VISIBLE);
+        if (localListSearch != null) localListSearch.setText("");
         currentPath = "local:favorites";
         currentTitle = "Избранное";
         heading.setText(currentTitle);
         java.util.List<Torrent> saved = new java.util.ArrayList<>(readFavorites().values());
+        java.util.Collections.reverse(saved);
+        activeLocalItems = new java.util.ArrayList<>(saved);
         list.removeAllViews();
         setCatalogStatus("Раздач в избранном", saved.size());
         if (saved.isEmpty()) addEmpty("Избранное пока пусто. Добавляйте раздачи из карточки.");
-        else renderTorrents(saved);
+        else renderTorrents(filterLocalItems(saved));
     }
 
 
@@ -2904,6 +7587,8 @@ public class MainActivity extends Activity {
                 t.seeds = o.optString("seeds", "—");
                 t.leeches = o.optString("leeches", "—");
                 t.uploaded = o.optString("uploaded", "—");
+                t.poster = o.optString("poster", "");                t.viewedAt = o.optLong("viewedAt", 0L);
+                if (t.viewedAt <= 0L) t.viewedAt = System.currentTimeMillis() - (i * 1000L);
                 if (!t.href.isEmpty()) result.put(t.href, t);
             }
         } catch (Exception ignored) { }
@@ -2911,9 +7596,25 @@ public class MainActivity extends Activity {
     }
 
     private void saveRecentlyViewed(Torrent torrent) {
+        if (!PlusAccess.hasFeature(this, "viewing_history")) return;
         if (torrent == null || torrent.href == null || torrent.href.isEmpty()) return;
+        // Home-feed torrents carry their poster separately from the details parser.
+        // Preserve it in history so Continue Watching can build complete TV cards.
+        if (torrent.poster == null || torrent.poster.isEmpty()) {
+            for (HomeSection section : homeSectionsMemory) {
+                for (HomePoster poster : section.items) {
+                    if (poster.torrent != null && torrent.href.equals(poster.torrent.href)
+                            && poster.imageUrl != null && !poster.imageUrl.isEmpty()) {
+                        torrent.poster = poster.imageUrl;
+                        break;
+                    }
+                }
+                if (torrent.poster != null && !torrent.poster.isEmpty()) break;
+            }
+        }
         java.util.LinkedHashMap<String, Torrent> recent = readRecentlyViewed();
         recent.remove(torrent.href);
+        torrent.viewedAt = System.currentTimeMillis();
         recent.put(torrent.href, torrent);
         while (recent.size() > 30) {
             String oldest = recent.keySet().iterator().next();
@@ -2927,22 +7628,140 @@ public class MainActivity extends Activity {
             try {
                 o.put("title", t.title); o.put("href", t.href); o.put("size", t.size);
                 o.put("seeds", t.seeds); o.put("leeches", t.leeches); o.put("uploaded", t.uploaded);
+                o.put("poster", t.poster == null ? "" : t.poster);
+                o.put("viewedAt", t.viewedAt);
                 array.put(o);
             } catch (Exception ignored) { }
         }
         getSharedPreferences(PREFS, MODE_PRIVATE).edit()
                 .putString(RECENTLY_VIEWED_KEY, array.toString()).apply();
+        TvHomeChannels.refreshContinue(this);
+        scheduleCloudSync();
+    }
+
+    private void addHistoryClearButton() {
+        Button clear = button("Очистить историю");
+        clear.setAllCaps(false);
+        clear.setTextSize(fontSize(14));
+        clear.setOnClickListener(v -> clearRecentlyViewed());
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-1, dp(44));
+        params.topMargin = dp(8);
+        params.bottomMargin = dp(8);
+        list.addView(clear, params);
+    }
+
+    private void addFavoritesClearButton() {
+        Button clear = button("Очистить избранное");
+        clear.setAllCaps(false);
+        clear.setTextSize(fontSize(14));
+        clear.setOnClickListener(v -> {
+            writeFavorites(new java.util.LinkedHashMap<>());
+            showFavorites();
+            showMessage("Избранное очищено");
+        });
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-1, dp(44));
+        params.topMargin = dp(8);
+        params.bottomMargin = dp(8);
+        list.addView(clear, params);
+    }
+
+    private List<Torrent> filterLocalItems(List<Torrent> source) {
+        String query = localListSearch == null ? "" : localListSearch.getText().toString().trim()
+                .toLowerCase(java.util.Locale.ROOT);
+        if (query.isEmpty()) return new ArrayList<>(source);
+        List<Torrent> filtered = new ArrayList<>();
+        for (Torrent torrent : source) {
+            String title = torrent.title == null ? "" : torrent.title.toLowerCase(java.util.Locale.ROOT);
+            if (title.contains(query)) filtered.add(torrent);
+        }
+        return filtered;
+    }
+
+    private void filterActiveLocalList() {
+        if (activeLocalItems == null || list == null) return;
+        List<Torrent> filtered = filterLocalItems(activeLocalItems);
+        if (filtered.isEmpty()) {
+            list.removeAllViews();
+            addEmpty(localListSearch != null && localListSearch.length() > 0
+                    ? "По этому запросу ничего не найдено."
+                    : "Список пока пуст.");
+        } else {
+            renderTorrents(filtered);
+        }
+    }
+
+    private String formatViewedAt(long timestamp) {
+        if (timestamp <= 0L) return "—";
+        return new java.text.SimpleDateFormat("dd.MM.yy HH:mm", java.util.Locale.getDefault())
+                .format(new java.util.Date(timestamp));
+    }
+
+    private void removeFavorite(String href) {
+        if (!PlusAccess.hasFeature(this, "favorites")) return;
+        if (href == null || href.isEmpty()) return;
+        java.util.LinkedHashMap<String, Torrent> favorites = readFavorites();
+        favorites.remove(href);
+        writeFavorites(favorites);
+        showFavorites();
+    }
+
+    private String displayTorrentValue(String value) {
+        return value == null || value.trim().isEmpty() || "null".equalsIgnoreCase(value.trim())
+                ? "—" : value.trim();
+    }
+
+    private void removeRecentlyViewed(String href) {
+        if (!PlusAccess.hasFeature(this, "viewing_history")) return;
+        if (href == null || href.isEmpty()) return;
+        java.util.LinkedHashMap<String, Torrent> recent = readRecentlyViewed();
+        recent.remove(href);
+        saveRecentlyViewedList(recent);
+        showRecentlyViewed();
+    }
+
+    private void clearRecentlyViewed() {
+        if (!PlusAccess.hasFeature(this, "viewing_history")) return;
+        saveRecentlyViewedList(new java.util.LinkedHashMap<>());
+        showRecentlyViewed();
+        showMessage("История очищена");
+    }
+
+    private void saveRecentlyViewedList(java.util.LinkedHashMap<String, Torrent> recent) {
+        if (!PlusAccess.hasFeature(this, "viewing_history")) return;
+        org.json.JSONArray array = new org.json.JSONArray();
+        java.util.List<Torrent> values = new java.util.ArrayList<>(recent.values());
+        for (int i = 0; i < values.size(); i++) {
+            Torrent t = values.get(i);
+            org.json.JSONObject o = new org.json.JSONObject();
+            try {
+                o.put("title", t.title); o.put("href", t.href); o.put("size", t.size);
+                o.put("seeds", t.seeds); o.put("leeches", t.leeches); o.put("uploaded", t.uploaded);
+                o.put("poster", t.poster == null ? "" : t.poster);
+                o.put("viewedAt", t.viewedAt);
+                array.put(o);
+            } catch (Exception ignored) { }
+        }
+        getSharedPreferences(PREFS, MODE_PRIVATE).edit()
+                .putString(RECENTLY_VIEWED_KEY, array.toString()).apply();
+        TvHomeChannels.refreshContinue(this);
+        scheduleCloudSync();
     }
 
     private void showRecentlyViewed() {
+        if (!requirePlusFeature("viewing_history")) return;
+        activateBrowseScreen();
+        if (mainSearchBar != null) mainSearchBar.setVisibility(View.GONE);
+        if (localListSearchBar != null) localListSearchBar.setVisibility(View.VISIBLE);
+        if (localListSearch != null) localListSearch.setText("");
         currentPath = "local:recently-viewed";
         currentTitle = "Недавно смотрели";
         heading.setText(currentTitle);
         java.util.List<Torrent> saved = new java.util.ArrayList<>(readRecentlyViewed().values());
-        list.removeAllViews();
+        java.util.Collections.sort(saved, (a, b) -> Long.compare(b.viewedAt, a.viewedAt));
+        activeLocalItems = new java.util.ArrayList<>(saved);        list.removeAllViews();
         setCatalogStatus("Недавно смотрели", saved.size());
         if (saved.isEmpty()) addEmpty("Здесь появятся открытые вами раздачи.");
-        else renderTorrents(saved);
+        else renderTorrents(filterLocalItems(saved));
     }
 
     private static class TorrentDetails {
@@ -2950,9 +7769,27 @@ public class MainActivity extends Activity {
         String imdbRating = "—", kinopoiskRating = "—", kinozalRating = "—", kinozalStars = "☆☆☆☆☆☆☆☆☆☆", kinozalVotes = "";
         final java.util.LinkedHashMap<String, String> fields = new java.util.LinkedHashMap<>();
         final java.util.List<String> screenshotThumbs = new java.util.ArrayList<>();
+        final java.util.List<String> comments = new java.util.ArrayList<>();
+        String screenshotRequestId = "";
+        String screenshotPagesd = "";
+        String similarRequestId = "";
+        String similarPagesd = "";
+        String similarSearchUrl = "";
+        final java.util.List<Torrent> similarTorrents = new java.util.ArrayList<>();
+        boolean similarLoaded = false;
+        boolean similarLoading = false;
+        String releaseRequestId = "";
+        String releasePagesd = "";
+        String releaseText = "";
+        boolean releaseLoaded = false;
+        boolean releaseLoading = false;
         boolean screenshotsLoaded = false;
+        boolean screenshotsLoading = false;
     }
 
+    // Warm the next likely details page while the user navigates the list.
+    // The click handler reuses this in-flight request instead of starting a
+    // second WebView navigation and cancelling the first one.
     private void showTorrent(Torrent t) {
         focusedTorrentSource = getCurrentFocus();
         if (t == null || t.href == null || t.href.trim().isEmpty()) {
@@ -2967,72 +7804,124 @@ public class MainActivity extends Activity {
         // Render a previously validated detail page immediately. The network
         // refresh below updates ratings, peer counts and other changing fields.
         String cachedHtml = null;
-        synchronized (pageCache) { cachedHtml = pageCache.get(cacheKey); }
-        if (cachedHtml == null) {
-            byte[] saved = diskCache.get(cacheKey, 30L * 60L * 1000L);
-            if (saved != null) {
-                cachedHtml = new String(saved, StandardCharsets.UTF_8);
-                synchronized (pageCache) { pageCache.put(cacheKey, cachedHtml); }
-            }
-        }
-
-        if (cachedHtml != null) {
-            try {
-                Document cachedDoc = Jsoup.parse(cachedHtml, href);
-                TorrentDetails cachedDetails = parseTorrentDetails(cachedDoc, t);
-                saveRecentlyViewed(t);
-                showTorrentDetails(t, cachedDetails);
-            } catch (Exception ignored) {
-                cachedHtml = null;
-            }
-        }
-
-        final boolean hasCachedDetails = cachedHtml != null;
-        if (!hasCachedDetails) progress.setVisibility(View.VISIBLE);
-
-        java.util.function.Consumer<String> onFreshHtml = html -> runOnUiThread(() -> {
-            if (html == null || html.trim().isEmpty()) {
-                if (!hasCachedDetails && href.equals(activeTorrentDetailsHref)) {
-                    progress.setVisibility(View.GONE);
-                    showMessage("Не удалось загрузить карточку через браузерную сессию.");
+        TorrentDetails cachedDetails = getCachedDetailData(cacheKey);
+        if (cachedDetails == null) {
+            synchronized (pageCache) { cachedHtml = pageCache.get(cacheKey); }
+            if (cachedHtml == null) {
+                byte[] saved = diskCache.get(cacheKey, 30L * 60L * 1000L);
+                if (saved != null) {
+                    cachedHtml = new String(saved, StandardCharsets.UTF_8);
+                    synchronized (pageCache) { pageCache.put(cacheKey, cachedHtml); }
                 }
-                return;
             }
-            try {
-                Document doc = Jsoup.parse(html, href);
-                TorrentDetails details = parseTorrentDetails(doc, t);
-                // Do not let a challenge/login/empty document replace a good entry.
-                boolean validDetails = !details.title.trim().isEmpty()
-                        && (doc.selectFirst("#main .content") != null
-                        || doc.selectFirst("a[href*=download.php]") != null);
-                if (!validDetails) {
+            if (cachedHtml != null) {
+                final String htmlFromCache = cachedHtml;
+                // Disk/memory cache entries can be large. Parse them away from
+                // the UI thread just like fresh detail pages.
+                executeSafely(io, () -> {
+                    try {
+                        Document cachedDoc = Jsoup.parse(htmlFromCache, href);
+                        TorrentDetails parsed = parseTorrentDetails(cachedDoc, t);
+                        boolean valid = !parsed.title.trim().isEmpty()
+                                && (cachedDoc.selectFirst("#main .content") != null
+                                || cachedDoc.selectFirst("a[href*=download.php]") != null);
+                        if (!valid) return;
+                        putCachedDetailData(cacheKey, parsed);
+                        runOnUiThread(() -> {
+                            if (href.equals(activeTorrentDetailsHref)
+                                    && activeTorrentDetailsDialog == null) {
+                                t.poster = parsed.poster;
+                                showTorrentDetails(t, parsed);
+                            }
+                        });
+                    } catch (Exception ignored) { }
+                });
+            }
+        }
+
+        if (cachedDetails != null) {
+            t.poster = cachedDetails.poster;
+            // Reuse the parsed model; no HTML parsing or network wait on repeat opens.
+            showTorrentDetails(t, cachedDetails);
+        }
+
+        final boolean hasCachedDetails = cachedDetails != null;
+        if (!hasCachedDetails) {
+            progress.setVisibility(View.VISIBLE);
+            // A focused-row prefetch is already loading this exact page.
+            // Wait for it rather than cancelling it with a duplicate request.
+            if (href.equals(pendingDetailPrefetchHref)) return;
+        }
+
+        java.util.function.Consumer<String> onFreshHtml = html -> {
+            if (html == null || html.trim().isEmpty()) {
+                runOnUiThread(() -> {
                     if (!hasCachedDetails && href.equals(activeTorrentDetailsHref)) {
                         progress.setVisibility(View.GONE);
-                        showMessage("Сайт вернул неполную страницу раздачи.");
+                        showMessage("Не удалось загрузить карточку через браузерную сессию.");
                     }
-                    return;
-                }
-                synchronized (pageCache) { pageCache.put(cacheKey, html); }
-                diskCache.put(cacheKey, html.getBytes(StandardCharsets.UTF_8));
-                saveRecentlyViewed(t);
-                if (href.equals(activeTorrentDetailsHref)) {
-                    progress.setVisibility(View.GONE);
-                    showTorrentDetails(t, details);
-                }
-            } catch (Exception e) {
-                if (!hasCachedDetails && href.equals(activeTorrentDetailsHref)) {
-                    progress.setVisibility(View.GONE);
-                    showMessage("Не удалось разобрать карточку: " + safe(e.getMessage()));
-                }
+                });
+                return;
             }
-        });
+
+            // Jsoup parsing of a full release page (including comments and related
+            // torrents) must never run on the Android UI thread. On TV boxes this
+            // could freeze the entire launcher while a card was opening.
+            executeSafely(io, () -> {
+                TorrentDetails parsedDetails = null;
+                boolean parsedValid = false;
+                String parsedError = null;
+                try {
+                    Document doc = Jsoup.parse(html, href);
+                    parsedDetails = parseTorrentDetails(doc, t);
+                    parsedValid = !parsedDetails.title.trim().isEmpty()
+                            && (doc.selectFirst("#main .content") != null
+                            || doc.selectFirst("a[href*=download.php]") != null);
+                } catch (Exception e) {
+                    parsedError = safe(e.getMessage());
+                }
+                final TorrentDetails details = parsedDetails;
+                final boolean validDetails = parsedValid;
+                final String parseError = parsedError;
+
+                runOnUiThread(() -> {
+                    if (parseError != null) {
+                        if (!hasCachedDetails && href.equals(activeTorrentDetailsHref)) {
+                            progress.setVisibility(View.GONE);
+                            showMessage("Не удалось разобрать карточку: " + parseError);
+                        }
+                        return;
+                    }
+                    // Do not let a challenge/login/empty document replace a good entry.
+                    if (!validDetails || details == null) {
+                        if (!hasCachedDetails && href.equals(activeTorrentDetailsHref)) {
+                            progress.setVisibility(View.GONE);
+                            showMessage("Сайт вернул неполную страницу раздачи.");
+                        }
+                        return;
+                    }
+                    synchronized (pageCache) { pageCache.put(cacheKey, html); }
+                    putCachedDetailData(cacheKey, details);
+                    diskCache.put(cacheKey, html.getBytes(StandardCharsets.UTF_8));
+                    t.poster = details.poster;
+                    // Do not wait for secondary screenshot/hash requests before
+                    // presenting the already parsed release details.
+                    if (href.equals(activeTorrentDetailsHref) && !hasCachedDetails) {
+                        progress.setVisibility(View.GONE);
+                        showTorrentDetails(t, details);
+                    }
+                    // If a cached card is already open, keep it and its DPAD focus
+                    // intact; the fresh HTML is saved for the next visit instead.
+                });
+            });
+        };
 
         if (sessionWebView != null) {
             // A single authenticated WebView request avoids the known HTTP 403
             // attempt followed by a second browser navigation.
             fetchBrowserPage(href, null, onFreshHtml);
         } else {
-            io.execute(() -> {
+            executeSafely(io, () -> {
                 try {
                     onFreshHtml.accept(client.fetch(href));
                 } catch (Exception e) {
@@ -3094,6 +7983,79 @@ public class MainActivity extends Activity {
 
         Element technical = doc.selectFirst("#tabs");
         if (technical != null) extractBoldFields(technical, data.fields);
+
+        // The "Релиз" tab is loaded by the same AJAX endpoint as screenshots,
+        // with pagesd=0. Capture its parameters without loading it eagerly.
+        java.util.regex.Matcher releaseTab = java.util.regex.Pattern.compile(
+                "id=\\\"tbch0\\\"[\\s\\S]*?showtab\\(([0-9]+),([0-9]+)\\)")
+                .matcher(doc.html());
+        if (releaseTab.find()) {
+            data.releaseRequestId = releaseTab.group(1);
+            data.releasePagesd = releaseTab.group(2);
+        }
+
+        // Kinozal renders the "Подобные" list directly in #tabs2 on the
+        // details page. It is NOT a showtab()/get_srv_details.php AJAX tab.
+        // Parse the already-present table and keep its native release classes.
+        // The similar tab is sometimes already rendered into #tabs2 by Kinozal,
+        // but on other responses the container is only an AJAX placeholder.
+        // Never mark the tab as loaded just because the empty #tabs2 container exists.
+        Element similarTable = doc.selectFirst("#tabs2 table.tables3");
+        if (similarTable != null) {
+            java.util.LinkedHashSet<String> similarSeen = new java.util.LinkedHashSet<>();
+            for (Element row : similarTable.select("tr")) {
+                Element link = row.selectFirst("td a[href*=details.php]");
+                if (link == null) continue;
+                String relatedHref = link.absUrl("href");
+                String relatedTitle = link.text().trim();
+                if (relatedHref.isEmpty() || relatedTitle.length() < 3 || !similarSeen.add(relatedHref)) continue;
+                Elements cells = row.select("> td");
+                Torrent related = new Torrent();
+                related.title = relatedTitle;
+                related.href = relatedHref;
+                related.size = cells.size() > 2 ? cells.get(2).text().trim() : "—";
+                related.seeds = cells.size() > 3 ? cells.get(3).text().trim() : "—";
+                related.leeches = cells.size() > 4 ? cells.get(4).text().trim() : "—";
+                related.releaseType = link.classNames().contains("r1") ? "r1"
+                        : link.classNames().contains("r2") ? "r2" : "r0";
+                data.similarTorrents.add(related);
+            }
+            data.similarLoaded = !similarTable.select("tr").isEmpty();
+        }
+        for (Element link : doc.select(".mn1_menu a[href*=browse.php]")) {
+            if (link.text().trim().toLowerCase(java.util.Locale.ROOT).contains("подобные раздачи")) {
+                data.similarSearchUrl = link.absUrl("href");
+                break;
+            }
+        }
+
+        // Kinozal comments are embedded in the release page as div.tx blocks.
+        // Read-only extraction: no input field, reply or submit action.
+        java.util.LinkedHashSet<String> uniqueComments = new java.util.LinkedHashSet<>();
+        for (Element comment : doc.select("div.tx")) {
+            String value = comment.wholeText().replace('\u00a0', ' ')
+                    // Some page fragments contain escaped line breaks as literal characters.
+                    .replace("\\n", "\n")
+                    .replace("\\r", "\n")
+                    .replaceAll("[\\t\\x0B\\f\\r]+", " ")
+                    .replaceAll(" *\\n *", "\n")
+                    .replaceAll(" {2,}", " ").trim();
+            if (!value.isEmpty()) uniqueComments.add(value);
+        }
+        data.comments.addAll(uniqueComments);
+        // Kinozal loads the screenshot tab asynchronously. The detail page
+        // contains showtab(id, pagesd), not the screenshot <img> elements.
+        java.util.regex.Matcher screenshotTab = java.util.regex.Pattern.compile(
+                "id=\\\"tbch[\\s\\S]*?showtab\\(([\\s\\S]*?),([\\s\\S]*?)\\)[\\s\\S]*?>([\\s\\S]*?)<",
+                java.util.regex.Pattern.CASE_INSENSITIVE).matcher(doc.html());
+        while (screenshotTab.find()) {
+            String tabLabel = Jsoup.parse(screenshotTab.group(3)).text()
+                    .toLowerCase(java.util.Locale.ROOT);
+            if (!tabLabel.contains("скриншот")) continue;
+            data.screenshotRequestId = screenshotTab.group(1).replaceAll("[\\\"']", "").trim();
+            data.screenshotPagesd = screenshotTab.group(2).replaceAll("[\\\"']", "").trim();
+            break;
+        }
         data.fields.putIfAbsent("Размер", torrent.size);
 
         Element ogImage = doc.selectFirst("meta[property=og:image]");
@@ -3114,6 +8076,177 @@ public class MainActivity extends Activity {
             data.torrentLink = href.startsWith("magnet:") ? href : download.absUrl("href");
         }
         return data;
+    }
+
+    /**
+     * Kinozal screenshot thumbnails are returned by get_srv_details.php,
+     * selected by the id/pagesd values in the Screenshot tab's showtab(...).
+     * Only img[src] URLs are retained; original-image href links are ignored.
+     */
+    private void loadReleaseText(TorrentDetails details,
+            java.util.function.Consumer<TorrentDetails> callback) {
+        if (details == null || details.releaseRequestId.isEmpty()
+                || details.releasePagesd.isEmpty()) {
+            callback.accept(details);
+            return;
+        }
+        final String endpoint = Uri.parse(details.sourcePage).buildUpon()
+                .path("/get_srv_details.php")
+                .clearQuery()
+                .appendQueryParameter("id", details.releaseRequestId)
+                .appendQueryParameter("pagesd", details.releasePagesd)
+                .build().toString();
+        java.util.function.Consumer<String> onHtml = html -> {
+            String release = "";
+            if (html != null && !html.trim().isEmpty()) {
+                try {
+                    Document fragment = Jsoup.parse(html, endpoint);
+                    Element content = fragment.selectFirst("#tabs, .justify, body");
+                    if (content != null) release = content.wholeText().trim();
+                    if (release.isEmpty() && content != null) release = content.text().trim();
+                } catch (Exception e) {
+                    Log.w("KinozalRelease", "Cannot parse release tab", e);
+                }
+            }
+            details.releaseText = release;
+            if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) {
+                callback.accept(details);
+            } else {
+                runOnUiThread(() -> callback.accept(details));
+            }
+        };
+        if (sessionWebView != null) {
+            fetchBrowserPage(endpoint, null, onHtml);
+        } else {
+            executeSafely(io, () -> {
+                try { onHtml.accept(client.fetch(endpoint)); }
+                catch (Exception e) {
+                    Log.w("KinozalRelease", "Cannot load release tab", e);
+                    runOnUiThread(() -> callback.accept(details));
+                }
+            });
+        }
+    }
+
+    private void loadSimilarTorrents(TorrentDetails details,
+            java.util.function.Consumer<TorrentDetails> callback) {
+        if (details == null) { callback.accept(null); return; }
+        final String endpoint;
+        if (!details.similarSearchUrl.isEmpty()) {
+            // Kinozal's actual "Подобные" tab is populated from the related-search
+            // URL in the release sidebar when #tabs2 is still an AJAX placeholder.
+            endpoint = details.similarSearchUrl;
+        } else if (!details.similarRequestId.isEmpty() && !details.similarPagesd.isEmpty()) {
+            endpoint = Uri.parse(details.sourcePage).buildUpon().path("/get_srv_details.php")
+                    .clearQuery().appendQueryParameter("id", details.similarRequestId)
+                    .appendQueryParameter("pagesd", details.similarPagesd).build().toString();
+        } else {
+            details.similarLoaded = true;
+            details.similarLoading = false;
+            callback.accept(details);
+            return;
+        }
+        java.util.function.Consumer<String> onHtml = html -> {
+            details.similarTorrents.clear();
+            if (html != null && !html.trim().isEmpty()) try {
+                Document fragment = Jsoup.parse(html, endpoint);
+                java.util.LinkedHashSet<String> seen = new java.util.LinkedHashSet<>();
+                for (Element row : fragment.select("table.tables3 tr")) {
+                    Element link = row.selectFirst("td a[href*=details.php]");
+                    if (link == null) continue;
+                    String href = link.absUrl("href"), name = link.text().trim();
+                    if (!href.contains("details.php?id=") || href.isEmpty()
+                            || name.length() < 3 || !seen.add(href)) continue;
+                    Torrent related = new Torrent();
+                    related.title = name;
+                    related.href = href;
+                    related.size = related.seeds = related.leeches = "—";
+                    Elements cells = row.select("> td");
+                    if (cells.size() > 2) related.size = cells.get(2).text().trim();
+                    if (cells.size() > 3) related.seeds = cells.get(3).text().trim();
+                    if (cells.size() > 4) related.leeches = cells.get(4).text().trim();
+                    related.releaseType = link.classNames().contains("r1") ? "r1"
+                            : link.classNames().contains("r2") ? "r2" : "r0";
+                    details.similarTorrents.add(related);
+                }
+            } catch (Exception e) { Log.w("KinozalSimilar", "Parse failed", e); }
+            details.similarLoaded = true;
+            details.similarLoading = false;
+            if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) callback.accept(details);
+            else runOnUiThread(() -> callback.accept(details));
+        };
+        if (sessionWebView != null) fetchBrowserPage(endpoint, null, onHtml);
+        else executeSafely(io, () -> {
+            try { onHtml.accept(client.fetch(endpoint)); }
+            catch (Exception e) { Log.w("KinozalSimilar", "Load failed", e);
+                runOnUiThread(() -> {
+                    details.similarLoading = false;
+                    details.similarLoaded = true;
+                    callback.accept(details);
+                });
+            }
+        });
+    }
+
+    private void loadScreenshotThumbnails(TorrentDetails details,
+            java.util.function.Consumer<TorrentDetails> callback) {
+        if (details == null || details.screenshotRequestId.isEmpty()
+                || details.screenshotPagesd.isEmpty()) {
+            callback.accept(details);
+            return;
+        }
+        final String endpoint = Uri.parse(details.sourcePage).buildUpon()
+                .path("/get_srv_details.php")
+                .clearQuery()
+                .appendQueryParameter("id", details.screenshotRequestId)
+                .appendQueryParameter("pagesd", details.screenshotPagesd)
+                .build().toString();
+
+        java.util.function.Consumer<String> onHtml = html -> {
+            if (html != null && !html.trim().isEmpty()) {
+                try {
+                    Document ajax = Jsoup.parse(html, endpoint);
+                    for (Element image : ajax.select("img[src]")) {
+                        String raw = image.attr("src").trim();
+                        if (raw.isEmpty()) continue;
+                        String decoded = raw;
+                        try {
+                            decoded = java.net.URLDecoder.decode(raw, "UTF-8");
+                        } catch (Exception ignored) { }
+                        String url = decoded;
+                        // Match the reference client's rule: decoded src values
+                        // containing an absolute HTTP URL are used as-is.
+                        if (!url.toLowerCase(java.util.Locale.ROOT).contains("http")) {
+                            url = image.absUrl("src");
+                        }
+                        if (url != null && url.toLowerCase(java.util.Locale.ROOT).contains("http")
+                                && !details.screenshotThumbs.contains(url)) {
+                            details.screenshotThumbs.add(url);
+                        }
+                    }
+                } catch (Exception e) {
+                    Log.w("KinozalScreenshots", "Cannot parse AJAX screenshot response", e);
+                }
+            }
+            if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) {
+                callback.accept(details);
+            } else {
+                runOnUiThread(() -> callback.accept(details));
+            }
+        };
+
+        if (sessionWebView != null) {
+            fetchBrowserPage(endpoint, null, onHtml);
+        } else {
+            executeSafely(io, () -> {
+                try {
+                    onHtml.accept(client.fetch(endpoint));
+                } catch (Exception e) {
+                    Log.w("KinozalScreenshots", "Cannot load screenshot AJAX endpoint", e);
+                    runOnUiThread(() -> callback.accept(details));
+                }
+            });
+        }
     }
 
     private void extractBoldFields(Element block, java.util.LinkedHashMap<String, String> fields) {
@@ -3143,11 +8276,47 @@ public class MainActivity extends Activity {
         catch (Exception ignored) { return 0; }
     }
 
+    private void prefetchTorrentDetails(Torrent torrent) {
+        if (torrent == null || torrent.href == null || torrent.href.trim().isEmpty()
+                || sessionWebView == null || !pendingDetailPrefetchHref.isEmpty()
+                || pendingBrowserCallback != null) return;
+        final String href = torrent.href;
+        final String key = "details|" + client.getMirror() + "|" + href;
+        synchronized (pageCache) {
+            if (pageCache.containsKey(key)) return;
+        }
+        if (diskCache.get(key, 30L * 60L * 1000L) != null) return;
+        pendingDetailPrefetchHref = href;
+        fetchBrowserPage(href, null, html -> {
+            if (href.equals(pendingDetailPrefetchHref)) pendingDetailPrefetchHref = "";
+            if (html == null || html.trim().isEmpty()) return;
+            try {
+                Document doc = Jsoup.parse(html, href);
+                TorrentDetails parsed = parseTorrentDetails(doc, torrent);
+                boolean valid = !parsed.title.trim().isEmpty()
+                        && (doc.selectFirst("#main .content") != null
+                        || doc.selectFirst("a[href*=download.php]") != null);
+                if (!valid) return;
+                synchronized (pageCache) { pageCache.put(key, html); }
+                putCachedDetailData(key, parsed);
+                diskCache.put(key, html.getBytes(StandardCharsets.UTF_8));
+                if (href.equals(activeTorrentDetailsHref)) {
+                    progress.setVisibility(View.GONE);
+                    // Prefetch only the detail HTML; screenshot data stays lazy.
+                    showTorrentDetails(torrent, parsed);
+                }
+            } catch (Exception ignored) { }
+        });
+    }
+
+
     private void showTorrentDetails(Torrent torrent, TorrentDetails data) {
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
         root.setPadding(dp(12), dp(8), dp(12), dp(10));
         root.setBackgroundColor(BG);
+        // Keep the card immediately visible; defer the heavier details layout
+        // until after the dialog gets its first frame on screen.
 
         TextView title = text(data.title, 20, GOLD, true);
         title.setMaxLines(2);
@@ -3166,7 +8335,7 @@ public class MainActivity extends Activity {
         actionRow.setGravity(Gravity.CENTER_VERTICAL);
 
         Button watch = button("Просмотр");
-        watch.setTextSize(15);
+        watch.setTextSize(fontSize(15));
         watch.setTextColor(Color.WHITE);
         watch.setBackground(shape(RED, 0));
         watch.setOnFocusChangeListener((v, focused) ->
@@ -3176,7 +8345,7 @@ public class MainActivity extends Activity {
         actionRow.addView(watch, watchParams);
 
         Button favorite = button(isFavorite(torrent) ? "★" : "☆");
-        favorite.setTextSize(25);
+        favorite.setTextSize(fontSize(25));
         favorite.setTextColor(GOLD);
         favorite.setGravity(Gravity.CENTER);
         favorite.setContentDescription(isFavorite(torrent) ? "Убрать из избранного" : "Добавить в избранное");
@@ -3184,52 +8353,87 @@ public class MainActivity extends Activity {
         favorite.setOnFocusChangeListener((v, focused) ->
                 v.setBackground(shape(focused ? Color.rgb(65, 72, 73) : PANEL, focused ? GOLD : 0)));
         favorite.setOnClickListener(v -> {
+            if (!requirePlusFeature("favorites")) return;
             toggleFavorite(torrent);
             boolean saved = isFavorite(torrent);
             favorite.setText(saved ? "★" : "☆");
             favorite.setContentDescription(saved ? "Убрать из избранного" : "Добавить в избранное");
         });
+        registerPlusFeatureControl(favorite, "favorites");
         actionRow.addView(favorite, new LinearLayout.LayoutParams(dp(48), dp(48)));
         posterColumn.addView(actionRow);
 
+        String releaseType = normalizeReleaseType(torrent == null ? "r0" : torrent.releaseType);
+        int releaseButtonColor = releaseTypeColor(releaseType);
         Button downloadTorrent = button("↓  Скачать торрент");
-        downloadTorrent.setTextSize(14);
-        downloadTorrent.setTextColor(GOLD);
-        downloadTorrent.setBackground(shape(PANEL, 0));
+        downloadTorrent.setTextSize(fontSize(14));
+        // Keep the original dark button appearance; use the release type only
+        // for its label and thin outline instead of filling the whole button.
+        downloadTorrent.setTextColor(releaseButtonColor);
+        downloadTorrent.setBackground(shape(PANEL, releaseButtonColor));
         downloadTorrent.setOnFocusChangeListener((v, focused) ->
-                v.setBackground(shape(focused ? Color.rgb(65, 72, 73) : PANEL, focused ? GOLD : 0)));
+                v.setBackground(shape(focused ? Color.rgb(65, 72, 73) : PANEL,
+                        releaseButtonColor)));
         LinearLayout.LayoutParams downloadParams = new LinearLayout.LayoutParams(-1, dp(42));
         downloadParams.topMargin = dp(8);
         downloadParams.bottomMargin = dp(10);
+        registerPlusFeatureControl(downloadTorrent, "torrent_download");
         posterColumn.addView(downloadTorrent, downloadParams);
 
         ImageView poster = new ImageView(this);
         poster.setScaleType(ImageView.ScaleType.FIT_CENTER);
         poster.setBackground(shape(PANEL, 0));
+        // Show the Kinozal brand artwork instead of an empty dark rectangle when
+        // a release has no poster or its remote image cannot be loaded.
+        poster.setImageResource(R.drawable.kinozal_poster_placeholder);
         posterColumn.addView(poster, new LinearLayout.LayoutParams(-1, dp(260)));
+
         LinearLayout ratings = new LinearLayout(this);
         ratings.setOrientation(LinearLayout.VERTICAL);
         ratings.setGravity(Gravity.CENTER_HORIZONTAL);
         ratings.setPadding(dp(2), dp(8), dp(2), dp(2));
 
-        TextView externalRatings = text(
-                "IMDb  " + data.imdbRating + "     Кинопоиск  " + data.kinopoiskRating,
-                12, Color.LTGRAY, true);
-        externalRatings.setGravity(Gravity.CENTER);
-        externalRatings.setSingleLine(true);
-        externalRatings.setIncludeFontPadding(false);
-        externalRatings.setPadding(0, dp(2), 0, dp(1));
-        ratings.addView(externalRatings, new LinearLayout.LayoutParams(-1, -2));
+        LinearLayout imdbRow = new LinearLayout(this);
+        imdbRow.setGravity(Gravity.CENTER_VERTICAL);
+        TextView imdbLabel = text("▪ IMDb", 12, GOLD, true);
+        imdbRow.addView(imdbLabel, new LinearLayout.LayoutParams(0, -2, 1f));
+        TextView imdbValue = text(data.imdbRating, 12, Color.WHITE, true);
+        imdbValue.setGravity(Gravity.RIGHT | Gravity.CENTER_VERTICAL);
+        imdbRow.addView(imdbValue);
+        ratings.addView(imdbRow, new LinearLayout.LayoutParams(-1, -2));
 
-        TextView kinozalRating = text("Kinozal  " + data.kinozalRating, 12, TEAL, true);
+        LinearLayout kpRow = new LinearLayout(this);
+        kpRow.setGravity(Gravity.CENTER_VERTICAL);
+        TextView kpLabel = text("▪ Кинопоиск", 12, GOLD, true);
+        kpRow.addView(kpLabel, new LinearLayout.LayoutParams(0, -2, 1f));
+        TextView kpValue = text(data.kinopoiskRating, 12, Color.WHITE, true);
+        kpValue.setGravity(Gravity.RIGHT | Gravity.CENTER_VERTICAL);
+        kpRow.addView(kpValue);
+        ratings.addView(kpRow, new LinearLayout.LayoutParams(-1, -2));
+
+        TextView kinozalRating = text("Kinozal  " + data.kinozalRating, 14, TEAL, true);
         kinozalRating.setGravity(Gravity.CENTER);
-        kinozalRating.setPadding(0, dp(3), 0, 0);
+        kinozalRating.setPadding(0, dp(4), 0, 0);
         ratings.addView(kinozalRating, new LinearLayout.LayoutParams(-1, -2));
 
-        TextView stars = text(data.kinozalStars, 13, GOLD, true);
-        stars.setGravity(Gravity.CENTER);
-        stars.setPadding(0, dp(3), 0, 0);
-        ratings.addView(stars, new LinearLayout.LayoutParams(-1, -2));
+        LinearLayout starRow = new LinearLayout(this);
+        starRow.setGravity(Gravity.CENTER);
+        float kinozalScore = 0f;
+        try {
+            java.util.regex.Matcher ratingMatcher = java.util.regex.Pattern
+                    .compile("(\\d+(?:[.,]\\d+)?)").matcher(data.kinozalRating);
+            if (ratingMatcher.find()) kinozalScore = Math.max(0f, Math.min(10f,
+                    Float.parseFloat(ratingMatcher.group(1).replace(',', '.'))));
+        } catch (Exception ignored) { }
+        for (int i = 0; i < 10; i++) {
+            String glyph = kinozalScore >= i + 1f ? "★"
+                    : kinozalScore >= i + 0.5f ? "⯪" : "☆";
+            TextView star = text(glyph, 13,
+                    kinozalScore >= i + 0.5f ? GOLD : Color.rgb(105, 111, 115), true);
+            star.setGravity(Gravity.CENTER);
+            starRow.addView(star, new LinearLayout.LayoutParams(0, -2, 1f));
+        }
+        ratings.addView(starRow, new LinearLayout.LayoutParams(-1, -2));
 
         posterColumn.addView(ratings, new LinearLayout.LayoutParams(-1, -2));
         LinearLayout.LayoutParams posterParams = new LinearLayout.LayoutParams(dp(190), -1);
@@ -3240,21 +8444,36 @@ public class MainActivity extends Activity {
         detailsColumn.setOrientation(LinearLayout.VERTICAL);
         LinearLayout tabs = new LinearLayout(this);
         tabs.setOrientation(LinearLayout.HORIZONTAL);
+        android.widget.HorizontalScrollView tabsScroll = new android.widget.HorizontalScrollView(this);
+        tabsScroll.setHorizontalScrollBarEnabled(false);
+        tabsScroll.setFillViewport(false);
+        tabsScroll.setFocusable(false);
+        tabsScroll.setDescendantFocusability(ViewGroup.FOCUS_AFTER_DESCENDANTS);
         Button descriptionTab = button("Описание");
         Button technicalTab = button("Техданные");
-        Button screenshotsTab = button("Скриншоты");
-        Button jackettTab = button("Другие раздачи");
-        tabs.addView(descriptionTab, new LinearLayout.LayoutParams(0, dp(44), 1));
-        LinearLayout.LayoutParams technicalParams = new LinearLayout.LayoutParams(0, dp(44), 1);
-        technicalParams.leftMargin = dp(6);
-        tabs.addView(technicalTab, technicalParams);
-        LinearLayout.LayoutParams screenshotsParams = new LinearLayout.LayoutParams(0, dp(44), 1);
-        screenshotsParams.leftMargin = dp(6);
-        tabs.addView(screenshotsTab, screenshotsParams);
-        LinearLayout.LayoutParams jackettParams = new LinearLayout.LayoutParams(0, dp(44), 1);
-        jackettParams.leftMargin = dp(6);
-        tabs.addView(jackettTab, jackettParams);
-        detailsColumn.addView(tabs);
+        Button releaseTab = button("Релиз");
+        Button screenshotsTab = button("Скрины");
+        Button similarTab = button("Подобные");
+        Button commentsTab = button("Комменты");
+        Button jackettTab = button("Другие");
+        registerPlusFeatureControl(screenshotsTab, "screenshots");
+        registerPlusFeatureControl(similarTab, "similar");
+        registerPlusFeatureControl(commentsTab, "comments");
+        Button[] tabButtons = {descriptionTab, technicalTab, releaseTab, screenshotsTab, similarTab, commentsTab, jackettTab};
+        for (int tabIndex = 0; tabIndex < tabButtons.length; tabIndex++) {
+            Button tab = tabButtons[tabIndex];
+            if (tab.getVisibility() != View.VISIBLE) continue;
+            tab.setId(View.generateViewId());
+            tab.setTextSize(fontSize(13));
+            tab.setSingleLine(true);
+            tab.setMinWidth(dp(82));
+            tab.setPadding(dp(9), 0, dp(9), 0);
+            LinearLayout.LayoutParams tabParams = new LinearLayout.LayoutParams(-2, dp(44));
+            if (tabIndex > 0) tabParams.leftMargin = dp(7);
+            tabs.addView(tab, tabParams);
+        }
+        tabsScroll.addView(tabs, new android.widget.HorizontalScrollView.LayoutParams(-2, -1));
+        detailsColumn.addView(tabsScroll, new LinearLayout.LayoutParams(-1, dp(48)));
 
         ScrollView detailsScroll = new ScrollView(this);
         detailsScroll.setFillViewport(true);
@@ -3271,37 +8490,166 @@ public class MainActivity extends Activity {
                 {"Качество", "Видео", "Аудио", "Субтитры", "Продолжительность", "Перевод", "Размер", "Язык"}
         };
         final int[] active = {0};
-        Runnable render = () -> {
+        final Runnable[] render = new Runnable[1];
+        render[0] = () -> {
             detailContent.removeAllViews();
             if (active[0] == 2) {
+                if (!data.releaseLoaded && data.releaseText.isEmpty()) {
+                    detailContent.addView(text(data.releaseLoading ? "Загружаем сведения о релизе…"
+                            : "Загружаем сведения о релизе…", 15, Color.LTGRAY, false));
+                    if (!data.releaseLoading && !data.releaseRequestId.isEmpty()
+                            && !data.releasePagesd.isEmpty()) {
+                        data.releaseLoading = true;
+                        loadReleaseText(data, ready -> {
+                            data.releaseLoading = false;
+                            data.releaseLoaded = true;
+                            if (active[0] == 2) render[0].run();
+                        });
+                    } else if (data.releaseRequestId.isEmpty() || data.releasePagesd.isEmpty()) {
+                        data.releaseLoaded = true;
+                        detailContent.removeAllViews();
+                        detailContent.addView(text("Вкладка «Релиз» на странице не найдена.",
+                                15, Color.LTGRAY, false));
+                    }
+                } else if (!data.releaseText.isEmpty()) {
+                    TextView release = text(data.releaseText, 16, Color.WHITE, false);
+                    release.setLineSpacing(dp(3), 1f);
+                    detailContent.addView(release, new LinearLayout.LayoutParams(-1, -2));
+                }
+                descriptionTab.setBackground(shape(descriptionTab.hasFocus() ? Color.rgb(65, 72, 73) : PANEL, descriptionTab.hasFocus() ? GOLD : 0));
+                technicalTab.setBackground(shape(technicalTab.hasFocus() ? Color.rgb(65, 72, 73) : PANEL, technicalTab.hasFocus() ? GOLD : 0));
+                releaseTab.setBackground(shape(releaseTab.hasFocus() ? Color.rgb(65, 72, 73) : PANEL, releaseTab.hasFocus() ? GOLD : 0));
+                detailsScroll.scrollTo(0, 0);
+                return;
+            }
+            if (active[0] == 3) {
                 if (data.screenshotThumbs.isEmpty()) {
-                    detailContent.addView(text(data.screenshotsLoaded
-                            ? "Скриншоты на странице раздачи не найдены."
-                            : "Загрузка скриншотов…", 15, Color.LTGRAY, false));
+                    String message = data.screenshotsLoading ? "Загружаем скриншоты…"
+                            : data.screenshotsLoaded || data.screenshotRequestId.isEmpty()
+                            || data.screenshotPagesd.isEmpty()
+                            ? "Скриншоты на странице раздачи не найдены."                            : "Загружаем скриншоты…";
+                    detailContent.addView(text(message, 15, Color.LTGRAY, false));
+                    if (!data.screenshotsLoaded && !data.screenshotsLoading
+                            && !data.screenshotRequestId.isEmpty()
+                            && !data.screenshotPagesd.isEmpty()) {
+                        data.screenshotsLoading = true;
+                        loadScreenshotThumbnails(data, ready -> {
+                            data.screenshotsLoading = false;
+                            data.screenshotsLoaded = true;
+                            if (active[0] == 3) render[0].run();
+                        });
+                    } else if (data.screenshotRequestId.isEmpty()
+                            || data.screenshotPagesd.isEmpty()) {
+                        data.screenshotsLoaded = true;
+                    }
                 } else {
-                    for (int i = 0; i < data.screenshotThumbs.size(); i += 2) {
-                        LinearLayout row = new LinearLayout(this);
-                        row.setOrientation(LinearLayout.HORIZONTAL);
-                        for (int j = i; j < Math.min(i + 2, data.screenshotThumbs.size()); j++) {
-                            ImageView shot = new ImageView(this);
-                            shot.setScaleType(ImageView.ScaleType.FIT_CENTER);
-                            shot.setFocusable(false);
-                            shot.setClickable(false);
-                            shot.setBackground(shape(PANEL, 0));
-                            LinearLayout.LayoutParams shotParams = new LinearLayout.LayoutParams(0, dp(142), 1f);
-                            if (j > i) shotParams.leftMargin = dp(8);
-                            shotParams.bottomMargin = dp(8);
-                            row.addView(shot, shotParams);
-                            loadImageIntoView(data.screenshotThumbs.get(j), shot);
+                    detailContent.addView(text("Скриншоты (" + data.screenshotThumbs.size() + ")",
+                            13, TEAL, true));
+                    for (int shot = 0; shot < data.screenshotThumbs.size(); shot += 2) {
+                        LinearLayout shotRow = new LinearLayout(this);
+                        shotRow.setOrientation(LinearLayout.HORIZONTAL);
+                        shotRow.setGravity(Gravity.TOP);
+                        for (int col = 0; col < 2 && shot + col < data.screenshotThumbs.size(); col++) {
+                            final int shotIndex = shot + col;
+                            ImageView preview = new ImageView(this);
+                            preview.setScaleType(ImageView.ScaleType.FIT_CENTER);
+                            preview.setBackground(shape(PANEL, 0));
+                            preview.setFocusable(false);
+                            preview.setContentDescription("Скриншот " + (shotIndex + 1));
+                            LinearLayout.LayoutParams imageParams =
+                                    new LinearLayout.LayoutParams(0, dp(190), 1);
+                            if (col == 1) imageParams.leftMargin = dp(8);
+                            shotRow.addView(preview, imageParams);
+                            loadImageIntoView(data.screenshotThumbs.get(shotIndex), preview);
                         }
-                        detailContent.addView(row, new LinearLayout.LayoutParams(-1, -2));
+                        detailContent.addView(shotRow,
+                                new LinearLayout.LayoutParams(-1, dp(198)));
                     }
                 }
+                descriptionTab.setBackground(shape(descriptionTab.hasFocus() ? Color.rgb(65, 72, 73) : PANEL, descriptionTab.hasFocus() ? GOLD : 0));
+                technicalTab.setBackground(shape(technicalTab.hasFocus() ? Color.rgb(65, 72, 73) : PANEL, technicalTab.hasFocus() ? GOLD : 0));
                 screenshotsTab.setBackground(shape(screenshotsTab.hasFocus() ? Color.rgb(65, 72, 73) : PANEL, screenshotsTab.hasFocus() ? GOLD : 0));
                 detailsScroll.scrollTo(0, 0);
                 return;
             }
-            String[] keys = groups[active[0] == 1 ? 1 : 0];
+            if (active[0] == 4) {
+                if (!data.similarLoaded) {
+                    detailContent.addView(text("Загружаем похожие раздачи…", 15, Color.LTGRAY, false));
+                    if (!data.similarLoading && (!data.similarSearchUrl.isEmpty()
+                            || (!data.similarRequestId.isEmpty() && !data.similarPagesd.isEmpty()))) {
+                        data.similarLoading = true;
+                        loadSimilarTorrents(data, ready -> { if (active[0] == 4) render[0].run(); });
+                    } else if (data.similarSearchUrl.isEmpty()
+                            && (data.similarRequestId.isEmpty() || data.similarPagesd.isEmpty())) {
+                        data.similarLoaded = true; detailContent.removeAllViews();
+                        detailContent.addView(text("Список похожих раздач на странице не найден.", 15, Color.LTGRAY, false));
+                    }
+                } else if (data.similarTorrents.isEmpty()) {
+                    detailContent.addView(text("Похожие раздачи не найдены.", 15, Color.LTGRAY, false));
+                } else {
+                    detailContent.addView(text("Подобные раздачи (" + data.similarTorrents.size() + ")", 13, TEAL, true));
+                    View previousSimilarRow = null;
+                    for (Torrent related : data.similarTorrents) {
+                        LinearLayout row = new LinearLayout(this); row.setOrientation(LinearLayout.HORIZONTAL);
+                        row.setId(View.generateViewId());
+                        row.setGravity(Gravity.CENTER_VERTICAL);
+                        row.setFocusable(true);
+                        row.setFocusableInTouchMode(false);
+                        row.setClickable(true);
+                        row.setBackground(shape(PANEL, 0)); row.setPadding(dp(8), dp(8), dp(8), dp(8));
+                        row.setOnFocusChangeListener((v, focused) ->
+                                v.setBackground(shape(focused ? Color.rgb(65, 72, 73) : PANEL,
+                                        focused ? GOLD : 0)));
+                        if (previousSimilarRow == null) {
+                            similarTab.setNextFocusDownId(row.getId());
+                            row.setNextFocusUpId(similarTab.getId());
+                        } else {
+                            previousSimilarRow.setNextFocusDownId(row.getId());
+                            row.setNextFocusUpId(previousSimilarRow.getId());
+                        }
+                        TextView name = text(related.title, 14, releaseTypeColor(related.releaseType), true);
+                        name.setMaxLines(2); row.addView(name, new LinearLayout.LayoutParams(0, -2, 1f));
+                        TextView meta = text(related.size + "  ↑" + related.seeds + "  ↓" + related.leeches, 11, Color.LTGRAY, false);
+                        meta.setGravity(Gravity.CENTER); row.addView(meta, new LinearLayout.LayoutParams(dp(150), -2));
+                        row.setOnClickListener(v -> showTorrent(related));
+                        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-1, -2);
+                        params.bottomMargin = dp(6); detailContent.addView(row, params);
+                        previousSimilarRow = row;
+                    }
+                }
+                detailsScroll.scrollTo(0, 0); return;
+            }
+            if (active[0] == 5) {
+                if (data.comments.isEmpty()) {
+                    detailContent.addView(text("Комментарии к этой раздаче не найдены.",
+                            15, Color.LTGRAY, false));
+                } else {
+                    detailContent.addView(text("Комментарии (" + data.comments.size() + ")",
+                            13, TEAL, true));
+                    for (int commentIndex = 0; commentIndex < data.comments.size(); commentIndex++) {
+                        LinearLayout commentCard = new LinearLayout(this);
+                        commentCard.setOrientation(LinearLayout.VERTICAL);
+                        commentCard.setPadding(dp(12), dp(10), dp(12), dp(10));
+                        commentCard.setBackground(shape(PANEL, dp(8)));
+                        TextView number = text("Комментарий " + (commentIndex + 1),
+                                12, TEAL, true);
+                        number.setPadding(0, 0, 0, dp(5));
+                        commentCard.addView(number);
+                        TextView body = text(data.comments.get(commentIndex),
+                                14, Color.WHITE, false);
+                        body.setLineSpacing(dp(2), 1.0f);
+                        body.setTextIsSelectable(false);
+                        commentCard.addView(body, new LinearLayout.LayoutParams(-1, -2));
+                        LinearLayout.LayoutParams commentParams =
+                                new LinearLayout.LayoutParams(-1, -2);
+                        commentParams.bottomMargin = dp(8);
+                        detailContent.addView(commentCard, commentParams);
+                    }
+                }
+                detailsScroll.scrollTo(0, 0);
+                return;
+            }
+            String[] keys = groups[active[0] == 0 ? 0 : 1];
             boolean any = false;
             int index = 0;
             while (index < keys.length) {
@@ -3312,14 +8660,14 @@ public class MainActivity extends Activity {
                 boolean fullWidth = active[0] == 0
                         && ("В ролях".equals(key) || "О фильме".equals(key));
                 if (fullWidth) {
-                    addDetailField(detailContent, key, value, -1);
+                    addDetailField(detailContent, key, value, -1, true);
                     index++;
                     continue;
                 }
                 LinearLayout pair = new LinearLayout(this);
                 pair.setOrientation(LinearLayout.HORIZONTAL);
                 pair.setGravity(Gravity.TOP);
-                addDetailField(pair, key, value, 0);
+                addDetailField(pair, key, value, 0, active[0] == 0);
                 index++;
                 if (index < keys.length) {
                     String nextKey = keys[index];
@@ -3327,7 +8675,7 @@ public class MainActivity extends Activity {
                     boolean nextFullWidth = active[0] == 0
                             && ("В ролях".equals(nextKey) || "О фильме".equals(nextKey));
                     if (!nextFullWidth && nextValue != null && !nextValue.trim().isEmpty()) {
-                        addDetailField(pair, nextKey, nextValue, 1);
+                        addDetailField(pair, nextKey, nextValue, 1, active[0] == 0);
                         index++;
                     }
                 }
@@ -3349,23 +8697,53 @@ public class MainActivity extends Activity {
                 v.setBackground(shape(focused ? Color.rgb(65, 72, 73) : PANEL, focused ? GOLD : 0)));
         technicalTab.setOnFocusChangeListener((v, focused) ->
                 v.setBackground(shape(focused ? Color.rgb(65, 72, 73) : PANEL, focused ? GOLD : 0)));
+        releaseTab.setOnFocusChangeListener((v, focused) ->
+                v.setBackground(shape(focused ? Color.rgb(65, 72, 73) : PANEL, focused ? GOLD : 0)));
         screenshotsTab.setOnFocusChangeListener((v, focused) ->
                 v.setBackground(shape(focused ? Color.rgb(65, 72, 73) : PANEL, focused ? GOLD : 0)));
-        descriptionTab.setOnClickListener(v -> { active[0] = 0; render.run(); });
-        technicalTab.setOnClickListener(v -> { active[0] = 1; render.run(); });
-        screenshotsTab.setOnClickListener(v -> { active[0] = 2; render.run(); });
+        similarTab.setOnFocusChangeListener((v, focused) ->
+                v.setBackground(shape(focused ? Color.rgb(65, 72, 73) : PANEL, focused ? GOLD : 0)));
+        commentsTab.setOnFocusChangeListener((v, focused) ->
+                v.setBackground(shape(focused ? Color.rgb(65, 72, 73) : PANEL, focused ? GOLD : 0)));
+        jackettTab.setOnFocusChangeListener((v, focused) ->
+                v.setBackground(shape(focused ? Color.rgb(65, 72, 73) : PANEL, focused ? GOLD : 0)));
+        descriptionTab.setOnClickListener(v -> { active[0] = 0; render[0].run(); });
+        technicalTab.setOnClickListener(v -> { active[0] = 1; render[0].run(); });
+        releaseTab.setOnClickListener(v -> { active[0] = 2; render[0].run(); });
+        screenshotsTab.setOnClickListener(v -> { if (!requirePlusFeature("screenshots")) return; active[0] = 3; render[0].run(); });
+        similarTab.setOnClickListener(v -> { if (!requirePlusFeature("similar")) return; active[0] = 4; render[0].run(); });
+        commentsTab.setOnClickListener(v -> { if (!requirePlusFeature("comments")) return; active[0] = 5; render[0].run(); });
         jackettTab.setOnClickListener(v -> searchJackett(torrent.title, data.poster));
-        render.run();
+        // Initial details rendering is deferred until the dialog is attached.
 
-        watch.setOnClickListener(v -> playTorrent(data));
-        downloadTorrent.setOnClickListener(v -> downloadTorrentFile(data));
+        // Add a release to "Недавно смотрели" only after an explicit user action.
+        watch.setOnClickListener(v -> {
+            saveRecentlyViewed(torrent);
+            playTorrent(data);
+        });
+        downloadTorrent.setOnClickListener(v -> {
+            if (!requirePlusFeature("torrent_download")) return;
+            saveRecentlyViewed(torrent);
+            downloadTorrentFile(data);
+        });
         root.setLayoutParams(new ViewGroup.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         AlertDialog dialog = new AlertDialog.Builder(this)
                 .setView(root)
                 .create();
         dialog.show();
+        activeTorrentDetailsDialog = dialog;
+        activeTorrentDetailsTorrent = torrent;
+        activeTorrentDetailsData = data;
         dialog.setOnDismissListener(ignored -> {
+            // A Plus entitlement refresh can replace this dialog with a new card.
+            // The old dialog's dismiss callback may arrive after the replacement is
+            // already visible; never move DPAD focus back to the catalogue in that case.
+            if (activeTorrentDetailsDialog != dialog) return;
+            activeTorrentDetailsDialog = null;
+            activeTorrentDetailsTorrent = null;
+            activeTorrentDetailsData = null;
+            if (refreshingTorrentCardForPlus) return;
             View returnFocus = focusedTorrentSource;
             focusedTorrentSource = null;
             if (returnFocus != null) {
@@ -3390,118 +8768,25 @@ public class MainActivity extends Activity {
             window.setAttributes(windowParams);
             window.setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT);
         }
-        if (!data.poster.isEmpty()) loadImageIntoView(data.poster, poster);
+        // Let Android display the dialog shell first, then populate the
+        // details column. This avoids building all detail rows before the
+        // first visible frame and removes the artificial 320 ms entrance delay.
+        root.postOnAnimation(() -> {
+            if (root.getParent() == null || dialog.isShowing()) {
+                if (root.getParent() != null) render[0].run();
+            }
+        });
+        if (data.poster != null && !data.poster.isEmpty()) loadImageIntoView(data.poster, poster);
         watch.requestFocus();
-        loadScreenshotThumbnails(data.sourcePage, data, () -> {
-            if (active[0] == 2 && detailContent.isAttachedToWindow()) render.run();
-        });
+        prefetchInfoHash(data);
     }
 
-    /**
-     * Ask the authenticated WebView to activate Kinozal's own Screenshots tab.
-     * The site fills #tabs asynchronously; we collect only thumbnail img src
-     * values and never open the linked full-size pages.
-     */
-    private void loadScreenshotThumbnails(String detailsUrl, TorrentDetails data, Runnable onLoaded) {
-        if (detailsUrl == null || detailsUrl.trim().isEmpty() || sessionWebView == null) return;
-        fetchBrowserPage(detailsUrl, null, html -> {
-            WebView web = sessionWebView;
-            if (html == null || html.isEmpty()) {
-                data.screenshotsLoaded = true;
-                runOnUiThread(onLoaded);
-                return;
-            }
-
-            // Some Kinozal pages already contain the selected screenshots tab
-            // in the HTML response. Parse that response first: the hidden
-            // WebView may have moved on by the time this callback is delivered.
-            if (collectScreenshotUrls(html, detailsUrl, data)) {
-                data.screenshotsLoaded = true;
-                runOnUiThread(onLoaded);
-                return;
-            }
-            if (web == null) {
-                data.screenshotsLoaded = true;
-                runOnUiThread(onLoaded);
-                return;
-            }
-            final boolean[] completed = {false};
-            final Runnable timeout = () -> {
-                if (completed[0]) return;
-                completed[0] = true;
-                web.removeJavascriptInterface("KinozalScreenshotsBridge");
-                data.screenshotsLoaded = true;
-                runOnUiThread(onLoaded);
-            };
-            web.addJavascriptInterface(new Object() {
-                @JavascriptInterface
-                public void onScreenshotsHtml(String fragment) {
-                    runOnUiThread(() -> {
-                        if (completed[0]) return;
-                        completed[0] = true;
-                        browserHandler.removeCallbacks(timeout);
-                        web.removeJavascriptInterface("KinozalScreenshotsBridge");
-                        try {
-                            collectScreenshotUrls(fragment == null ? "" : fragment, detailsUrl, data);
-                        } catch (Exception ignored) { }
-                        data.screenshotsLoaded = true;
-                        onLoaded.run();
-                    });
-                }
-            }, "KinozalScreenshotsBridge");
-            browserHandler.postDelayed(timeout, 18000);
-            String script = "(function(){try{var box=document.querySelector('#tabs');"
-                    + "var tab=document.querySelector('#tbch1 a');"
-                    + "if(!box||!tab){window.KinozalScreenshotsBridge.onScreenshotsHtml('');return;}"
-                    + "var done=false;var observer=new MutationObserver(function(){"
-                    + "if(done)return;var imgs=box.querySelectorAll('img');"
-                    + "if(imgs.length){done=true;observer.disconnect();"
-                    + "window.KinozalScreenshotsBridge.onScreenshotsHtml(box.innerHTML);}});"
-                    + "observer.observe(box,{childList:true,subtree:true,attributes:true});"
-                    + "tab.click();setTimeout(function(){if(!done){done=true;observer.disconnect();"
-                    + "window.KinozalScreenshotsBridge.onScreenshotsHtml(box.innerHTML);}},2500);"
-                    + "}catch(e){window.KinozalScreenshotsBridge.onScreenshotsHtml('');}})()";
-            web.evaluateJavascript(script, null);
-        });
-    }
-
-    private boolean collectScreenshotUrls(String html, String pageUrl, TorrentDetails data) {
-        try {
-            Document doc = Jsoup.parse(html == null ? "" : html, pageUrl);
-            Element tabs = doc.selectFirst("#tabs");
-            boolean isFragment = html != null
-                    && !html.toLowerCase(java.util.Locale.ROOT).contains("<html");
-            if (tabs == null && !isFragment) return false;
-            java.util.LinkedHashSet<String> unique = new java.util.LinkedHashSet<>();
-            Elements screenshotImages = tabs != null ? tabs.select("img") : doc.select("img");
-            for (Element image : screenshotImages) {
-                String raw = image.hasAttr("data-src") ? image.attr("data-src").trim() : image.attr("src").trim();
-                if (raw.isEmpty() || raw.startsWith("data:")) continue;
-                String src = image.absUrl(image.hasAttr("data-src") ? "data-src" : "src");
-                if (src == null || src.trim().isEmpty()) {
-                    try { src = java.net.URI.create(pageUrl).resolve(raw).toString(); }
-                    catch (Exception ignored) { src = ""; }
-                }
-                String lower = src.toLowerCase(java.util.Locale.ROOT);
-                if (!src.isEmpty() && !lower.contains("/poster/") && !lower.endsWith(".gif")) {
-                    unique.add(src);
-                }
-            }
-            if (!unique.isEmpty()) {
-                data.screenshotThumbs.clear();
-                data.screenshotThumbs.addAll(unique);
-                return true;
-            }
-        } catch (Exception ignored) { }
-        return false;
-    }
-
-    private void addDetailField(LinearLayout parent, String key, String value, int column) {
+    private void addDetailField(LinearLayout parent, String key, String value, int column, boolean description) {
         LinearLayout block = new LinearLayout(this);
         block.setOrientation(LinearLayout.VERTICAL);
         block.setPadding(dp(8), dp(7), dp(10), dp(9));
-        TextView label = text(key, 12, TEAL, true);
-        TextView valueView = text(value, 14, Color.WHITE, false);
+        TextView label = text(key, 16, TEAL, true);
+        TextView valueView = text(value, 16, Color.WHITE, false);
         valueView.setLineSpacing(dp(1), 1f);
         block.addView(label);
         block.addView(valueView);
@@ -3514,63 +8799,271 @@ public class MainActivity extends Activity {
         }
     }
 
-    private void playTorrent(TorrentDetails data) {
-        if (data.torrentLink == null || data.torrentLink.isEmpty()) {
-            showMessage("Не удалось найти ссылку на торрент на странице раздачи.");
+    private String getReleaseId(TorrentDetails data) {
+        String page = data.sourcePage == null ? "" : data.sourcePage.trim();
+        java.util.regex.Matcher matcher = java.util.regex.Pattern
+                .compile("(?:[?&]id=)([0-9]+)").matcher(page);
+        return matcher.find() ? matcher.group(1) : null;
+    }
+
+    private String parseInfoHash(String response) {
+        if (response == null || response.isEmpty()) return null;
+        java.util.regex.Matcher itemMatcher = java.util.regex.Pattern
+                .compile("(?is)<li>[^<]*?:\\s*([0-9a-f]{40})\\s*</li>").matcher(response);
+        if (itemMatcher.find()) return itemMatcher.group(1).toLowerCase(java.util.Locale.ROOT);
+        java.util.regex.Matcher hashMatcher = java.util.regex.Pattern
+                .compile("(?i)\\b[0-9a-f]{40}\\b").matcher(response);
+        return hashMatcher.find() ? hashMatcher.group().toLowerCase(java.util.Locale.ROOT) : null;
+    }
+
+    private void prefetchInfoHash(TorrentDetails data) {
+        requestInfoHash(data, null);
+    }
+
+    private void requestInfoHash(TorrentDetails data,
+            java.util.function.Consumer<String> callback) {
+        if (sessionWebView == null) {
+            if (callback != null) callback.accept(null);
             return;
         }
-        if (data.torrentLink.startsWith("magnet:")) {
-            try {
-                Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(data.torrentLink));
-                intent.setPackage("ru.yourok.torrserve");
-                intent.putExtra("poster", data.poster == null ? "" : data.poster);
-                intent.putExtra("title", data.title == null ? "" : data.title);
-                startActivity(intent);
-            } catch (Exception e) {
-                showMessage("Не удалось открыть magnet в TorrServe: " + safe(e.getMessage()));
-            }
+        String releaseId = getReleaseId(data);
+        if (releaseId == null) {
+            if (callback != null) callback.accept(null);
             return;
         }
 
-        // Download through the same WebView session that opened the details page.
-        // This preserves Cloudflare/session cookies and the real details-page Referer.
-        WebView web = sessionWebView;
-        if (web != null) {
-            // evaluateJavascript does not await a returned Promise. Use a JS bridge
-            // so the response is delivered only after the authenticated fetch finishes.
-            web.addJavascriptInterface(new Object() {
-                @JavascriptInterface
-                public void onTorrentResult(int statusCode, String base64, String error) {
-                    runOnUiThread(() -> {
-                        if (statusCode >= 200 && statusCode < 300 && base64 != null && !base64.isEmpty()) {
-                            try {
-                                byte[] bytes = android.util.Base64.decode(base64, android.util.Base64.DEFAULT);
-                                deliverTorrentBytes(data, bytes);
-                            } catch (Exception e) {
-                                showMessage("Не удалось прочитать торрент: " + safe(e.getMessage()));
-                            }
-                        } else {
-                            // Keep the native retry as a fallback, but do not silently
-                            // treat the unresolved JS Promise as a successful response.
-                            downloadTorrentNative(data);
-                        }
-                    });
-                }
-            }, "KinozalTorrentBridge");
-            String url = org.json.JSONObject.quote(data.torrentLink);
-            String script = "(function(){fetch(" + url
-                    + ",{credentials:'include',redirect:'follow',cache:'no-store'})"
-                    + ".then(function(r){if(!r.ok){window.KinozalTorrentBridge.onTorrentResult(r.status,'','HTTP '+r.status);return;}"
-                    + "return r.blob().then(function(blob){var reader=new FileReader();"
-                    + "reader.onloadend=function(){var value=String(reader.result||'');"
-                    + "window.KinozalTorrentBridge.onTorrentResult(r.status,value.substring(value.indexOf(',')+1),'');};"
-                    + "reader.onerror=function(){window.KinozalTorrentBridge.onTorrentResult(0,'','FileReader error');};"
-                    + "reader.readAsDataURL(blob);});})"
-                    + ".catch(function(e){window.KinozalTorrentBridge.onTorrentResult(0,'',String(e));});})()";
-            web.evaluateJavascript(script, null);
-        } else {
-            downloadTorrentNative(data);
+        String cached;
+        synchronized (infoHashCache) { cached = infoHashCache.get(releaseId); }
+        if (cached != null) {
+            if (callback != null) callback.accept(cached);
+            return;
         }
+
+        if (releaseId.equals(pendingInfoHashId)) {
+            if (callback != null) pendingInfoHashCallbacks.add(callback);
+            return;
+        }
+
+        // Only one top-level WebView navigation can be active. If the user
+        // switches to another release, finish the old waiters gracefully.
+        if (pendingInfoHashId != null) {
+            List<java.util.function.Consumer<String>> old = new ArrayList<>(pendingInfoHashCallbacks);
+            pendingInfoHashCallbacks.clear();
+            pendingInfoHashId = null;
+            for (java.util.function.Consumer<String> waiter : old) waiter.accept(null);
+        }
+        pendingInfoHashId = releaseId;
+        pendingInfoHashCallbacks.clear();
+        if (callback != null) pendingInfoHashCallbacks.add(callback);
+
+        String endpoint = Uri.parse(data.sourcePage).buildUpon()
+                .path("/get_srv_details.php")
+                .clearQuery()
+                .appendQueryParameter("id", releaseId)
+                .appendQueryParameter("action", "2")
+                .build().toString();
+
+        fetchBrowserPage(endpoint, null, response -> {
+            if (!releaseId.equals(pendingInfoHashId)) return;
+            String hash = parseInfoHash(response);
+            if (hash != null) {
+                synchronized (infoHashCache) { infoHashCache.put(releaseId, hash); }
+            }
+            List<java.util.function.Consumer<String>> waiters =
+                    new ArrayList<>(pendingInfoHashCallbacks);
+            pendingInfoHashCallbacks.clear();
+            pendingInfoHashId = null;
+            for (java.util.function.Consumer<String> waiter : waiters) waiter.accept(hash);
+        });
+    }
+
+    private void playTorrent(TorrentDetails data) {
+        requestInfoHash(data, hash -> {
+            if (hash == null) {
+                showMessage("Не удалось получить ссылку для воспроизведения. Проверьте авторизацию Kinozal и повторите.");
+                return;
+            }
+
+            String magnet = "magnet:?xt=urn:btih:" + hash
+                    + "&dn=" + Uri.encode(data.title == null ? "" : data.title);
+            String remote = getSharedPreferences(PREFS, MODE_PRIVATE)
+                    .getString("torrserve_url", "http://localhost:8090").trim().replaceAll("/+$", "");
+            String remoteHost = remote.isEmpty() ? "" : Uri.parse(remote).getHost();
+            boolean localTorrServer = "127.0.0.1".equals(remoteHost)
+                    || "localhost".equalsIgnoreCase(remoteHost)
+                    || "::1".equals(remoteHost);
+            // On the same Android device, hand the magnet to the installed TorrServe app.
+            // The REST /torrents add endpoint only queues a torrent and does not start playback.
+            if (!remote.isEmpty() && !localTorrServer) {
+                addMagnetToExternalTorrServer(remote, magnet, data);
+                return;
+            }
+            Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(magnet));
+            intent.setPackage("ru.yourok.torrserve");
+            intent.putExtra("poster", data.poster == null ? "" : data.poster);
+            intent.putExtra("title", data.title == null ? "" : data.title);
+            try {
+                startActivity(intent);
+            } catch (Exception e) {
+                showMessage("Не удалось открыть TorrServe. Проверьте, что он установлен.");
+            }
+        });
+    }
+
+
+    private void addMagnetToExternalTorrServer(String baseUrl, String magnet, TorrentDetails data) {
+        // Match TorrServe MatriX "Играть все": add the magnet through the server API,
+        // wait until metadata is ready, then open the server-generated M3U playlist.
+        // Do not select a single file or build a /stream URL on the client.
+        executeSafely(io, () -> {
+            try {
+                org.json.JSONObject addRequest = new org.json.JSONObject();
+                addRequest.put("action", "add");
+                addRequest.put("link", magnet);
+                addRequest.put("title", data.title == null ? "" : data.title);
+                addRequest.put("poster", data.poster == null ? "" : data.poster);
+                addRequest.put("category", "");
+                addRequest.put("data", "");
+                addRequest.put("save_to_db", true);
+
+                org.json.JSONObject torrent = postTorrServerJson(baseUrl, addRequest);
+                String hash = torrent.optString("hash", "");
+                if (hash.isEmpty()) {
+                    throw new java.io.IOException("Удалённый TorrServer не вернул hash добавленной раздачи.");
+                }
+
+                org.json.JSONArray files = torrent.optJSONArray("file_stats");
+                for (int attempt = 0; (files == null || files.length() == 0) && attempt < 60; attempt++) {
+                    Thread.sleep(1000);
+                    org.json.JSONObject getRequest = new org.json.JSONObject();
+                    getRequest.put("action", "get");
+                    getRequest.put("hash", hash);
+                    torrent = postTorrServerJson(baseUrl, getRequest);
+                    files = torrent.optJSONArray("file_stats");
+                }
+                if (files == null || files.length() == 0) {
+                    throw new java.io.IOException("Удалённый TorrServer не подготовил список файлов за 60 секунд.");
+                }
+
+                String torrentName = torrent.optString("name", "");
+                if (torrentName.trim().isEmpty()) {
+                    torrentName = data.title == null || data.title.trim().isEmpty()
+                            ? hash : data.title;
+                }
+
+                // This is the same endpoint used by TorrServe MatriX's own
+                // "Играть все" button: /playlist/{torrent-name}.m3u?hash=...
+                Uri playlistUri = Uri.parse(baseUrl + "/playlist/" + Uri.encode(torrentName) + ".m3u")
+                        .buildUpon()
+                        .appendQueryParameter("hash", hash)
+                        .build();
+                Intent intent = new Intent(Intent.ACTION_VIEW);
+                intent.setDataAndType(playlistUri, "video/*");
+                intent.putExtra("title", data.title == null ? "" : data.title);
+                intent.putExtra("poster", data.poster == null ? "" : data.poster);
+                runOnUiThread(() -> {
+                    try {
+                        startActivity(intent);
+                    } catch (Exception e) {
+                        showMessage("Не найден плеер, поддерживающий плейлисты TorrServer. Установите VLC или другой совместимый плеер.");
+                    }
+                });
+            } catch (Exception e) {
+                String error = safe(e.getMessage());
+                runOnUiThread(() -> showMessage("Не удалось запустить «Играть все» на удалённом TorrServer: " + error));
+            }
+        });
+    }
+
+    private org.json.JSONObject postTorrServerJson(String baseUrl, org.json.JSONObject request) throws Exception {
+        HttpURLConnection connection = null;
+        try {
+            connection = (HttpURLConnection) new URL(baseUrl + "/torrents").openConnection();
+            connection.setConnectTimeout(15000);
+            connection.setReadTimeout(45000);
+            connection.setRequestMethod("POST");
+            connection.setDoOutput(true);
+            connection.setRequestProperty("Content-Type", "application/json; charset=utf-8");
+            connection.setRequestProperty("Accept", "application/json");
+            byte[] payload = request.toString().getBytes(StandardCharsets.UTF_8);
+            connection.setFixedLengthStreamingMode(payload.length);
+            try (java.io.OutputStream output = connection.getOutputStream()) {
+                output.write(payload);
+            }
+
+            int code = connection.getResponseCode();
+            java.io.InputStream input = code >= 200 && code < 300
+                    ? connection.getInputStream() : connection.getErrorStream();
+            StringBuilder body = new StringBuilder();
+            if (input != null) {
+                try (java.io.BufferedReader reader = new java.io.BufferedReader(
+                        new java.io.InputStreamReader(input, StandardCharsets.UTF_8))) {
+                    String line;
+                    while ((line = reader.readLine()) != null) body.append(line);
+                }
+            }
+            if (code < 200 || code >= 300) {
+                String detail = body.toString();
+                throw new java.io.IOException("TorrServer HTTP " + code
+                        + (detail.isEmpty() ? "" : ": " + detail.substring(0, Math.min(180, detail.length()))));
+            }
+            return new org.json.JSONObject(body.toString());
+        } finally {
+            if (connection != null) connection.disconnect();
+        }
+    }
+
+    private void startMagnetWebViewFetch(TorrentDetails data, WebView web, int retry) {
+        final boolean[] completed = {false};
+        final Runnable fallback = () -> {
+            if (completed[0]) return;
+            completed[0] = true;
+            downloadTorrentNativeForPlayback(data);
+        };
+        final Runnable timeout = fallback;
+        browserHandler.postDelayed(timeout, 20000);
+
+        web.addJavascriptInterface(new Object() {
+            @JavascriptInterface
+            public void onMagnetTorrentResult(int statusCode, String base64, String error) {
+                runOnUiThread(() -> {
+                    if (completed[0]) return;
+                    if (statusCode >= 200 && statusCode < 300
+                            && base64 != null && !base64.isEmpty()) {
+                        try {
+                            byte[] bytes = android.util.Base64.decode(
+                                    base64, android.util.Base64.DEFAULT);
+                            if (bytes.length >= 20 && bytes[0] == 'd') {
+                                completed[0] = true;
+                                browserHandler.removeCallbacks(timeout);
+                                deliverMagnetFromTorrentBytes(data, bytes);
+                                return;
+                            }
+                        } catch (Exception ignored) { }
+                    }
+                    browserHandler.removeCallbacks(timeout);
+                    if (retry == 0) {
+                        // Retry once after a transient first-request/session race.
+                        startMagnetWebViewFetch(data, web, 1);
+                    } else {
+                        fallback.run();
+                    }
+                });
+            }
+        }, "KinozalMagnetBridge");
+
+        String url = org.json.JSONObject.quote(data.torrentLink);
+        String script = "(function(){try{fetch(" + url
+                + ",{credentials:'include',redirect:'follow',cache:'no-store'})"
+                + ".then(function(r){if(!r.ok){window.KinozalMagnetBridge.onMagnetTorrentResult(r.status,'','HTTP '+r.status);return;}"
+                + "return r.blob().then(function(blob){var reader=new FileReader();"
+                + "reader.onloadend=function(){var value=String(reader.result||'');"
+                + "window.KinozalMagnetBridge.onMagnetTorrentResult(r.status,value.substring(value.indexOf(',')+1),'');};"
+                + "reader.onerror=function(){window.KinozalMagnetBridge.onMagnetTorrentResult(0,'','FileReader error');};"
+                + "reader.readAsDataURL(blob);});})"
+                + ".catch(function(e){window.KinozalMagnetBridge.onMagnetTorrentResult(0,'',String(e));});"
+                + "}catch(e){window.KinozalMagnetBridge.onMagnetTorrentResult(0,'',String(e));}})()";
+        web.evaluateJavascript(script, null);
     }
 
     private void downloadTorrentFile(TorrentDetails data) {
@@ -3579,20 +9072,41 @@ public class MainActivity extends Activity {
             return;
         }
         if (data.torrentLink.startsWith("magnet:")) {
-            showMessage("На странице пока доступна только magnet-ссылка. Обработку magnet продолжим отдельно.");
+            showMessage("На странице доступна magnet-ссылка, а не торрент-файл.");
             return;
         }
 
+        // Fast path: use the authenticated native HTTP client directly.
+        // This avoids reloading the details page and converting the torrent
+        // through WebView -> Blob -> Base64 on every download.
         WebView web = sessionWebView;
+        executeSafely(io, () -> {
+            try {
+                String browserCookies = CookieManager.getInstance().getCookie(client.getMirror());
+                if (browserCookies != null && !browserCookies.isEmpty()) {
+                    client.importBrowserCookies(browserCookies);
+                }
+                byte[] bytes = client.fetchBytes(data.torrentLink,
+                        "application/x-bittorrent,application/octet-stream,*/*",
+                        data.sourcePage == null || data.sourcePage.isEmpty()
+                                ? client.getMirror() + "/" : data.sourcePage);
+                if (bytes == null || bytes.length < 20 || bytes[0] != 'd') {
+                    throw new java.io.IOException("Сайт вернул не .torrent-файл");
+                }
+                runOnUiThread(() -> deliverTorrentBytes(data, bytes));
+            } catch (Exception nativeError) {
+                Log.w("KinozalDownload", "Native torrent fetch failed; trying browser session",
+                        nativeError);
+                runOnUiThread(() -> downloadTorrentViaBrowser(data, web));
+            }
+        });
+    }
+
+    private void downloadTorrentViaBrowser(TorrentDetails data, WebView web) {
         if (web == null) {
-            downloadTorrentNative(data);
+            showMessage("Не удалось скачать торрент: проверьте соединение и авторизацию.");
             return;
         }
-
-        // The hidden WebView may still be on the home/catalogue page on the
-        // first visit to a details card. Load the actual details page first:
-        // this establishes the correct same-origin context and Referer before
-        // requesting download.php. fetchBrowserPage waits for onPageFinished.
         String detailsPage = data.sourcePage;
         if (detailsPage == null || detailsPage.trim().isEmpty()) {
             detailsPage = data.torrentLink;
@@ -3657,8 +9171,41 @@ public class MainActivity extends Activity {
         web.evaluateJavascript(script, null);
     }
 
+    private void downloadTorrentNativeForPlayback(TorrentDetails data) {
+        executeSafely(io, () -> {
+            try {
+                String browserCookies = CookieManager.getInstance().getCookie(client.getMirror());
+                if (browserCookies != null && !browserCookies.isEmpty()) {
+                    client.importBrowserCookies(browserCookies);
+                }
+                byte[] bytes = client.fetchBytes(data.torrentLink,
+                        "application/x-bittorrent,application/octet-stream,*/*",
+                        data.sourcePage == null || data.sourcePage.isEmpty()
+                                ? client.getMirror() + "/" : data.sourcePage);
+                deliverMagnetFromTorrentBytes(data, bytes);
+            } catch (Exception e) {
+                runOnUiThread(() -> showMessage("Не удалось получить magnet: " + safe(e.getMessage())));
+            }
+        });
+    }
+
+    private void deliverMagnetFromTorrentBytes(TorrentDetails data, byte[] bytes) throws Exception {
+        String magnet = TorrentMagnetBuilder.build(bytes, data.title);
+        Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(magnet));
+        intent.setPackage("ru.yourok.torrserve");
+        intent.putExtra("poster", data.poster == null ? "" : data.poster);
+        intent.putExtra("title", data.title == null ? "" : data.title);
+        runOnUiThread(() -> {
+            try {
+                startActivity(intent);
+            } catch (Exception e) {
+                showMessage("Не удалось открыть magnet в TorrServe: " + safe(e.getMessage()));
+            }
+        });
+    }
+
     private void downloadTorrentNative(TorrentDetails data) {
-        io.execute(() -> {
+        executeSafely(io, () -> {
             try {
                 String browserCookies = CookieManager.getInstance().getCookie(client.getMirror());
                 if (browserCookies != null && !browserCookies.isEmpty()) {
@@ -3675,28 +9222,197 @@ public class MainActivity extends Activity {
         });
     }
 
+    private static final String TORRENT_HANDLER_PACKAGE_KEY = "torrent_handler_package";
+    private static final String TORRENT_HANDLER_ACTION_KEY = "torrent_handler_action";
+    private static final String TORRENT_HANDLER_REMEMBER_KEY = "torrent_handler_remember";
+
+    private static class TorrentHandlerOption {
+        final android.content.pm.ResolveInfo resolveInfo;
+        final String action;
+        TorrentHandlerOption(android.content.pm.ResolveInfo info, String action) {
+            this.resolveInfo = info;
+            this.action = action;
+        }
+    }
+
+    private Uri prepareTorrentForExternalApp(TorrentDetails data, byte[] bytes) throws Exception {
+        if (bytes == null || bytes.length < 20 || bytes[0] != 'd') {
+            throw new java.io.IOException("Сайт вернул не .torrent-файл. Возможно, сессия истекла или зеркало отклонило запрос.");
+        }
+        String safeTitle = data.title == null ? "kinozal-torrent" : data.title.trim();
+        safeTitle = safeTitle.replaceAll("[/\\\\:*?\\\"<>|]", "_")
+                .replaceAll("\\s+", " ").trim();
+        if (safeTitle.isEmpty()) safeTitle = "kinozal-torrent";
+        java.io.File file = new java.io.File(getCacheDir(), "kinozal-transfer.torrent");
+        try (java.io.FileOutputStream out = new java.io.FileOutputStream(file, false)) {
+            out.write(bytes);
+            out.flush();
+        }
+        return Uri.parse("content://ru.gm.ktv.torrentprovider/torrent");
+    }
+
+    private List<TorrentHandlerOption> findTorrentHandlers(Uri uri) {
+        android.content.pm.PackageManager pm = getPackageManager();
+        List<TorrentHandlerOption> found = new ArrayList<>();
+        Map<String, TorrentHandlerOption> unique = new java.util.LinkedHashMap<>();
+        String[] types = {"application/x-bittorrent", "application/octet-stream", "*/*"};
+        for (String type : types) {
+            Intent view = new Intent(Intent.ACTION_VIEW);
+            view.setDataAndType(uri, type);
+            view.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            for (android.content.pm.ResolveInfo info : pm.queryIntentActivities(view, 0)) {
+                String key = info.activityInfo.packageName;
+                if (!unique.containsKey(key)) unique.put(key, new TorrentHandlerOption(info, Intent.ACTION_VIEW));
+            }
+            Intent send = new Intent(Intent.ACTION_SEND);
+            send.setType(type);
+            send.putExtra(Intent.EXTRA_STREAM, uri);
+            send.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            for (android.content.pm.ResolveInfo info : pm.queryIntentActivities(send, 0)) {
+                String key = info.activityInfo.packageName;
+                if (!unique.containsKey(key)) unique.put(key, new TorrentHandlerOption(info, Intent.ACTION_SEND));
+            }
+        }
+        found.addAll(unique.values());
+        java.util.Collections.sort(found, (a, b) -> {
+            String an = String.valueOf(a.resolveInfo.loadLabel(pm));
+            String bn = String.valueOf(b.resolveInfo.loadLabel(pm));
+            return an.compareToIgnoreCase(bn);
+        });
+        return found;
+    }
+
+    private void launchTorrentHandler(TorrentHandlerOption option, Uri uri) {
+        try {
+            Intent intent = new Intent(option.action);
+            intent.setClassName(option.resolveInfo.activityInfo.packageName,
+                    option.resolveInfo.activityInfo.name);
+            if (Intent.ACTION_VIEW.equals(option.action)) {
+                intent.setDataAndType(uri, "application/x-bittorrent");
+            } else {
+                intent.setType("application/x-bittorrent");
+                intent.putExtra(Intent.EXTRA_STREAM, uri);
+            }
+            intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            startActivity(intent);
+        } catch (Exception e) {
+            getSharedPreferences(PREFS, MODE_PRIVATE).edit()
+                    .remove(TORRENT_HANDLER_PACKAGE_KEY).remove(TORRENT_HANDLER_ACTION_KEY)
+                    .putBoolean(TORRENT_HANDLER_REMEMBER_KEY, false).apply();
+            showMessage("Не удалось открыть торрент этим приложением. Выберите другое.");            showTorrentHandlerChooser(uri);
+        }
+    }
+
+    private void showTorrentHandlerChooser(Uri uri) {
+        List<TorrentHandlerOption> handlers = findTorrentHandlers(uri);
+        if (handlers.isEmpty()) {
+            showMessage("Не найдено приложений для открытия .torrent. Установите торрент-клиент или файловый менеджер.");
+            return;
+        }
+        android.content.SharedPreferences prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
+        String remembered = prefs.getString(TORRENT_HANDLER_PACKAGE_KEY, "");
+        if (prefs.getBoolean(TORRENT_HANDLER_REMEMBER_KEY, false) && !remembered.isEmpty()) {
+            for (TorrentHandlerOption option : handlers) {
+                if (remembered.equals(option.resolveInfo.activityInfo.packageName)) {
+                    launchTorrentHandler(option, uri);
+                    return;
+                }
+            }
+            prefs.edit().remove(TORRENT_HANDLER_PACKAGE_KEY)
+                    .remove(TORRENT_HANDLER_ACTION_KEY)
+                    .putBoolean(TORRENT_HANDLER_REMEMBER_KEY, false).apply();
+        }
+
+        LinearLayout panel = new LinearLayout(this);
+        panel.setOrientation(LinearLayout.VERTICAL);
+        panel.setPadding(dp(20), dp(10), dp(20), dp(8));
+        CheckBox remember = new CheckBox(this);
+        remember.setText("Запомнить мой выбор");
+        remember.setTextColor(Color.WHITE);
+        remember.setTextSize(fontSize(15));
+        panel.addView(remember);
+        android.widget.ListView listView = new android.widget.ListView(this);
+        ArrayList<String> labels = new ArrayList<>();
+        for (TorrentHandlerOption option : handlers) {
+            labels.add(String.valueOf(option.resolveInfo.loadLabel(getPackageManager())));
+        }
+        ArrayAdapter<String> adapter = new ArrayAdapter<String>(this,
+                android.R.layout.simple_list_item_1, labels) {
+            @Override public View getView(int position, View convertView, ViewGroup parent) {
+                TextView row = (TextView) super.getView(position, convertView, parent);
+                row.setTextColor(Color.WHITE);
+                row.setTextSize(fontSize(17));
+                row.setPadding(dp(12), dp(12), dp(12), dp(12));
+                row.setCompoundDrawablePadding(dp(14));
+                android.graphics.drawable.Drawable icon = handlers.get(position).resolveInfo.loadIcon(getPackageManager());
+                if (icon != null) {
+                    icon.setBounds(0, 0, dp(36), dp(36));
+                    row.setCompoundDrawables(icon, null, null, null);
+                }
+                return row;
+            }
+        };
+        listView.setAdapter(adapter);
+        panel.addView(listView, new LinearLayout.LayoutParams(-1, dp(300)));
+        AlertDialog dialog = new AlertDialog.Builder(this)
+                .setTitle("Открыть торрент с помощью")
+                .setView(panel)
+                .setNegativeButton("Отмена", null)
+                .create();
+        listView.setOnItemClickListener((parent, view, position, id) -> {
+            TorrentHandlerOption selected = handlers.get(position);
+            if (remember.isChecked()) {
+                prefs.edit().putString(TORRENT_HANDLER_PACKAGE_KEY,
+                        selected.resolveInfo.activityInfo.packageName)
+                        .putString(TORRENT_HANDLER_ACTION_KEY, selected.action)
+                        .putBoolean(TORRENT_HANDLER_REMEMBER_KEY, true).apply();
+            } else {
+                prefs.edit().remove(TORRENT_HANDLER_PACKAGE_KEY)
+                        .remove(TORRENT_HANDLER_ACTION_KEY)
+                        .putBoolean(TORRENT_HANDLER_REMEMBER_KEY, false).apply();
+            }
+            dialog.dismiss();
+            launchTorrentHandler(selected, uri);
+        });
+        dialog.show();
+        if (dialog.getWindow() != null) {
+            dialog.getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(PANEL));
+            dialog.getWindow().setLayout((int)(getResources().getDisplayMetrics().widthPixels * 0.72f),
+                    ViewGroup.LayoutParams.WRAP_CONTENT);
+        }
+    }
+
+    private void resetTorrentHandlerChoice() {
+        getSharedPreferences(PREFS, MODE_PRIVATE).edit()
+                .remove(TORRENT_HANDLER_PACKAGE_KEY).remove(TORRENT_HANDLER_ACTION_KEY)
+                .putBoolean(TORRENT_HANDLER_REMEMBER_KEY, false).apply();
+        showMessage("Выбор приложения для торрентов сброшен");
+    }
+
     private void deliverTorrentBytes(TorrentDetails data, byte[] bytes) {
         try {
-            if (bytes == null || bytes.length < 20 || bytes[0] != 'd') {
-                throw new java.io.IOException("Сайт вернул не .torrent-файл. Возможно, сессия истекла или зеркало отклонило запрос.");
-            }
-            java.io.File target = new java.io.File(getCacheDir(), "kinozal-transfer.torrent");
-            try (java.io.FileOutputStream out = new java.io.FileOutputStream(target)) { out.write(bytes); }
-            Uri fileUri = Uri.parse("content://" + getPackageName() + ".torrentprovider/torrent");
-            Intent send = new Intent(Intent.ACTION_SEND);
-            send.setPackage("ru.yourok.torrserve");
-            send.setType("application/x-bittorrent");
-            send.putExtra(Intent.EXTRA_STREAM, fileUri);
-            send.putExtra("poster", data.poster == null ? "" : data.poster);
-            send.putExtra("title", data.title == null ? "" : data.title);
-            send.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-            send.setClipData(android.content.ClipData.newUri(getContentResolver(), "torrent", fileUri));
-            runOnUiThread(() -> {
-                try { startActivity(send); }
-                catch (Exception e) { showMessage("TorrServe MatriX не установлен или не принимает файл."); }
-            });
+            Uri uri = prepareTorrentForExternalApp(data, bytes);
+            showTorrentHandlerChooser(uri);
         } catch (Exception e) {
-            runOnUiThread(() -> showMessage("Не удалось подготовить торрент: " + safe(e.getMessage())));
+            showMessage("Не удалось подготовить торрент: " + safe(e.getMessage()));
+        }
+    }
+
+
+    private void writeTorrentToUri(Uri uri) {
+        byte[] bytes = pendingTorrentSaveBytes;
+        pendingTorrentSaveBytes = null;
+        if (bytes == null || bytes.length < 20 || bytes[0] != 'd') {
+            showMessage("Данные торрент-файла потеряны. Повторите скачивание.");
+            return;
+        }
+        try (java.io.OutputStream out = getContentResolver().openOutputStream(uri)) {
+            if (out == null) throw new java.io.IOException("Не удалось открыть выбранное место");
+            out.write(bytes);
+            out.flush();
+            showMessage("Торрент-файл сохранён");
+        } catch (Exception e) {
+            showMessage("Не удалось сохранить торрент: " + safe(e.getMessage()));
         }
     }
 
@@ -3708,5 +9424,79 @@ public class MainActivity extends Activity {
     private String safe(String s) { return s == null ? "Ошибка сети" : s; }
 
     @Override public void onBackPressed() { finish(); }
-    @Override protected void onDestroy() { if (socks5Bridge != null) socks5Bridge.stop(); io.shutdownNow(); super.onDestroy(); }
+    @Override protected void onResume() {
+        super.onResume();
+        if (!BuildConfig.DEBUG && !NativeSignatureGuard.isOfficial(this)) {
+            finish();
+            android.os.Process.killProcess(android.os.Process.myPid());
+        }
+    }
+
+    @Override protected void onStart() {
+        super.onStart();
+        scheduleCloudSync();
+        if (feedCacheReceiver == null) {
+            feedCacheReceiver = new android.content.BroadcastReceiver() {
+                @Override public void onReceive(android.content.Context context, android.content.Intent intent) {
+                    if ("com.goblinmini.kinozalclient.FEED_REFRESH_STATE".equals(intent.getAction())) {
+                        handleFeedRefreshState(intent);
+                        return;
+                    }
+                    String group = intent.getStringExtra("feed_group");
+                    String path = intent.getStringExtra("feed_path");
+                    String refreshError = intent.getStringExtra("refresh_error");
+                    if (refreshError != null) {
+                        if (("home".equals(group) && "home".equals(activeFeedScreen))
+                                || ("collections".equals(group) && "collections".equals(activeFeedScreen))) {
+                            status.setText("Обновление не удалось: " + refreshError);
+                        }
+                        return;
+                    }
+                    if (group == null || path == null) return;
+                    executeSafely(io, () -> {
+                        List<HomeSection> snapshot = "home".equals(group)
+                                ? readHomeModel() : readCollectionsModel();
+                        if (snapshot == null) return;
+                        HomeSection changed = null;
+                        for (HomeSection section : snapshot) if (path.equals(section.path)) { changed = section; break; }
+                        final HomeSection updated = changed;
+                        if (updated == null) return;
+                        runOnUiThread(() -> {
+                            if ("home".equals(group)) {
+                                homeSectionsMemory = new ArrayList<>(snapshot);
+                                java.io.File tvModel = new java.io.File(getFilesDir(), "kinozal_tv_channels_v1.json");
+                                TvHomeChannels.sync(MainActivity.this, tvModel);
+                            } else collectionsSectionsMemory = new ArrayList<>(snapshot);
+                            if (!isFinishing()) {
+                                LinearLayout targetList = "home".equals(group) ? homeList : collectionsList;
+                                if (targetList != null) {
+                                    LinearLayout previousList = list;
+                                    list = targetList;
+                                    renderHomeSection(updated);
+                                    list = previousList;
+                                }
+                                if (("home".equals(group) && "home".equals(activeFeedScreen))
+                                        || ("collections".equals(group) && "collections".equals(activeFeedScreen))) {
+                                    status.setText("Обновлена лента: " + updated.title);
+                                }
+                            }
+                        });
+                    });
+                }
+            };
+        }
+        android.content.IntentFilter filter = new android.content.IntentFilter(
+                "com.goblinmini.kinozalclient.FEED_CACHE_UPDATED");
+        filter.addAction("com.goblinmini.kinozalclient.FEED_REFRESH_STATE");
+        registerReceiver(feedCacheReceiver, filter, android.content.Context.RECEIVER_NOT_EXPORTED);
+    }
+
+    @Override protected void onStop() {
+        if (feedCacheReceiver != null) {
+            try { unregisterReceiver(feedCacheReceiver); } catch (Exception ignored) { }
+        }
+        super.onStop();
+    }
+
+    @Override protected void onDestroy() { io.shutdownNow(); imageIo.shutdownNow(); homeRefreshIo.shutdownNow(); super.onDestroy(); }
 }

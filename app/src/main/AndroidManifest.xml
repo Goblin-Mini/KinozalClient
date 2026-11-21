@@ -1,25 +1,47 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:mimeType="*/*" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.SEND" />
+            <data android:mimeType="*/*" />
+        </intent>
+    </queries>
+
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="com.android.providers.tv.permission.WRITE_EPG_DATA" />
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
     <uses-feature android:name="android.software.leanback" android:required="false" />
     <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
 
     <application
+        android:name=".KinozalApplication"
         android:allowBackup="false"
         android:label="@string/app_name"
         android:icon="@mipmap/ic_launcher"
         android:banner="@drawable/kinozal_banner"
         android:theme="@style/AppTheme"
-        android:usesCleartextTraffic="false">
+        android:usesCleartextTraffic="true">
+        <meta-data
+            android:name="com.tvvoicesearch.plugin.CAPABILITIES"
+            android:resource="@xml/plugin_capabilities" />
         <provider
-            android:name="com.goblinmini.kinozalclient.TorrentFileProvider"
-            android:authorities="com.goblinmini.kinozalclient.torrentprovider"
+            android:name=".KinozalSearchProvider"
+            android:authorities="ru.gm.ktv.search"
+            android:exported="true"
+            android:grantUriPermissions="true" />
+        <provider
+            android:name=".TorrentFileProvider"
+            android:authorities="ru.gm.ktv.torrentprovider"
             android:exported="false"
             android:grantUriPermissions="true" />
         <activity
-            android:name="com.goblinmini.kinozalclient.MainActivity"
+            android:name=".MainActivity"
+            android:screenOrientation="landscape"
             android:configChanges="keyboard|keyboardHidden|orientation|screenSize"
             android:exported="true">
             <intent-filter>
@@ -29,6 +51,24 @@
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
+            </intent-filter>
+            <!-- ATV-RU Search foreground redirect: ACTION_SEARCH + SearchManager.QUERY -->
+            <intent-filter>
+                <action android:name="android.intent.action.SEARCH" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+            <meta-data
+                android:name="android.app.searchable"
+                android:resource="@xml/searchable" />
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:scheme="kinozal" android:host="search" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:scheme="kinozal" android:host="torrent" />
             </intent-filter>
         </activity>
     </application>
