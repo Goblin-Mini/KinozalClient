@@ -72,7 +72,7 @@ async function signPlusGrant(device, env) {
   };
   const encoder = new TextEncoder();
   const signingInput = base64Url(encoder.encode(JSON.stringify(header))) + "." +
-    base64Url(encoder.encode(payload));
+    base64Url(encoder.encode(JSON.stringify(payload)));
   const signature = await crypto.subtle.sign(
     "RSASSA-PKCS1-v1_5", key, encoder.encode(signingInput),
   );
