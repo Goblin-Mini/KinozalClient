@@ -1,10 +1,34 @@
+import java.io.FileInputStream
+import java.security.KeyStore
+import java.security.MessageDigest
+
 plugins {
     id("com.android.application")
+}
+
+val releaseKeystorePath = System.getenv("KINOZAL_KEYSTORE_FILE")
+val releaseKeystorePassword = System.getenv("KINOZAL_STORE_PASSWORD")
+val releaseKeyAlias = System.getenv("KINOZAL_KEY_ALIAS")
+val releaseCertSha256: String = if (!releaseKeystorePath.isNullOrBlank()
+    && !releaseKeystorePassword.isNullOrBlank()
+    && !releaseKeyAlias.isNullOrBlank()) {
+    val keyStore = KeyStore.getInstance("JKS")
+    FileInputStream(releaseKeystorePath).use {
+        keyStore.load(it, releaseKeystorePassword.toCharArray())
+    }
+    val certificate = keyStore.getCertificate(releaseKeyAlias)
+        ?: throw GradleException("Release certificate not found for configured alias")
+    MessageDigest.getInstance("SHA-256").digest(certificate.encoded)
+        .joinToString("") { "%02X".format(it) }
+} else {
+    // Debug builds compile but intentionally cannot pass the release-certificate gate.
+    "0000000000000000000000000000000000000000000000000000000000000000"
 }
 
 android {
     namespace = "com.goblinmini.kinozalclient"
     compileSdk = 35
+    ndkVersion = "27.2.12479018"
 
     defaultConfig {
         applicationId = "ru.gm.ktv"
@@ -12,6 +36,21 @@ android {
         targetSdk = 28
         versionCode = 6
         versionName = "1.0.5"
+
+        externalNativeBuild {
+            cmake {
+                arguments += listOf("-DKTV_OFFICIAL_CERT_SHA256=$releaseCertSha256")
+                cppFlags += listOf("-std=c++17", "-fvisibility=hidden", "-fvisibility-inlines-hidden",
+                    "-fstack-protector-strong", "-D_FORTIFY_SOURCE=2")
+            }
+        }
+    }
+
+    externalNativeBuild {
+        cmake {
+            path = file("src/main/cpp/CMakeLists.txt")
+            version = "3.22.1"
+        }
     }
 
     lint {
@@ -37,7 +76,6 @@ android {
 
     buildTypes {
         release {
-            // Enable R8 shrinking, optimization and obfuscation for production APKs.
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(
