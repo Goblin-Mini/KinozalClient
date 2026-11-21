@@ -114,7 +114,7 @@ jobs:
           make_latest: true
 
       - name: Decode release keystore
-        if: github.event_name != 'pull_request' && (github.ref_name != 'feature/magnet-playback' && github.ref_name != 'feature/performance' && github.ref_name != 'feature/screen-cache-background-refresh' && github.ref_name != 'feature/sidebar-login-status-stable-restore' && github.ref_name != 'fix/home-feed-js-extractor-diagnostics' && github.ref_name != 'fix/cloud-sync-request-throttling' && github.ref_name != 'security/apk-file-signature-verifier')
+        if: github.event_name != 'pull_request' && (github.ref_name != 'feature/magnet-playback' && github.ref_name != 'feature/performance' && github.ref_name != 'feature/screen-cache-background-refresh' && github.ref_name != 'feature/sidebar-login-status-stable-restore' && github.ref_name != 'fix/home-feed-js-extractor-diagnostics' && github.ref_name != 'fix/cloud-sync-request-throttling')
         env:
           KEYSTORE_BASE64: ${{ secrets.KINOZAL_KEYSTORE_BASE64 }}
         shell: bash
@@ -124,7 +124,7 @@ jobs:
           test -s "$RUNNER_TEMP/kinozal-release.jks"
 
       - name: Build signed release APK
-        if: github.event_name != 'pull_request' && github.ref_name != 'feature/magnet-playback' && github.ref_name != 'feature/performance' && github.ref_name != 'feature/screen-cache-background-refresh' && github.ref_name != 'feature/sidebar-login-status-stable-restore' && github.ref_name != 'fix/home-feed-js-extractor-diagnostics' && github.ref_name != 'fix/cloud-sync-request-throttling' && github.ref_name != 'security/apk-file-signature-verifier'
+        if: github.event_name != 'pull_request' && github.ref_name != 'feature/magnet-playback' && github.ref_name != 'feature/performance' && github.ref_name != 'feature/screen-cache-background-refresh' && github.ref_name != 'feature/sidebar-login-status-stable-restore' && github.ref_name != 'fix/home-feed-js-extractor-diagnostics' && github.ref_name != 'fix/cloud-sync-request-throttling'
         env:
           KINOZAL_KEYSTORE_FILE: ${{ runner.temp }}/kinozal-release.jks
           KINOZAL_STORE_PASSWORD: ${{ secrets.KINOZAL_STORE_PASSWORD }}
@@ -144,6 +144,29 @@ jobs:
           test -n "$VERSION_NAME"
           echo "VERSION_CODE=$VERSION_CODE" >> "$GITHUB_ENV"
           echo "VERSION_NAME=$VERSION_NAME" >> "$GITHUB_ENV"
+
+      - name: Verify and upload signature-guard Release APK
+        if: github.event_name != 'pull_request' && github.ref_name == 'security/apk-file-signature-verifier'
+        shell: bash
+        run: |
+          APK="app/build/outputs/apk/release/app-release.apk"
+          test -s "$APK"
+          EXPECTED="C3CEC28612A951F18A0016CD193B5CAD5404905712EE0A4BFC593FDFE0E83281"
+          ACTUAL=$("$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --print-certs "$APK" | sed -n 's/^Signer #1 certificate SHA-256 digest: //p' | tr '[:lower:]' '[:upper:]')
+          echo "Expected release certificate: $EXPECTED"
+          echo "Actual APK certificate:       $ACTUAL"
+          test "$ACTUAL" = "$EXPECTED" || { echo "APK is not signed with the official release certificate"; exit 1; }
+          mkdir -p dist
+          cp "$APK" dist/KinozalClient-signature-guard-release.apk
+
+      - name: Upload signature-guard Release APK
+        if: github.event_name != 'pull_request' && github.ref_name == 'security/apk-file-signature-verifier'
+        uses: actions/upload-artifact@v4
+        with:
+          name: KinozalClient-signature-guard-release
+          path: dist/KinozalClient-signature-guard-release.apk
+          if-no-files-found: error
+          retention-days: 14
 
       - name: Upload signed Plus test APK
         if: github.event_name != 'pull_request' && (github.ref_name == 'feature/plus-premium-feature-gates' || github.ref_name == 'security/plus-signed-entitlements' || github.ref_name == 'security/apk-native-signature-guard')
