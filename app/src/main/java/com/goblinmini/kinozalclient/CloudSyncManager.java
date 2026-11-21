@@ -95,15 +95,21 @@ public final class CloudSyncManager {
         return prefs(context).getString("cloud_sync_status", "Не настроена");
     }
 
-    public static void activate(Context context, String code) throws Exception {
+    static String installationId(Context context) {
         SharedPreferences p = prefs(context);
-        String base = endpoint(context);
-        if (base.isEmpty()) throw new IllegalArgumentException("Сначала укажите адрес сервера синхронизации");
         String installId = p.getString("cloud_sync_installation_id", "");
         if (installId.isEmpty()) {
             installId = UUID.randomUUID().toString().replace("-", "");
             p.edit().putString("cloud_sync_installation_id", installId).apply();
         }
+        return installId;
+    }
+
+    public static void activate(Context context, String code) throws Exception {
+        SharedPreferences p = prefs(context);
+        String base = endpoint(context);
+        if (base.isEmpty()) throw new IllegalArgumentException("Сначала укажите адрес сервера синхронизации");
+        String installId = installationId(context);
         JSONObject request = new JSONObject();
         request.put("code", code);
         request.put("installation_id", installId);
