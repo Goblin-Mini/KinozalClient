@@ -7,7 +7,9 @@ binding = "DB"
 database_name = "kinozal-tv-license"
 database_id = "REPLACE_WITH_D1_DATABASE_ID"
 
-# Configure ADMIN_TOKEN with:
+# Configure secrets with:
 #   npx wrangler secret put ADMIN_TOKEN
-# Never commit the real token or put it in the Android APK.
+#   npx wrangler secret put PLUS_SIGNING_PRIVATE_KEY
+# PLUS_SIGNING_PRIVATE_KEY must be an unencrypted PKCS#8 RSA private-key PEM.
+# Never commit either secret or put the signing private key in the Android APK.
 # Set ALLOWED_ORIGIN as a plain-text Worker variable to the exact Pages origin.
