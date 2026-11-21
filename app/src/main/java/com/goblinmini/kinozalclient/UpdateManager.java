@@ -22,7 +22,7 @@ import java.net.URL;
 final class UpdateManager {
     private static final String TAG = "KinozalUpdate";
     private static final String RELEASE_API =
-            "https://api.github.com/repos/Goblin-Mini/KinozalClient/releases/latest";
+            "https://api.github.com/repos/Goblin-Mini/KinozalTV-Updates/releases/latest";
     private static final String UPDATE_PREFS = "kinozal_update_prefs";
     private static final String LAST_AUTO_CHECK = "last_automatic_check";
     private static final String AUTO_CHECK = "automatic_check_enabled";
