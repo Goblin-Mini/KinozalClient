@@ -47,6 +47,10 @@ android {
                 keyAlias = System.getenv("KINOZAL_KEY_ALIAS")
                 keyPassword = System.getenv("KINOZAL_KEY_PASSWORD")
             }
+            // The runtime APK-file verifier validates the signed JAR entries.
+            // Keep v1 alongside v2 so this works on API 23+ TV devices.
+            enableV1Signing = true
+            enableV2Signing = true
         }
     }
 
