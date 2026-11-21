@@ -9342,6 +9342,14 @@ public class MainActivity extends Activity {
     private String safe(String s) { return s == null ? "Ошибка сети" : s; }
 
     @Override public void onBackPressed() { finish(); }
+    @Override protected void onResume() {
+        super.onResume();
+        if (!BuildConfig.DEBUG && !NativeSignatureGuard.isOfficial(this)) {
+            finish();
+            android.os.Process.killProcess(android.os.Process.myPid());
+        }
+    }
+
     @Override protected void onStart() {
         super.onStart();
         scheduleCloudSync();
