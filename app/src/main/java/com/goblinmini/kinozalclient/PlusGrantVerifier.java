@@ -24,6 +24,9 @@ final class PlusGrantVerifier {
     static JSONObject verify(Context context, String compactGrant) throws Exception {
         try {
         if (context == null || compactGrant == null) throw new SecurityException("missing_plus_grant");
+        if (!AppSignatureGuard.isOfficial(context)) {
+            throw new SecurityException("unofficial_app_signature");
+        }
         String[] parts = compactGrant.split("\\.", -1);
         if (parts.length != 3) throw new SecurityException("malformed_plus_grant");
 
