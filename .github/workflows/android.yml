@@ -147,7 +147,7 @@ jobs:
           echo "VERSION_NAME=$VERSION_NAME" >> "$GITHUB_ENV"
 
       - name: Verify and upload signature-guard Release APK
-        if: github.event_name != 'pull_request' && (github.ref_name == 'security/apk-file-signature-verifier' || github.ref_name == 'feature/public-update-repository' || github.ref_name == 'main')
+        if: github.event_name != 'pull_request' && (github.ref_name == 'security/apk-file-signature-verifier' || github.ref_name == 'feature/public-update-repository' || github.ref_name == 'release/1.0.6-7-main-promotion' || github.ref_name == 'main')
         shell: bash
         run: |
           APK="app/build/outputs/apk/release/app-release.apk"
@@ -161,7 +161,7 @@ jobs:
           cp "$APK" dist/KinozalClient-signature-guard-release.apk
 
       - name: Upload signature-guard Release APK
-        if: github.event_name != 'pull_request' && (github.ref_name == 'security/apk-file-signature-verifier' || github.ref_name == 'feature/public-update-repository' || github.ref_name == 'main')
+        if: github.event_name != 'pull_request' && (github.ref_name == 'security/apk-file-signature-verifier' || github.ref_name == 'feature/public-update-repository' || github.ref_name == 'release/1.0.6-7-main-promotion' || github.ref_name == 'main')
         uses: actions/upload-artifact@v4
         with:
           name: KinozalClient-signature-guard-release
