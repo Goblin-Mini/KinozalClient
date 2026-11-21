@@ -114,7 +114,7 @@ jobs:
           make_latest: true
 
       - name: Decode release keystore
-        if: github.event_name != 'pull_request' && (github.ref_name != 'feature/magnet-playback' && github.ref_name != 'feature/performance' && github.ref_name != 'feature/screen-cache-background-refresh' && github.ref_name != 'feature/sidebar-login-status-stable-restore' && github.ref_name != 'fix/home-feed-js-extractor-diagnostics' && github.ref_name != 'fix/cloud-sync-request-throttling')
+        if: github.event_name != 'pull_request' && (github.ref_name != 'feature/magnet-playback' && github.ref_name != 'feature/performance' && github.ref_name != 'feature/screen-cache-background-refresh' && github.ref_name != 'feature/sidebar-login-status-stable-restore' && github.ref_name != 'fix/home-feed-js-extractor-diagnostics' && github.ref_name != 'fix/cloud-sync-request-throttling' && github.ref_name != 'security/apk-file-signature-verifier')
         env:
           KEYSTORE_BASE64: ${{ secrets.KINOZAL_KEYSTORE_BASE64 }}
         shell: bash
