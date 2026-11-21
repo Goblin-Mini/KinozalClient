@@ -305,6 +305,8 @@ final class TvHomeChannels {
 
     private static void refreshLocalChannel(Activity activity, String channelKey) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O || activity == null || activity.isFinishing()) return;
+        String requiredFeature = "favorites".equals(channelKey) ? "favorites" : "viewing_history";
+        if (!PlusAccess.hasFeature(activity, requiredFeature)) return;
         EXECUTOR.execute(() -> {
             try {
                 PreviewChannelHelper helper = new PreviewChannelHelper(activity);
