@@ -16,5 +16,10 @@
     public static final android.os.Parcelable$Creator CREATOR;
 }
 
+# Preserve JNI entrypoint names and the signature-guard classes.
+-keep class com.goblinmini.kinozalclient.NativeSignatureGuard { *; }
+-keep class com.goblinmini.kinozalclient.AppSignatureGuard { *; }
+-keep class com.goblinmini.kinozalclient.KinozalApplication { *; }
+
 # Keep source/line metadata in the mapping file for crash retracing.
 -keepattributes SourceFile,LineNumberTable
