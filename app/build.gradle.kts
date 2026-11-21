@@ -5,6 +5,7 @@ plugins {
 android {
     namespace = "com.goblinmini.kinozalclient"
     compileSdk = 35
+    ndkVersion = "27.2.12479018"
 
     defaultConfig {
         applicationId = "ru.gm.ktv"
@@ -12,6 +13,25 @@ android {
         targetSdk = 28
         versionCode = 6
         versionName = "1.0.5"
+        ndk {
+            abiFilters += listOf("armeabi-v7a", "arm64-v8a")
+        }
+        externalNativeBuild {
+            cmake {
+                cppFlags += listOf("-std=c++17")
+            }
+        }
+    }
+
+    buildFeatures {
+        buildConfig = true
+    }
+
+    externalNativeBuild {
+        cmake {
+            path = file("src/main/cpp/CMakeLists.txt")
+            version = "3.22.1"
+        }
     }
 
     lint {
@@ -37,7 +57,6 @@ android {
 
     buildTypes {
         release {
-            // Enable R8 shrinking, optimization and obfuscation for production APKs.
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(
