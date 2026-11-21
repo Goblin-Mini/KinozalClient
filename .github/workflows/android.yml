@@ -99,7 +99,7 @@ jobs:
           make_latest: true
 
       - name: Decode release keystore
-        if: github.event_name != 'pull_request' && (github.ref_name != 'feature/magnet-playback' && github.ref_name != 'feature/performance' && github.ref_name != 'feature/screen-cache-background-refresh' && github.ref_name != 'feature/sidebar-login-status-stable-restore' && github.ref_name != 'fix/home-feed-js-extractor-diagnostics' && github.ref_name != 'fix/cloud-sync-request-throttling' && github.ref_name != 'fix/voice-search-result-handling' && github.ref_name != 'fix/voice-search-result-handling')
+        if: github.event_name != 'pull_request' && (github.ref_name != 'feature/magnet-playback' && github.ref_name != 'feature/performance' && github.ref_name != 'feature/screen-cache-background-refresh' && github.ref_name != 'feature/sidebar-login-status-stable-restore' && github.ref_name != 'fix/home-feed-js-extractor-diagnostics' && github.ref_name != 'fix/cloud-sync-request-throttling')
         env:
           KEYSTORE_BASE64: ${{ secrets.KINOZAL_KEYSTORE_BASE64 }}
         shell: bash
@@ -109,7 +109,7 @@ jobs:
           test -s "$RUNNER_TEMP/kinozal-release.jks"
 
       - name: Build signed release APK
-        if: github.event_name != 'pull_request' && github.ref_name != 'feature/magnet-playback' && github.ref_name != 'feature/performance' && github.ref_name != 'feature/screen-cache-background-refresh' && github.ref_name != 'feature/sidebar-login-status-stable-restore' && github.ref_name != 'fix/home-feed-js-extractor-diagnostics' && github.ref_name != 'fix/cloud-sync-request-throttling' && github.ref_name != 'fix/voice-search-result-handling'
+        if: github.event_name != 'pull_request' && github.ref_name != 'feature/magnet-playback' && github.ref_name != 'feature/performance' && github.ref_name != 'feature/screen-cache-background-refresh' && github.ref_name != 'feature/sidebar-login-status-stable-restore' && github.ref_name != 'fix/home-feed-js-extractor-diagnostics' && github.ref_name != 'fix/cloud-sync-request-throttling'
         env:
           KINOZAL_KEYSTORE_FILE: ${{ runner.temp }}/kinozal-release.jks
           KINOZAL_STORE_PASSWORD: ${{ secrets.KINOZAL_STORE_PASSWORD }}
@@ -129,6 +129,15 @@ jobs:
           test -n "$VERSION_NAME"
           echo "VERSION_CODE=$VERSION_CODE" >> "$GITHUB_ENV"
           echo "VERSION_NAME=$VERSION_NAME" >> "$GITHUB_ENV"
+
+      - name: Upload signed test APK (no release publication)
+        if: github.event_name == 'push' && github.ref_name == 'fix/voice-search-result-handling'
+        uses: actions/upload-artifact@v4
+        with:
+          name: KinozalClient-voice-search-fix-signed
+          path: dist/KinozalClient.apk
+          if-no-files-found: error
+          retention-days: 14
 
       - name: Publish GitHub Release
         if: github.event_name != 'pull_request' && github.ref_name != 'feature/magnet-playback' && github.ref_name != 'feature/performance' && github.ref_name != 'feature/screen-cache-background-refresh' && github.ref_name != 'feature/sidebar-login-status-stable-restore' && github.ref_name != 'fix/home-feed-js-extractor-diagnostics' && github.ref_name != 'fix/cloud-sync-request-throttling' && github.ref_name != 'fix/voice-search-result-handling'
