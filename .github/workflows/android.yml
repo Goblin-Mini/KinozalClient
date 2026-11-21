@@ -177,6 +177,38 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+      - name: Initialize public updates repository when empty
+        if: github.event_name != 'pull_request' && github.ref_name == 'main'
+        env:
+          UPDATE_REPO_TOKEN: ${{ secrets.KINOZAL_UPDATE_REPO_TOKEN }}
+        shell: bash
+        run: |
+          test -n "$UPDATE_REPO_TOKEN" || { echo "Missing KINOZAL_UPDATE_REPO_TOKEN"; exit 1; }
+          AUTH=$(printf 'x-access-token:%s' "$UPDATE_REPO_TOKEN" | base64 -w0)
+          REMOTE="https://github.com/Goblin-Mini/KinozalTV-Updates.git"
+          if git -c http.extraheader="AUTHORIZATION: basic $AUTH" ls-remote --exit-code "$REMOTE" refs/heads/main >/dev/null 2>&1; then
+            echo "Public updates repository already has main; initialization is not needed."
+            exit 0
+          fi
+          mkdir -p "$RUNNER_TEMP/ktv-updates-init"
+          cd "$RUNNER_TEMP/ktv-updates-init"
+          git init --initial-branch=main
+          git config user.name "Kinozal TV Release Bot"
+          git config user.email "kinozal-tv-release-bot@users.noreply.github.com"
+          cat > README.md <<'README'
+          # Кинозал ТВ — обновления
+
+          Публичное хранилище подписанных APK и заметок к выпускам приложения «Кинозал ТВ».
+          Исходный код и серверная логика здесь не размещаются.
+
+          Установочный файл каждого выпуска: KinozalClient.apk.
+
+          Загрузки: https://github.com/Goblin-Mini/KinozalTV-Updates/releases
+          README
+          git add README.md
+          git commit -m "Initialize public app updates repository"
+          git -c http.extraheader="AUTHORIZATION: basic $AUTH" push "$REMOTE" HEAD:main
+
       - name: Publish public update release
         if: github.event_name != 'pull_request' && github.ref_name == 'main'
         uses: softprops/action-gh-release@v2
