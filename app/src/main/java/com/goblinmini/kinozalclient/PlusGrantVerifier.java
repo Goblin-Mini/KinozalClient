@@ -22,6 +22,7 @@ final class PlusGrantVerifier {
     private PlusGrantVerifier() { }
 
     static JSONObject verify(Context context, String compactGrant) throws Exception {
+        try {
         if (context == null || compactGrant == null) throw new SecurityException("missing_plus_grant");
         String[] parts = compactGrant.split("\\.", -1);
         if (parts.length != 3) throw new SecurityException("malformed_plus_grant");
@@ -89,8 +90,12 @@ final class PlusGrantVerifier {
         if (verifiedFeatures.length() == 0) throw new SecurityException("empty_plus_features");
         claims.put("verified_features", verifiedFeatures);
         return claims;
+        } catch (SecurityException invalid) {
+            throw invalid;
+        } catch (Exception invalid) {
+            throw new SecurityException("plus_grant_verification_failed", invalid);
+        }
     }
-
     private static String sha256(String value) throws Exception {
         byte[] digest = MessageDigest.getInstance("SHA-256")
                 .digest(value.getBytes(StandardCharsets.UTF_8));
