@@ -291,6 +291,7 @@ async function getLicense(request: Request, env: Env): Promise<Response> {
   const grant = await signPlusGrant(row, env);
   return response(request, env, {
     grant,
+    device_id: row.device_id,
     plan: row.plan,
     status: row.status,
     active_devices: row.active_devices,
