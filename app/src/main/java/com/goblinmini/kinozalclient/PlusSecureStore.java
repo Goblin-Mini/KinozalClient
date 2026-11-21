@@ -118,6 +118,8 @@ final class PlusSecureStore {
         return generator.generateKey();
     }
 
+    static synchronized void clear(Context context) { clearFile(context); }
+
     private static void clearFile(Context context) {
         File file = new File(context.getNoBackupFilesDir(), FILE_NAME);
         if (file.exists()) file.delete();

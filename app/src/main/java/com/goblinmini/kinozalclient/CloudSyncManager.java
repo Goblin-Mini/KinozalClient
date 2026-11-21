@@ -66,7 +66,7 @@ public final class CloudSyncManager {
         ensureSecureStorage(context);
         SharedPreferences p = prefs(context);
         String base = endpoint(context);
-        String token = p.getString("cloud_sync_token", "");
+        String token = PlusSecureStore.getString(context, "cloud_sync_token", "");
         if (base.isEmpty() || token.isEmpty()) throw new IllegalStateException("Устройство не активировано");
         return request(base + "/v1/devices", "GET", token, null).optJSONArray("devices");
     }
@@ -75,7 +75,7 @@ public final class CloudSyncManager {
         ensureSecureStorage(context);
         SharedPreferences p = prefs(context);
         String base = endpoint(context);
-        String token = p.getString("cloud_sync_token", "");
+        String token = PlusSecureStore.getString(context, "cloud_sync_token", "");
         if (base.isEmpty() || token.isEmpty()) throw new IllegalStateException("Устройство не активировано");
         request(base + "/v1/devices/" + deviceId, "DELETE", token, null);
     }
@@ -160,7 +160,7 @@ public final class CloudSyncManager {
         ensureSecureStorage(context);
         SharedPreferences p = prefs(context);
         String base = endpoint(context);
-        String token = p.getString("cloud_sync_token", "");
+        String token = PlusSecureStore.getString(context, "cloud_sync_token", "");
         if (base.isEmpty() || token.isEmpty()) throw new IllegalStateException("Синхронизация не активирована");
         JSONObject local = readLocalSnapshot(p);
         JSONArray outgoing = buildOutgoing(p, local);
