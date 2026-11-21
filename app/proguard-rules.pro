@@ -18,3 +18,6 @@
 
 # Keep source/line metadata in the mapping file for crash retracing.
 -keepattributes SourceFile,LineNumberTable
+
+# JNI entry point is resolved by its exported native symbol name.
+-keep class com.goblinmini.kinozalclient.NativeAppGuard { *; }
