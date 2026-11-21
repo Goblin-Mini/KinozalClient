@@ -50,7 +50,7 @@ function base64Url(bytes) {
 async function signPlusGrant(device, env) {
   const pem = env.PLUS_SIGNING_PRIVATE_KEY || "";
   if (!pem.includes("BEGIN PRIVATE KEY")) throw new Error("plus_signing_key_not_configured");
-  const encoded = pem.replace(/-----BEGIN PRIVATE KEY-----|-----END PRIVATE KEY-----|\\s/g, "");
+  const encoded = pem.replace(/-----BEGIN PRIVATE KEY-----|-----END PRIVATE KEY-----|\s/g, "");
   const binary = atob(encoded);
   const der = Uint8Array.from(binary, (character) => character.charCodeAt(0));
   const key = await crypto.subtle.importKey(
