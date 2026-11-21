@@ -103,7 +103,7 @@ jobs:
           retention-days: 14
 
       - name: Publish temporary update-test release
-        if: (github.ref_name == 'fix/home-feed-js-extractor-diagnostics' || github.ref_name == 'fix/cloud-sync-request-throttling' || github.ref_name == 'fix/remote-auth-presets-tv-channels') && github.event_name == 'push'
+        if: (github.ref_name == 'fix/home-feed-js-extractor-diagnostics' || github.ref_name == 'fix/cloud-sync-request-throttling') && github.event_name == 'push'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: test-update-1.0.4
