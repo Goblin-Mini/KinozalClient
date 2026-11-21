@@ -6554,45 +6554,59 @@ public class MainActivity extends Activity {
         presetLabels.add(0, "Список пресетов");
         ArrayAdapter<String> presetAdapter = new ArrayAdapter<String>(this,
                 android.R.layout.simple_spinner_item, presetLabels) {
-            private void stylePresetRow(View row) {
+            private void stylePresetText(View row, boolean dropdown, boolean selected) {
                 if (!(row instanceof TextView)) return;
                 TextView text = (TextView) row;
-                int[][] states = new int[][] {
-                        new int[] { android.R.attr.state_focused },
-                        new int[] { android.R.attr.state_pressed },
-                        new int[] { android.R.attr.state_activated },
-                        new int[] {}
-                };
-                int[] colors = new int[] { GOLD, GOLD, GOLD, Color.WHITE };
-                text.setTextColor(new android.content.res.ColorStateList(states, colors));
-                android.graphics.drawable.StateListDrawable background =
-                        new android.graphics.drawable.StateListDrawable();
-                background.addState(new int[] { android.R.attr.state_focused },
-                        shape(Color.rgb(65, 72, 73), GOLD));
-                background.addState(new int[] { android.R.attr.state_pressed },
-                        shape(Color.rgb(65, 72, 73), GOLD));
-                background.addState(new int[] { android.R.attr.state_activated },
-                        shape(Color.rgb(57, 68, 70), GOLD));
-                background.addState(new int[] {}, shape(PANEL, 0));
-                text.setBackground(background);
-                text.setPadding(dp(12), dp(8), dp(12), dp(8));
+                text.setTextColor(selected ? GOLD : Color.WHITE);
+                text.setTextSize(fontSize(15));
+                text.setGravity(Gravity.CENTER_VERTICAL);
+                text.setSingleLine(true);
+                text.setEllipsize(android.text.TextUtils.TruncateAt.END);
+                text.setPadding(dp(12), dp(7), dp(12), dp(7));
                 text.setMinHeight(dp(44));
-                text.setFocusable(true);
+                if (dropdown) {
+                    text.setLayoutParams(new android.widget.AbsListView.LayoutParams(
+                            ViewGroup.LayoutParams.MATCH_PARENT, dp(44)));
+                    android.graphics.drawable.StateListDrawable rowBackground =
+                            new android.graphics.drawable.StateListDrawable();
+                    rowBackground.addState(new int[] { android.R.attr.state_activated },
+                            shape(Color.rgb(57, 68, 70), GOLD));
+                    rowBackground.addState(new int[] { android.R.attr.state_pressed },
+                            shape(Color.rgb(57, 68, 70), GOLD));
+                    rowBackground.addState(new int[] { android.R.attr.state_focused },
+                            shape(Color.rgb(57, 68, 70), GOLD));
+                    rowBackground.addState(new int[] {}, shape(PANEL, 0));
+                    text.setBackground(rowBackground);
+                    text.setActivated(selected);
+                    text.setFocusable(false);
+                } else {
+                    text.setBackgroundColor(Color.TRANSPARENT);
+                }
             }
             @Override public View getView(int position, View convertView, ViewGroup parent) {
                 View row = super.getView(position, convertView, parent);
-                stylePresetRow(row);
+                stylePresetText(row, false, position > 0);
                 return row;
             }
             @Override public View getDropDownView(int position, View convertView, ViewGroup parent) {
                 View row = super.getDropDownView(position, convertView, parent);
-                stylePresetRow(row);
+                stylePresetText(row, true, position == presetList.getSelectedItemPosition());
                 return row;
             }
         };
         presetAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
         presetList.setAdapter(presetAdapter);
-        presetList.setBackground(shape(PANEL, TEAL));
+        android.graphics.drawable.StateListDrawable presetSpinnerBackground =
+                new android.graphics.drawable.StateListDrawable();
+        presetSpinnerBackground.addState(new int[] { android.R.attr.state_focused },
+                shape(PANEL, GOLD));
+        presetSpinnerBackground.addState(new int[] { android.R.attr.state_pressed },
+                shape(PANEL, GOLD));
+        presetSpinnerBackground.addState(new int[] {}, shape(PANEL, TEAL));
+        presetList.setBackground(presetSpinnerBackground);
+        presetList.setDropDownWidth(ViewGroup.LayoutParams.MATCH_PARENT);
+        presetList.setDropDownHorizontalOffset(0);
+        presetList.setPopupBackgroundDrawable(shape(PANEL, TEAL));
         panel.addView(presetList, new LinearLayout.LayoutParams(-1, dp(43)));
 
         CheckBox remember = new CheckBox(this);
@@ -6770,12 +6784,13 @@ public class MainActivity extends Activity {
                 getSharedPreferences("kinozal_search_presets", MODE_PRIVATE);
         String raw = presetPrefs.getString("presets", null);
         if (raw == null) {
-            // One-time migration from the original settings file used by earlier builds.
+            // Migrate the legacy value once, then keep both stores synchronized for
+            // compatibility with backups created by earlier app versions.
             raw = getSharedPreferences(PREFS, MODE_PRIVATE)
                     .getString("advanced_search_presets", "[]");
             try {
                 org.json.JSONArray migrated = new org.json.JSONArray(raw);
-                presetPrefs.edit().putString("presets", migrated.toString()).commit();
+                saveAdvancedSearchPresets(migrated);
                 return migrated;
             } catch (Exception e) {
                 android.util.Log.w("KinozalPresets", "Legacy presets could not be parsed", e);
@@ -6792,8 +6807,22 @@ public class MainActivity extends Activity {
 
     private boolean saveAdvancedSearchPresets(org.json.JSONArray presets) {
         if (presets == null) return false;
-        return getSharedPreferences("kinozal_search_presets", MODE_PRIVATE).edit()
-                .putString("presets", presets.toString()).commit();
+        String serialized = presets.toString();
+        boolean primarySaved = getSharedPreferences("kinozal_search_presets", MODE_PRIVATE)
+                .edit().putString("presets", serialized).commit();
+        boolean backupSaved = getSharedPreferences(PREFS, MODE_PRIVATE)
+                .edit().putString("advanced_search_presets", serialized).commit();
+        String verified = getSharedPreferences("kinozal_search_presets", MODE_PRIVATE)
+                .getString("presets", null);
+        boolean verifiedOnDisk = serialized.equals(verified);
+        if (!primarySaved || !backupSaved || !verifiedOnDisk) {
+            android.util.Log.e("KinozalPresets", "Preset persistence verification failed"
+                    + " primary=" + primarySaved + ", backup=" + backupSaved
+                    + ", verified=" + verifiedOnDisk);
+            return false;
+        }
+        android.util.Log.i("KinozalPresets", "Saved and verified " + presets.length() + " presets");
+        return true;
     }
 
     private void appendFilterParam(StringBuilder path, String key, String value) throws Exception {
