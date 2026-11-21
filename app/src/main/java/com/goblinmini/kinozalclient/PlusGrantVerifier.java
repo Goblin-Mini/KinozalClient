@@ -15,7 +15,7 @@ import java.security.spec.X509EncodedKeySpec;
 /** Verifies short-lived RS256 Plus grants issued by the license Worker. */
 final class PlusGrantVerifier {
     private static final String PUBLIC_KEY_DER_BASE64 =
-            "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAuftIcHmvNmHLW87pyQgzqT7wzQ5o/7pqbTDTMMcTr0amjIWPLEUm9iE64I2t8nJGEYQaP5ZBcMiLy8T8he0mkqZZp50KJ5WhEkwa+PgNV/3+Wn8C4SMY0Qmh5SP9sV7cegMMLHsh9PqcdspalzP5M3FcjoqDT6xGVaPN8WKKodO4sGpV6Dm8nxnnrrkyHLqizgflT/zSzJyS0tcVOTLlyyJMyzgiZK5+lwYVM6xkkVL10CC8pDFDNzh3z8g3v7tRkq6ilcr8VdfkQ2QneUXJjge3HoVXsZTwf/41f6UZpk4M1OZ/ZYdlULY1ue6tVZ4jwJDJtNCaVruyhwWE075NewIDAQAB";
+            "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAo0tCtUSow6g+uR7xeb9nPDr6DWqEfSjnySdhejl6OrjIJxwk4ZWHw91FOCjJEEDAxv3FuTaqkL6MX8GCROs+GHdO8y1BKtNQT6BsR00MDLpntZcWGuS0YlOYOgD2VQ5/bxz6fEse2suc9ueoCcn5igAJAyb6quFtN2lB5R4msp8q6lQspKoKESlQ/pqstJAdtBzy8UKqE23Ynm4MMJCyzCD9JRyKH1gaPMNwJqi2HRqQXcuaWVaeW6j5ddElvq0q+lH7+I8dwLZwP6I7a3rmzB80apZGRT5LplFmNa/E3xtJCh8nY0gt3Mf9eYtlbsTAyiN+Ynns/dsOUR8J0COx0wIDAQAB";
     private static final long MAX_GRANT_LIFETIME_SECONDS = 6L * 60L * 60L;
     private static final long CLOCK_SKEW_SECONDS = 5L * 60L;
 
