@@ -1,4 +1,5 @@
 name: Android CI
+# Release candidate branch: build and verify signed APK without publishing a release.
 
 on:
   push:
