@@ -6317,6 +6317,25 @@ public class MainActivity extends Activity {
     @Override protected void onActivityResult(int requestCode, int resultCode, android.content.Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
         TvHomeChannels.onBrowsableRequestResult(this, requestCode);
+
+        // Speech recognition returns text in EXTRA_RESULTS, normally without a data URI.
+        // Handle voice search before the URI guard used by document/torrent operations.
+        if (requestCode == REQUEST_VOICE_SEARCH) {
+            if (resultCode != RESULT_OK || data == null) return;
+            java.util.ArrayList<String> results = data.getStringArrayListExtra(
+                    android.speech.RecognizerIntent.EXTRA_RESULTS);
+            if (results != null && !results.isEmpty()) {
+                String recognized = results.get(0);
+                if (recognized != null && !recognized.trim().isEmpty() && search != null) {
+                    String query = recognized.trim();
+                    search.setText(query);
+                    search.setSelection(search.length());
+                    submitSearch();
+                }
+            }
+            return;
+        }
+
         if (resultCode != RESULT_OK || data == null || data.getData() == null) return;
         if (requestCode == REQUEST_BACKUP_EXPORT) {
             writeBackupToUri(data.getData());
@@ -6336,18 +6355,6 @@ public class MainActivity extends Activity {
                     .setNegativeButton("Отмена", null)
                     .setPositiveButton("Восстановить", (dialog, which) -> restoreBackupFromUri(data.getData()))
                     .show();
-            return;
-        }
-        if (requestCode != REQUEST_VOICE_SEARCH) return;
-        java.util.ArrayList<String> results = data.getStringArrayListExtra(
-                android.speech.RecognizerIntent.EXTRA_RESULTS);
-        if (results != null && !results.isEmpty()) {
-            String recognized = results.get(0);
-            if (recognized != null && !recognized.trim().isEmpty()) {
-                search.setText(recognized.trim());
-                search.setSelection(search.length());
-                submitSearch();
-            }
         }
     }
 
