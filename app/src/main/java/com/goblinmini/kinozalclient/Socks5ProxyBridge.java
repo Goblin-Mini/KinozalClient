@@ -31,6 +31,17 @@ import javax.crypto.spec.GCMParameterSpec;
  * authenticated upstream SOCKS5 connection. It never binds outside loopback.
  */
 public final class Socks5ProxyBridge {
+    // One process-wide loopback bridge: WebView's ProxyController override is global.
+    private static volatile Socks5ProxyBridge sharedInstance;
+
+    public static Socks5ProxyBridge getInstance(Context context) {
+        Socks5ProxyBridge current = sharedInstance;
+        if (current != null) return current;
+        synchronized (Socks5ProxyBridge.class) {
+            if (sharedInstance == null) sharedInstance = new Socks5ProxyBridge(context);
+            return sharedInstance;
+        }
+    }
     private static final String PREFS = "kinozal_socks5";
     private static final String KEY_ALIAS = "kinozal_socks5_aes";
     private final Context context;
@@ -67,6 +78,8 @@ public final class Socks5ProxyBridge {
 
     public synchronized void saveSettings(boolean enabled, String host, int port,
             String username, String password) throws Exception {
+        if (enabled && !PlusAccess.hasFeature(context, "proxy"))
+            throw new SecurityException("Для SOCKS5 требуется активный Plus");
         String h = host == null ? "" : host.trim();
         String u = username == null ? "" : username.trim();
         String p = password == null ? "" : password;
@@ -99,6 +112,8 @@ public final class Socks5ProxyBridge {
 
     /** Verify DNS, TCP reachability and SOCKS5 authentication without changing saved settings. */
     public void testConnection(String host, int port, String username, String password) throws Exception {
+        if (!PlusAccess.hasFeature(context, "proxy"))
+            throw new SecurityException("Для проверки SOCKS5 требуется активный Plus");
         String h = host == null ? "" : host.trim();
         String u = username == null ? "" : username.trim();
         String p = password == null ? "" : password;
@@ -114,9 +129,16 @@ public final class Socks5ProxyBridge {
         }
     }
 
+    public synchronized Proxy ensureStarted() throws Exception {
+        if (running && localPort != 0) return localHttpProxy();
+        return start();
+    }
+
     public synchronized Proxy start() throws Exception {
         stop();
         Settings cfg = settings;
+        if (cfg.enabled && !PlusAccess.hasFeature(context, "proxy"))
+            throw new SecurityException("Для SOCKS5 требуется активный Plus");
         if (!cfg.enabled) return Proxy.NO_PROXY;
         if (cfg.host.isEmpty() || cfg.port < 1 || cfg.port > 65535)
             throw new IllegalStateException("Проверьте адрес и порт SOCKS5");
@@ -190,7 +212,7 @@ public final class Socks5ProxyBridge {
             upstream = openSocks(cfg, host, port);
             upstream.setSoTimeout(0);
             if (connect) {
-                out.write("HTTP/1.1 200 Connection Established\\r\\nProxy-Agent: KinozalClient\\r\\n\\r\\n".getBytes(StandardCharsets.ISO_8859_1));
+                out.write("HTTP/1.1 200 Connection Established\r\nProxy-Agent: KinozalClient\r\n\r\n".getBytes(StandardCharsets.ISO_8859_1));
                 out.flush();
             } else {
                 URI uri = URI.create(request[1]);
@@ -200,9 +222,9 @@ public final class Socks5ProxyBridge {
                 for (int i = 1; i < lines.length; i++) {
                     String line = lines[i];
                     if (line.isEmpty() || line.toLowerCase(java.util.Locale.ROOT).startsWith("proxy-connection:")) continue;
-                    rewritten.append(line).append("\\r\\n");
+                    rewritten.append(line).append("\r\n");
                 }
-                rewritten.append("\\r\\n");
+                rewritten.append("\r\n");
                 upstream.getOutputStream().write(rewritten.toString().getBytes(StandardCharsets.ISO_8859_1));
                 upstream.getOutputStream().flush();
             }

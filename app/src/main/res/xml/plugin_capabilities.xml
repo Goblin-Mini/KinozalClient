@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<plugin-capabilities schemaVersion="2" modulePackage="ru.gm.ktv">
+    <voice-capability
+        id="kinozal-search"
+        version="1"
+        label="Поиск Кинозал ТВ"
+        kind="prefix"
+        mode="guide"
+        providerAuthoritySuffix=".search"
+        actionViewUri="kinozal://search"
+        requiredAliases="найди раздачу"
+        defaultAliases="поиск кинозала;найди на кинозале" />
+</plugin-capabilities>

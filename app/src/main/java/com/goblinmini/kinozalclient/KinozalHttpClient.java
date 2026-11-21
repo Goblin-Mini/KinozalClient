@@ -31,18 +31,22 @@ import javax.crypto.spec.GCMParameterSpec;
  * encrypted with an Android Keystore AES-GCM key before being persisted.
  */
 public final class KinozalHttpClient {
-    public static final String DEFAULT_MIRROR = "https://kinozal.cloudns.nz";
+    public static final String DEFAULT_MIRROR = "https://kinozal.me";
     private static final String PREFS = "kinozal_native_session";
     private static final String COOKIE_KEY = "encrypted_cookie_jar";
+    private static final String USER_AGENT_KEY = "native_http_user_agent";
     private static final String KEY_ALIAS = "kinozal_session_aes";
     private final Context context;
     private final CookieManager cookies = new CookieManager(null, CookiePolicy.ACCEPT_ALL);
     private String baseUrl;
+    private volatile String userAgent;
     private volatile java.net.Proxy networkProxy = java.net.Proxy.NO_PROXY;
 
     public KinozalHttpClient(Context context, String mirror) {
         this.context = context.getApplicationContext();
         setMirror(mirror);
+        userAgent = this.context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                .getString(USER_AGENT_KEY, android.webkit.WebSettings.getDefaultUserAgent(this.context));
         restoreCookies();
     }
 
@@ -55,6 +59,16 @@ public final class KinozalHttpClient {
     }
 
     public synchronized String getMirror() { return baseUrl; }
+
+    /** Keep native requests on the exact UA used to obtain the browser clearance cookie. */
+    public void setUserAgent(String value) {
+        if (value == null || value.trim().isEmpty()) return;
+        userAgent = value.trim();
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+                .putString(USER_AGENT_KEY, userAgent).apply();
+    }
+
+    public String getUserAgent() { return userAgent; }
 
     /** Route native HTTP requests through the app-owned local SOCKS5 bridge. */
     public void setProxy(java.net.Proxy proxy) {
@@ -190,7 +204,7 @@ public final class KinozalHttpClient {
             connection.setConnectTimeout(15000);
             connection.setReadTimeout(25000);
             connection.setInstanceFollowRedirects(false);
-            connection.setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 Chrome/120.0 Mobile Safari/537.36");
+            connection.setRequestProperty("User-Agent", userAgent);
             connection.setRequestProperty("Accept", accept == null ? "*/*" : accept);
             connection.setRequestProperty("Referer",
                     referer == null || referer.trim().isEmpty() ? baseUrl + "/" : referer);
@@ -222,11 +236,71 @@ public final class KinozalHttpClient {
         throw new java.io.IOException("Не удалось загрузить файл");
     }
 
+    /** Public catalogue/home GET. Does not require or import a browser login session. */
+    public String fetchPublic(String pathOrUrl) throws Exception {
+        String mirror = getMirror();
+        String target = pathOrUrl.startsWith("http") ? pathOrUrl
+                : mirror + "/" + pathOrUrl.replaceFirst("^/+", "");
+        return request(target, "GET", null, false);
+    }
+
     public synchronized String fetch(String pathOrUrl) throws Exception {
         String target = pathOrUrl.startsWith("http") ? pathOrUrl : baseUrl + "/" + pathOrUrl.replaceFirst("^/+", "");
         String html = request(target, "GET", null, false);
         if (isLoginPage(html)) throw new SecurityException("Сессия Kinozal завершилась. Войдите снова.");
         return html;
+    }
+
+
+    /**
+     * Fetch a text endpoint using the native authenticated cookie jar.
+     * The details page is sent as Referer, matching Kinozal TV's native
+     * request flow while avoiding WebView fetch stalls.
+     */
+    public synchronized String fetchTextWithReferer(String target, String referer) throws Exception {
+        String current = target.startsWith("http") ? target
+                : baseUrl + "/" + target.replaceFirst("^/+", "");
+        for (int redirect = 0; redirect < 9; redirect++) {
+            URL url = new URL(current);
+            HttpURLConnection connection = (HttpURLConnection) url.openConnection(networkProxy);
+            connection.setConnectTimeout(15000);
+            connection.setReadTimeout(20000);
+            connection.setInstanceFollowRedirects(false);
+            connection.setRequestMethod("GET");
+            connection.setRequestProperty("User-Agent", userAgent);
+            connection.setRequestProperty("Accept",
+                    "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8");
+            connection.setRequestProperty("Accept-Language", "ru-RU,ru;q=0.9,en;q=0.7");
+            connection.setRequestProperty("Cache-Control", "no-cache");
+            connection.setRequestProperty("Referer",
+                    referer == null || referer.trim().isEmpty() ? baseUrl + "/" : referer);
+            URI uri = URI.create(current);
+            List<String> cookieHeaders = cookies.get(uri, new java.util.HashMap<>()).get("Cookie");
+            if (cookieHeaders != null && !cookieHeaders.isEmpty()) {
+                connection.setRequestProperty("Cookie", cookieHeaders.get(0));
+            }
+            int code = connection.getResponseCode();
+            cookies.put(uri, connection.getHeaderFields());
+            String location = connection.getHeaderField("Location");
+            if (code == 301 || code == 302 || code == 303 || code == 307 || code == 308) {
+                connection.disconnect();
+                if (location == null || redirect == 8) {
+                    throw new java.io.IOException("Слишком много перенаправлений");
+                }
+                current = new URL(url, location).toString();
+                continue;
+            }
+            InputStream input = code >= 400 ? connection.getErrorStream() : connection.getInputStream();
+            String body = input == null ? "" : readAll(input, connection.getContentType());
+            connection.disconnect();
+            if (code < 200 || code >= 300) {
+                throw new java.io.IOException("HTTP " + code + ": "
+                        + body.replaceAll("\\s+", " ").trim().substring(0,
+                        Math.min(160, body.replaceAll("\\s+", " ").trim().length())));
+            }
+            return body;
+        }
+        throw new java.io.IOException("Не удалось выполнить запрос к Kinozal");
     }
 
     /** Submit a site category/filter form while preserving its original fields. */
@@ -248,7 +322,7 @@ public final class KinozalHttpClient {
             connection.setReadTimeout(20000);
             connection.setInstanceFollowRedirects(false);
             connection.setRequestMethod(currentMethod);
-            connection.setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 Chrome/120.0 Mobile Safari/537.36");
+            connection.setRequestProperty("User-Agent", userAgent);
             connection.setRequestProperty("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8");
             connection.setRequestProperty("Accept-Language", "ru-RU,ru;q=0.9,en;q=0.7");
             URI uri = URI.create(current);
@@ -262,6 +336,8 @@ public final class KinozalHttpClient {
             }
             int code = connection.getResponseCode();
             cookies.put(uri, connection.getHeaderFields());
+            // Persist rotated session/Cloudflare cookies for background workers.
+            try { persistCookies(); } catch (Exception ignored) { }
             String location = connection.getHeaderField("Location");
             if (code == 301 || code == 302 || code == 303 || code == 307 || code == 308) {
                 connection.disconnect();
@@ -284,7 +360,26 @@ public final class KinozalHttpClient {
                         : "Повтори не раньше чем через " + retryAfter.trim() + " сек.";
                 throw new java.io.IOException("Kinozal временно ограничил запросы (HTTP 429). " + wait);
             }
-            if (code >= 400) throw new java.io.IOException("HTTP " + code + " при запросе Kinozal");
+            if (code >= 400) {
+                org.jsoup.nodes.Document errorDoc = org.jsoup.Jsoup.parse(result == null ? "" : result);
+                String errorTitle = errorDoc.title();
+                String errorText = errorDoc.text();
+                if (errorText.length() > 220) errorText = errorText.substring(0, 220);
+                String diagnostic = "";
+                if (code == 403) {
+                    String lower = (errorTitle + " " + errorText).toLowerCase(java.util.Locale.ROOT);
+                    if (lower.contains("cloudflare") || lower.contains("attention required")
+                            || lower.contains("checking your browser") || lower.contains("ray id")) {
+                        diagnostic = " (страница блокировки Cloudflare)";
+                    } else if (lower.contains("access denied") || lower.contains("forbidden")) {
+                        diagnostic = " (сервер запретил доступ; проверьте сессию/зеркало)";
+                    } else {
+                        diagnostic = " (тип ответа: " + (errorTitle.isEmpty() ? "неизвестная страница" : errorTitle) + ")";
+                    }
+                }
+                throw new java.io.IOException("HTTP " + code + diagnostic + " при запросе Kinozal"
+                        + (errorText.isEmpty() ? "" : ": " + errorText));
+            }
             return result;
         }
         throw new java.io.IOException("Не удалось выполнить запрос к Kinozal");
@@ -329,6 +424,17 @@ public final class KinozalHttpClient {
             cookies.getCookieStore().add(origin, cookie);
         }
         persistCookies();
+    }
+
+    /** Build a current Cookie header for synchronizing the authenticated native session into WebView. */
+    public synchronized String getCookieHeader() {
+        StringBuilder value = new StringBuilder();
+        for (HttpCookie cookie : cookies.getCookieStore().getCookies()) {
+            if (cookie == null || cookie.hasExpired()) continue;
+            if (value.length() > 0) value.append("; ");
+            value.append(cookie.getName()).append("=").append(cookie.getValue());
+        }
+        return value.toString();
     }
 
     private void persistCookies() throws Exception {
