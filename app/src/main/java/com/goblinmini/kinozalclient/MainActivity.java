@@ -6539,9 +6539,8 @@ public class MainActivity extends Activity {
         queryParams.bottomMargin = dp(5);
         panel.addView(query, queryParams);
 
-        // Saved search templates are stored locally on this device.
-        android.widget.Spinner presetList = new android.widget.Spinner(this);
-        presetList.setPrompt("Список пресетов");
+        // Saved presets use a native single-choice AlertDialog instead of Spinner.
+        // Android TV's Spinner popup did not reliably receive DPAD navigation.
         List<String> presetLabels = new ArrayList<>();
         List<Integer> presetIndexes = new ArrayList<>();
         final org.json.JSONArray storedPresets = loadAdvancedSearchPresets();
@@ -6552,73 +6551,41 @@ public class MainActivity extends Activity {
             } catch (Exception ignored) { }
         }
         presetLabels.add(0, "Список пресетов");
-        ArrayAdapter<String> presetAdapter = new ArrayAdapter<String>(this,
-                android.R.layout.simple_spinner_item, presetLabels) {
-            private void stylePresetText(View row, boolean dropdown, boolean selected) {
-                if (!(row instanceof TextView)) return;
-                TextView text = (TextView) row;
-                text.setTextColor(selected ? GOLD : Color.WHITE);
-                text.setTextSize(fontSize(15));
-                text.setGravity(Gravity.CENTER_VERTICAL);
-                text.setSingleLine(true);
-                text.setEllipsize(android.text.TextUtils.TruncateAt.END);
-                text.setPadding(dp(12), dp(7), dp(12), dp(7));
-                text.setMinHeight(dp(44));
-                if (dropdown) {
-                    text.setLayoutParams(new android.widget.AbsListView.LayoutParams(
-                            ViewGroup.LayoutParams.MATCH_PARENT, dp(44)));
-                    android.graphics.drawable.StateListDrawable rowBackground =
-                            new android.graphics.drawable.StateListDrawable();
-                    rowBackground.addState(new int[] { android.R.attr.state_activated },
-                            shape(Color.rgb(57, 68, 70), GOLD));
-                    rowBackground.addState(new int[] { android.R.attr.state_pressed },
-                            shape(Color.rgb(57, 68, 70), GOLD));
-                    rowBackground.addState(new int[] { android.R.attr.state_focused },
-                            shape(Color.rgb(57, 68, 70), GOLD));
-                    rowBackground.addState(new int[] {}, shape(PANEL, 0));
-                    text.setBackground(rowBackground);
-                    text.setActivated(selected);
-                    // Keep dropdown rows in the DPAD focus chain. On Android TV,
-                    // non-focusable custom rows can leave the popup stuck on the
-                    // initially selected item even though the popup is visible.
-                    text.setFocusable(true);
-                    text.setFocusableInTouchMode(false);
-                    text.setClickable(false);
-                    text.setOnFocusChangeListener((view, focused) -> {
-                        view.setSelected(focused);
-                        view.setBackground(shape(focused
-                                ? Color.rgb(57, 68, 70) : PANEL, focused ? GOLD : 0));
-                        ((TextView) view).setTextColor(focused ? GOLD : Color.WHITE);
-                    });
-                } else {
-                    text.setBackgroundColor(Color.TRANSPARENT);
-                }
-            }
-            @Override public View getView(int position, View convertView, ViewGroup parent) {
-                View row = super.getView(position, convertView, parent);
-                stylePresetText(row, false, position > 0);
-                return row;
-            }
-            @Override public View getDropDownView(int position, View convertView, ViewGroup parent) {
-                View row = super.getDropDownView(position, convertView, parent);
-                stylePresetText(row, true, position == presetList.getSelectedItemPosition());
-                return row;
-            }
-        };
-        presetAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
-        presetList.setAdapter(presetAdapter);
-        android.graphics.drawable.StateListDrawable presetSpinnerBackground =
-                new android.graphics.drawable.StateListDrawable();
-        presetSpinnerBackground.addState(new int[] { android.R.attr.state_focused },
-                shape(PANEL, GOLD));
-        presetSpinnerBackground.addState(new int[] { android.R.attr.state_pressed },
-                shape(PANEL, GOLD));
-        presetSpinnerBackground.addState(new int[] {}, shape(PANEL, TEAL));
-        presetList.setBackground(presetSpinnerBackground);
-        presetList.setDropDownWidth(ViewGroup.LayoutParams.MATCH_PARENT);
-        presetList.setDropDownHorizontalOffset(0);
-        presetList.setPopupBackgroundDrawable(shape(PANEL, TEAL));
-        panel.addView(presetList, new LinearLayout.LayoutParams(-1, dp(43)));
+        final int[] selectedPresetPosition = {0};
+        TextView presetSelector = text("Список пресетов", 15, Color.WHITE, false);
+        presetSelector.setGravity(Gravity.CENTER_VERTICAL);
+        presetSelector.setSingleLine(true);
+        presetSelector.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        presetSelector.setPadding(dp(12), 0, dp(12), 0);
+        presetSelector.setFocusable(true);
+        presetSelector.setFocusableInTouchMode(false);
+        presetSelector.setClickable(true);
+        presetSelector.setBackground(shape(PANEL, TEAL));
+        presetSelector.setOnFocusChangeListener((view, focused) ->
+                view.setBackground(shape(PANEL, focused ? GOLD : TEAL)));
+        presetSelector.setOnClickListener(v -> {
+            String[] choices = presetLabels.toArray(new String[0]);
+            AlertDialog chooser = new AlertDialog.Builder(this)
+                    .setTitle("Список пресетов")
+                    .setSingleChoiceItems(choices, selectedPresetPosition[0], (choiceDialog, which) -> {
+                        selectedPresetPosition[0] = which;
+                        presetSelector.setText(presetLabels.get(which));
+                        if (which > 0) {
+                            try {
+                                int storedIndex = presetIndexes.get(which - 1);
+                                restorePreset.accept(storedPresets.getJSONObject(storedIndex));
+                            } catch (Exception e) {
+                                showMessage("Не удалось открыть пресет поиска.");
+                            }
+                        }
+                        choiceDialog.dismiss();
+                    })
+                    .setNegativeButton("Закрыть", null)
+                    .create();
+            chooser.show();
+            chooser.getWindow().setBackgroundDrawable(shape(BG, TEAL));
+        });
+        panel.addView(presetSelector, new LinearLayout.LayoutParams(-1, dp(43)));
 
         CheckBox remember = new CheckBox(this);
         remember.setText("Запомнить параметры фильтра");
@@ -6667,17 +6634,6 @@ public class MainActivity extends Activity {
                 if (!last.isEmpty()) restorePreset.accept(new org.json.JSONObject(last));
             } catch (Exception ignored) { }
         }
-        presetList.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener() {
-            @Override public void onNothingSelected(android.widget.AdapterView<?> parent) { }
-            @Override public void onItemSelected(android.widget.AdapterView<?> parent, View view,
-                    int position, long id) {
-                if (position <= 0) return;
-                try {
-                    int storedIndex = presetIndexes.get(position - 1);
-                    restorePreset.accept(storedPresets.getJSONObject(storedIndex));
-                } catch (Exception e) { showMessage("Не удалось открыть пресет поиска."); }
-            }
-        });
         addPreset.setOnClickListener(v -> {
             EditText nameInput = new EditText(this);
             nameInput.setSingleLine(true);
@@ -6700,17 +6656,17 @@ public class MainActivity extends Activity {
                                 preset.put(keys[i], ((FilterOption) filterSpinners[i].getSelectedItem()).value);
                             storedPresets.put(preset);
                             presetIndexes.add(storedPresets.length() - 1);
-                            presetAdapter.add(name);
-                            presetAdapter.notifyDataSetChanged();
+                            presetLabels.add(name);
                             if (!saveAdvancedSearchPresets(storedPresets))
                                 throw new IllegalStateException("Не удалось записать пресеты на диск");
-                            presetList.setSelection(presetAdapter.getCount() - 1);
+                            selectedPresetPosition[0] = presetLabels.size() - 1;
+                            presetSelector.setText(name);
                             showMessage("Пресет «" + name + "» сохранён");
                         } catch (Exception e) { showMessage("Не удалось сохранить пресет."); }
                     }).show();
         });
         deletePreset.setOnClickListener(v -> {
-            int selectedPosition = presetList.getSelectedItemPosition();
+            int selectedPosition = selectedPresetPosition[0];
             if (selectedPosition <= 0 || selectedPosition > presetIndexes.size()) {
                 showMessage("Сначала выберите пресет для удаления");
                 return;
@@ -6731,10 +6687,10 @@ public class MainActivity extends Activity {
                                         .optString("name", "Пресет " + (i + 1)));
                                 presetIndexes.add(i);
                             }
-                            presetAdapter.notifyDataSetChanged();
                             if (!saveAdvancedSearchPresets(storedPresets))
                                 throw new IllegalStateException("Не удалось записать пресеты на диск");
-                            presetList.setSelection(0);
+                            selectedPresetPosition[0] = 0;
+                            presetSelector.setText("Список пресетов");
                             showMessage("Пресет удалён");
                         } catch (Exception e) { showMessage("Не удалось удалить пресет."); }
                     }).show();
