@@ -40,6 +40,45 @@ function normalizeCode(code) {
   return code.toUpperCase().replace(/[^A-Z0-9]/g, "");
 }
 
+
+function base64Url(bytes) {
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary).replace(/=/g, "").replace(/\\+/g, "-").replace(/\\//g, "_");
+}
+
+async function signPlusGrant(device, env) {
+  const pem = env.PLUS_SIGNING_PRIVATE_KEY || "";
+  if (!pem.includes("BEGIN PRIVATE KEY")) throw new Error("plus_signing_key_not_configured");
+  const encoded = pem.replace(/-----BEGIN PRIVATE KEY-----|-----END PRIVATE KEY-----|\\s/g, "");
+  const binary = atob(encoded);
+  const der = Uint8Array.from(binary, (character) => character.charCodeAt(0));
+  const key = await crypto.subtle.importKey(
+    "pkcs8", der, { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" }, false, ["sign"],
+  );
+  const header = { alg: "RS256", typ: "JWT", kid: "plus-rsa-2026-01" };
+  const issuedAt = Math.floor(Date.now() / 1000);
+  const payload = {
+    iss: "kinozal-tv-license",
+    aud: "ru.gm.ktv",
+    sub: device.device_id,
+    iid: await sha256(device.installation_id),
+    plan: device.plan,
+    status: device.status,
+    features: FEATURES,
+    iat: issuedAt,
+    exp: issuedAt + 6 * 60 * 60,
+    jti: randomHex(16),
+  };
+  const encoder = new TextEncoder();
+  const signingInput = base64Url(encoder.encode(JSON.stringify(header))) + "." +
+    base64Url(encoder.encode(payload));
+  const signature = await crypto.subtle.sign(
+    "RSASSA-PKCS1-v1_5", key, encoder.encode(signingInput),
+  );
+  return signingInput + "." + base64Url(new Uint8Array(signature));
+}
+
 async function sha256(value) {
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
   return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
@@ -187,7 +226,7 @@ async function getLicense(request, env) {
   if (!token) return response(request, env, { error: "unauthorized" }, 401);
   const tokenHash = await sha256(token);
   const row = await env.DB.prepare(
-    `SELECT d.id AS device_id, d.license_id, d.device_label, l.plan, l.status,
+    `SELECT d.id AS device_id, d.installation_id, d.license_id, d.device_label, l.plan, l.status,
        l.device_limit, l.created_at,
        (SELECT COUNT(*) FROM devices x WHERE x.license_id=l.id AND x.revoked_at IS NULL) AS active_devices
      FROM devices d JOIN licenses l ON l.id=d.license_id
@@ -198,7 +237,12 @@ async function getLicense(request, env) {
   await env.DB.prepare("UPDATE devices SET last_seen_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?")
     .bind(row.device_id).run();
 
+  if (!env.PLUS_SIGNING_PRIVATE_KEY) {
+    return response(request, env, { error: "plus_signing_not_configured" }, 503);
+  }
+  const grant = await signPlusGrant(row, env);
   return response(request, env, {
+    grant,
     plan: row.plan,
     status: row.status,
     active_devices: row.active_devices,
