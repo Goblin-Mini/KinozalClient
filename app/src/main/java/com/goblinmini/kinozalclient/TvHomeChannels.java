@@ -307,20 +307,32 @@ final class TvHomeChannels {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O || activity == null || activity.isFinishing()) return;
         String requiredFeature = "favorites".equals(channelKey) ? "favorites" : "viewing_history";
         if (!PlusAccess.hasFeature(activity, requiredFeature)) return;
+        Context appContext = activity.getApplicationContext();
         EXECUTOR.execute(() -> {
             try {
-                PreviewChannelHelper helper = new PreviewChannelHelper(activity);
+                PreviewChannelHelper helper = new PreviewChannelHelper(appContext);
                 PreviewChannel channel = findChannel(helper, "kinozal:" + channelKey);
                 if (channel == null) {
-                    diag(activity, "LOCAL_CHANNEL_REFRESH", channelKey + " channel not created yet");
+                    // A local item may be added before the initial feed pass has
+                    // created launcher channels. Re-run channel sync from the last
+                    // saved model instead of dropping this refresh request.
+                    File model = new File(appContext.getFilesDir(), "kinozal_home_model_v2.json");
+                    if (model.isFile() && model.length() > 0) {
+                        diag(appContext, "LOCAL_CHANNEL_REFRESH", channelKey
+                                + " channel missing; rebuilding channels from saved model");
+                        syncInternal(appContext, model, activity.isFinishing() ? null : activity);
+                    } else {
+                        diag(appContext, "LOCAL_CHANNEL_REFRESH", channelKey
+                                + " channel missing and saved model unavailable");
+                    }
                     return;
                 }
                 JSONArray programs = "favorites".equals(channelKey)
-                        ? readFavoritePrograms(activity) : readRecentPrograms(activity);
-                replacePrograms(activity, helper, channel.getId(), channelKey, programs);
-                diag(activity, "LOCAL_CHANNEL_REFRESH", channelKey + " programs=" + programs.length());
+                        ? readFavoritePrograms(appContext) : readRecentPrograms(appContext);
+                replacePrograms(appContext, helper, channel.getId(), channelKey, programs);
+                diag(appContext, "LOCAL_CHANNEL_REFRESH", channelKey + " programs=" + programs.length());
             } catch (Exception e) {
-                diag(activity, "LOCAL_CHANNEL_REFRESH_ERROR", channelKey + " " + e.getClass().getSimpleName()
+                diag(appContext, "LOCAL_CHANNEL_REFRESH_ERROR", channelKey + " " + e.getClass().getSimpleName()
                         + ": " + e.getMessage());
                 Log.w(TAG, "Could not refresh " + channelKey + " channel", e);
             }
@@ -415,7 +427,10 @@ final class TvHomeChannels {
         try {
             JSONArray source = new JSONArray(raw);
             JSONArray result = new JSONArray();
-            for (int i = 0; i < Math.min(source.length(), 20); i++) {
+            // Favorites are stored oldest-first in insertion order. Publish them
+            // newest-first so the most recently added title appears at the left.
+            int start = Math.max(0, source.length() - 20);
+            for (int i = source.length() - 1; i >= start; i--) {
                 JSONObject old = source.optJSONObject(i);
                 if (old == null) continue;
                 JSONObject item = new JSONObject();
@@ -540,7 +555,7 @@ final class TvHomeChannels {
                     .setType(TvContractCompat.PreviewPrograms.TYPE_MOVIE)
                     .setTitle(title)
                     .setDescription(description.toString())
-                    .setWeight(limit - i)
+                    .setWeight(i + 1)
                     .setIntentUri(Uri.parse(openIntent.toUri(Intent.URI_INTENT_SCHEME)))
                     .setInternalProviderId("kinozal:" + channelKey + ":" + href);
             Uri posterUri = (image.startsWith("https://") || image.startsWith("http://"))

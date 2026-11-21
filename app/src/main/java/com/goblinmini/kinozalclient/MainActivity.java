@@ -434,8 +434,11 @@ public class MainActivity extends Activity {
             firstLaunchAuthorizationPending = true;
             return;
         }
-        if (savedBrowserCookies != null) restoreBrowserSession(savedBrowserCookies);
-        else markStartupCatalogReady();
+        // Always keep the authenticated WebView transport available, even when
+        // the saved cookie snapshot is empty or expired. This lets feed/category
+        // requests use the same credential-based session recovery path instead
+        // of silently falling back to native HTTP without automatic re-login.
+        restoreBrowserSession(savedBrowserCookies == null ? "" : savedBrowserCookies);
     }
 
     private void applyWebViewProxy(boolean enabled, Runnable callback) {
@@ -3851,8 +3854,16 @@ public class MainActivity extends Activity {
         syncParams.topMargin = dp(8);
         panel.addView(sync, syncParams);
 
+        // The device list can grow beyond the visible dialog height. Keep the
+        // entire activation flow scrollable so DPAD users can reach Sync.
+        ScrollView activationScroll = new ScrollView(this);
+        activationScroll.setFillViewport(false);
+        activationScroll.setClipToPadding(false);
+        activationScroll.setVerticalScrollBarEnabled(true);
+        activationScroll.addView(panel, new ScrollView.LayoutParams(-1, -2));
+
         AlertDialog dialog = new AlertDialog.Builder(this).setTitle("Активация и синхронизация")
-                .setView(panel).setNegativeButton("Закрыть", null).create();
+                .setView(activationScroll).setNegativeButton("Закрыть", null).create();
 
         final Runnable[] refreshDevices = new Runnable[1];
         refreshDevices[0] = () -> {
@@ -4004,6 +4015,15 @@ public class MainActivity extends Activity {
                 }
             });
         });
+        sync.setFocusable(true);
+        sync.setFocusableInTouchMode(false);
+        sync.setOnFocusChangeListener((view, focused) -> {
+            if (focused) activationScroll.post(() -> {
+                android.graphics.Rect visible = new android.graphics.Rect();
+                sync.getDrawingRect(visible);
+                activationScroll.requestChildRectangleOnScreen(sync, visible, true);
+            });
+        });
         sync.setOnClickListener(v -> {
             if (!CloudSyncManager.isActivated(this)) {
                 showMessage("Сначала активируйте устройство");
@@ -4014,6 +4034,10 @@ public class MainActivity extends Activity {
             executeSafely(io, () -> {
                 try {
                     CloudSyncManager.sync(this);
+                    // Cloud sync can add or remove local items from another device.
+                    // Refresh launcher channels from the just-merged local snapshot.
+                    TvHomeChannels.refreshFavorites(MainActivity.this);
+                    TvHomeChannels.refreshContinue(MainActivity.this);
                     runOnUiThread(() -> {
                         sync.setEnabled(true);
                         syncState.setText("Статус: синхронизировано");
@@ -6515,9 +6539,8 @@ public class MainActivity extends Activity {
         queryParams.bottomMargin = dp(5);
         panel.addView(query, queryParams);
 
-        // Saved search templates are stored locally on this device.
-        android.widget.Spinner presetList = new android.widget.Spinner(this);
-        presetList.setPrompt("Список пресетов");
+        // Saved presets use a native single-choice AlertDialog instead of Spinner.
+        // Android TV's Spinner popup did not reliably receive DPAD navigation.
         List<String> presetLabels = new ArrayList<>();
         List<Integer> presetIndexes = new ArrayList<>();
         final org.json.JSONArray storedPresets = loadAdvancedSearchPresets();
@@ -6528,12 +6551,19 @@ public class MainActivity extends Activity {
             } catch (Exception ignored) { }
         }
         presetLabels.add(0, "Список пресетов");
-        ArrayAdapter<String> presetAdapter = new ArrayAdapter<>(this,
-                android.R.layout.simple_spinner_item, presetLabels);
-        presetAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
-        presetList.setAdapter(presetAdapter);
-        presetList.setBackground(shape(PANEL, TEAL));
-        panel.addView(presetList, new LinearLayout.LayoutParams(-1, dp(43)));
+        final int[] selectedPresetPosition = {0};
+        TextView presetSelector = text("Список пресетов", 15, Color.WHITE, false);
+        presetSelector.setGravity(Gravity.CENTER_VERTICAL);
+        presetSelector.setSingleLine(true);
+        presetSelector.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        presetSelector.setPadding(dp(12), 0, dp(12), 0);
+        presetSelector.setFocusable(true);
+        presetSelector.setFocusableInTouchMode(false);
+        presetSelector.setClickable(true);
+        presetSelector.setBackground(shape(PANEL, TEAL));
+        presetSelector.setOnFocusChangeListener((view, focused) ->
+                view.setBackground(shape(PANEL, focused ? GOLD : TEAL)));
+        panel.addView(presetSelector, new LinearLayout.LayoutParams(-1, dp(43)));
 
         CheckBox remember = new CheckBox(this);
         remember.setText("Запомнить параметры фильтра");
@@ -6575,6 +6605,28 @@ public class MainActivity extends Activity {
                 }
             }
         };
+        presetSelector.setOnClickListener(v -> {
+            String[] choices = presetLabels.toArray(new String[0]);
+            AlertDialog chooser = new AlertDialog.Builder(this)
+                    .setTitle("Список пресетов")
+                    .setSingleChoiceItems(choices, selectedPresetPosition[0], (choiceDialog, which) -> {
+                        selectedPresetPosition[0] = which;
+                        presetSelector.setText(presetLabels.get(which));
+                        if (which > 0) {
+                            try {
+                                int storedIndex = presetIndexes.get(which - 1);
+                                restorePreset.accept(storedPresets.getJSONObject(storedIndex));
+                            } catch (Exception e) {
+                                showMessage("Не удалось открыть пресет поиска.");
+                            }
+                        }
+                        choiceDialog.dismiss();
+                    })
+                    .setNegativeButton("Закрыть", null)
+                    .create();
+            chooser.show();
+            chooser.getWindow().setBackgroundDrawable(shape(BG, TEAL));
+        });
         if (remember.isChecked()) {
             try {
                 String last = getSharedPreferences(PREFS, MODE_PRIVATE)
@@ -6582,17 +6634,6 @@ public class MainActivity extends Activity {
                 if (!last.isEmpty()) restorePreset.accept(new org.json.JSONObject(last));
             } catch (Exception ignored) { }
         }
-        presetList.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener() {
-            @Override public void onNothingSelected(android.widget.AdapterView<?> parent) { }
-            @Override public void onItemSelected(android.widget.AdapterView<?> parent, View view,
-                    int position, long id) {
-                if (position <= 0) return;
-                try {
-                    int storedIndex = presetIndexes.get(position - 1);
-                    restorePreset.accept(storedPresets.getJSONObject(storedIndex));
-                } catch (Exception e) { showMessage("Не удалось открыть пресет поиска."); }
-            }
-        });
         addPreset.setOnClickListener(v -> {
             EditText nameInput = new EditText(this);
             nameInput.setSingleLine(true);
@@ -6615,17 +6656,17 @@ public class MainActivity extends Activity {
                                 preset.put(keys[i], ((FilterOption) filterSpinners[i].getSelectedItem()).value);
                             storedPresets.put(preset);
                             presetIndexes.add(storedPresets.length() - 1);
-                            presetAdapter.add(name);
-                            presetAdapter.notifyDataSetChanged();
+                            presetLabels.add(name);
                             if (!saveAdvancedSearchPresets(storedPresets))
                                 throw new IllegalStateException("Не удалось записать пресеты на диск");
-                            presetList.setSelection(presetAdapter.getCount() - 1);
+                            selectedPresetPosition[0] = presetLabels.size() - 1;
+                            presetSelector.setText(name);
                             showMessage("Пресет «" + name + "» сохранён");
                         } catch (Exception e) { showMessage("Не удалось сохранить пресет."); }
                     }).show();
         });
         deletePreset.setOnClickListener(v -> {
-            int selectedPosition = presetList.getSelectedItemPosition();
+            int selectedPosition = selectedPresetPosition[0];
             if (selectedPosition <= 0 || selectedPosition > presetIndexes.size()) {
                 showMessage("Сначала выберите пресет для удаления");
                 return;
@@ -6646,10 +6687,10 @@ public class MainActivity extends Activity {
                                         .optString("name", "Пресет " + (i + 1)));
                                 presetIndexes.add(i);
                             }
-                            presetAdapter.notifyDataSetChanged();
                             if (!saveAdvancedSearchPresets(storedPresets))
                                 throw new IllegalStateException("Не удалось записать пресеты на диск");
-                            presetList.setSelection(0);
+                            selectedPresetPosition[0] = 0;
+                            presetSelector.setText("Список пресетов");
                             showMessage("Пресет удалён");
                         } catch (Exception e) { showMessage("Не удалось удалить пресет."); }
                     }).show();
@@ -6710,12 +6751,13 @@ public class MainActivity extends Activity {
                 getSharedPreferences("kinozal_search_presets", MODE_PRIVATE);
         String raw = presetPrefs.getString("presets", null);
         if (raw == null) {
-            // One-time migration from the original settings file used by earlier builds.
+            // Migrate the legacy value once, then keep both stores synchronized for
+            // compatibility with backups created by earlier app versions.
             raw = getSharedPreferences(PREFS, MODE_PRIVATE)
                     .getString("advanced_search_presets", "[]");
             try {
                 org.json.JSONArray migrated = new org.json.JSONArray(raw);
-                presetPrefs.edit().putString("presets", migrated.toString()).commit();
+                saveAdvancedSearchPresets(migrated);
                 return migrated;
             } catch (Exception e) {
                 android.util.Log.w("KinozalPresets", "Legacy presets could not be parsed", e);
@@ -6732,8 +6774,22 @@ public class MainActivity extends Activity {
 
     private boolean saveAdvancedSearchPresets(org.json.JSONArray presets) {
         if (presets == null) return false;
-        return getSharedPreferences("kinozal_search_presets", MODE_PRIVATE).edit()
-                .putString("presets", presets.toString()).commit();
+        String serialized = presets.toString();
+        boolean primarySaved = getSharedPreferences("kinozal_search_presets", MODE_PRIVATE)
+                .edit().putString("presets", serialized).commit();
+        boolean backupSaved = getSharedPreferences(PREFS, MODE_PRIVATE)
+                .edit().putString("advanced_search_presets", serialized).commit();
+        String verified = getSharedPreferences("kinozal_search_presets", MODE_PRIVATE)
+                .getString("presets", null);
+        boolean verifiedOnDisk = serialized.equals(verified);
+        if (!primarySaved || !backupSaved || !verifiedOnDisk) {
+            android.util.Log.e("KinozalPresets", "Preset persistence verification failed"
+                    + " primary=" + primarySaved + ", backup=" + backupSaved
+                    + ", verified=" + verifiedOnDisk);
+            return false;
+        }
+        android.util.Log.i("KinozalPresets", "Saved and verified " + presets.length() + " presets");
+        return true;
     }
 
     private void appendFilterParam(StringBuilder path, String key, String value) throws Exception {
