@@ -3225,7 +3225,7 @@ public class MainActivity extends Activity {
         searchBar.addView(searchField, searchParams);
         plusAdvancedSearchButton = button("+");
         plusAdvancedSearchButton.setTextSize(fontSize(24));
-        plusAdvancedSearchButton.setText("+ $");
+        plusAdvancedSearchButton.setText("+");
         plusAdvancedSearchButton.setContentDescription("Расширенный поиск — Plus");
         registerPlusFeatureControl(plusAdvancedSearchButton, "advanced_search");
         plusAdvancedSearchButton.setMinWidth(0);
@@ -3685,14 +3685,14 @@ public class MainActivity extends Activity {
         addSettingsAction(left, "Начальный раздел", () -> chooseStartupSource());
         addSettingsAction(left, "Размер шрифта", () -> showFontSizeSettings());
         addSettingsAction(left, "Поиск Jackett", () -> showJackettSettings());
-        Button proxyAction = addSettingsAction(left, "Прокси  $", this::showSocks5Settings);
+        Button proxyAction = addSettingsAction(left, "Прокси", this::showSocks5Settings);
         registerPlusFeatureControl(proxyAction, "proxy");
         addSettingsAction(left, "Очистить кэш", () -> confirmClearCache());
         addSettingsAction(right, "Сбросить приложение для торрентов", () -> resetTorrentHandlerChoice());
 
         addSettingsAction(right, "Цвет акцента", () -> showAccentPicker());
         addSettingsAction(right, "TorrServe", () -> showTorrServeSettings());
-        Button backupAction = addSettingsAction(right, "Резервная копия  $", () -> {
+        Button backupAction = addSettingsAction(right, "Резервная копия", () -> {
             if (!requirePlusFeature("backup")) return;
             new AlertDialog.Builder(this)
                     .setItems(new String[]{"Создать резервную копию", "Восстановить из копии"},
@@ -3709,7 +3709,7 @@ public class MainActivity extends Activity {
         bottomRow.setOrientation(LinearLayout.HORIZONTAL);
         bottomRow.setPadding(0, dp(8), 0, 0);
         boolean hasTvChannelsPlus = PlusAccess.hasFeature(this, "android_tv_channels");
-        Button channelsButton = settingsPillButton("Каналы Android TV  $");
+        Button channelsButton = settingsPillButton("Каналы Android TV");
         registerPlusFeatureControl(channelsButton, "android_tv_channels");
         boolean channelsOn = PlusAccess.hasFeature(this, "android_tv_channels")
                 && getSharedPreferences(PREFS, MODE_PRIVATE).getBoolean("tv_channels_enabled", false);
@@ -3718,7 +3718,7 @@ public class MainActivity extends Activity {
             TvHomeChannels.removeAll(this);
         }
         channelsButton.setText(hasTvChannelsPlus
-                ? "Каналы Android TV  $: " + (channelsOn ? "Вкл." : "Выкл.")
+                ? "Каналы Android TV: " + (channelsOn ? "Вкл." : "Выкл.")
                 : "Каналы Android TV — Доступно в Plus");
         bottomRow.addView(channelsButton, new LinearLayout.LayoutParams(0, dp(48), 1f));
         Button aboutButton = settingsPillButton("О приложении");
@@ -3737,13 +3737,13 @@ public class MainActivity extends Activity {
                         if (which == 0) {
                             getSharedPreferences(PREFS, MODE_PRIVATE).edit()
                                     .putBoolean("tv_channels_enabled", true).apply();
-                            channelsButton.setText("Каналы Android TV  $: Вкл.");
+                            channelsButton.setText("Каналы Android TV: Вкл.");
                             browserHandler.postDelayed(this::loadTvChannelFeedsInBrowser, 150);
                             showMessage("Каналы Android TV включены");
                         } else if (which == 1) {
                             getSharedPreferences(PREFS, MODE_PRIVATE).edit()
                                     .putBoolean("tv_channels_enabled", false).apply();
-                            channelsButton.setText("Каналы Android TV  $: Выкл.");
+                            channelsButton.setText("Каналы Android TV: Выкл.");
                             TvHomeChannels.removeAll(this);
                             showMessage("Каналы Android TV отключены");
                         } else if (which == 2) {
@@ -5224,7 +5224,7 @@ public class MainActivity extends Activity {
 
     private void addMenu(String icon, String label, Runnable action, boolean premium) {
 
-        String displayLabel = icon + "   " + label + (premium ? "  $" : "");
+        String displayLabel = icon + "   " + label;
         Button b = button(displayLabel);
         b.setText(menuIconText(displayLabel));
         b.setText(menuIconText(displayLabel));
@@ -8272,7 +8272,7 @@ public class MainActivity extends Activity {
 
         String releaseType = normalizeReleaseType(torrent == null ? "r0" : torrent.releaseType);
         int releaseButtonColor = releaseTypeColor(releaseType);
-        Button downloadTorrent = button("↓  Скачать торрент  $");
+        Button downloadTorrent = button("↓  Скачать торрент");
         downloadTorrent.setTextSize(fontSize(14));
         // Keep the original dark button appearance; use the release type only
         // for its label and thin outline instead of filling the whole button.
@@ -8359,9 +8359,9 @@ public class MainActivity extends Activity {
         Button descriptionTab = button("Описание");
         Button technicalTab = button("Техданные");
         Button releaseTab = button("Релиз");
-        Button screenshotsTab = button("Скрины  $");
-        Button similarTab = button("Подобные  $");
-        Button commentsTab = button("Комменты  $");
+        Button screenshotsTab = button("Скрины");
+        Button similarTab = button("Подобные");
+        Button commentsTab = button("Комменты");
         Button jackettTab = button("Другие");
         registerPlusFeatureControl(screenshotsTab, "screenshots");
         registerPlusFeatureControl(similarTab, "similar");
