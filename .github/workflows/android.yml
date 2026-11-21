@@ -2,7 +2,7 @@ name: Android CI
 
 on:
   push:
-    branches: [ main, feature/magnet-playback, feature/performance, feature/screen-cache-background-refresh, feature/sidebar-login-status-stable-restore, fix/home-feed-js-extractor-diagnostics, fix/cloud-sync-request-throttling, feature/plus-premium-feature-gates, security/plus-signed-entitlements, security/apk-native-signature-guard, security/apk-file-signature-verifier ]
+    branches: [ main, develop, feature/magnet-playback, feature/performance, feature/screen-cache-background-refresh, feature/sidebar-login-status-stable-restore, fix/home-feed-js-extractor-diagnostics, fix/cloud-sync-request-throttling, feature/plus-premium-feature-gates, security/plus-signed-entitlements, security/apk-native-signature-guard, security/apk-file-signature-verifier ]
   pull_request:
     branches: [ main ]
   workflow_dispatch:
