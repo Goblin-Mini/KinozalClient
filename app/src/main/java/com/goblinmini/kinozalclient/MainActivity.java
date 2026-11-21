@@ -3694,7 +3694,6 @@ public class MainActivity extends Activity {
         Button proxyAction = addSettingsAction(left, "Прокси", this::showSocks5Settings);
         registerPlusFeatureControl(proxyAction, "proxy");
         addSettingsAction(left, "Очистить кэш", () -> confirmClearCache());
-        addSettingsAction(right, "Сбросить приложение для торрентов", () -> resetTorrentHandlerChoice());
 
         addSettingsAction(right, "Цвет акцента", () -> showAccentPicker());
         addSettingsAction(right, "TorrServe", () -> showTorrServeSettings());
