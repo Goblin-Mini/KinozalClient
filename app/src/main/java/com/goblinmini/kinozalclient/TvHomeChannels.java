@@ -427,7 +427,10 @@ final class TvHomeChannels {
         try {
             JSONArray source = new JSONArray(raw);
             JSONArray result = new JSONArray();
-            for (int i = 0; i < Math.min(source.length(), 20); i++) {
+            // Favorites are stored oldest-first in insertion order. Publish them
+            // newest-first so the most recently added title appears at the left.
+            int start = Math.max(0, source.length() - 20);
+            for (int i = source.length() - 1; i >= start; i--) {
                 JSONObject old = source.optJSONObject(i);
                 if (old == null) continue;
                 JSONObject item = new JSONObject();
@@ -552,7 +555,7 @@ final class TvHomeChannels {
                     .setType(TvContractCompat.PreviewPrograms.TYPE_MOVIE)
                     .setTitle(title)
                     .setDescription(description.toString())
-                    .setWeight(limit - i)
+                    .setWeight(i + 1)
                     .setIntentUri(Uri.parse(openIntent.toUri(Intent.URI_INTENT_SCHEME)))
                     .setInternalProviderId("kinozal:" + channelKey + ":" + href);
             Uri posterUri = (image.startsWith("https://") || image.startsWith("http://"))
