@@ -51,7 +51,8 @@ final class PlusAccess {
             try {
                 JSONObject info = CloudSyncManager.licenseInfo(app);
                 String compactGrant = info.optString("grant", "");
-                JSONObject verifiedGrant = PlusGrantVerifier.verify(app, compactGrant);
+                String expectedDeviceId = info.optString("device_id", "");
+                JSONObject verifiedGrant = PlusGrantVerifier.verify(app, compactGrant, expectedDeviceId);
                 JSONArray verifiedFeatures = verifiedGrant.optJSONArray("verified_features");
                 long expiresAt = verifiedGrant.optLong("exp", 0L) * 1000L;
                 if (verifiedFeatures == null || expiresAt <= System.currentTimeMillis()) {
