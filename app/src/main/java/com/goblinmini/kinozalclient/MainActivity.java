@@ -6318,8 +6318,6 @@ public class MainActivity extends Activity {
         super.onActivityResult(requestCode, resultCode, data);
         TvHomeChannels.onBrowsableRequestResult(this, requestCode);
 
-        // Speech recognition returns text in EXTRA_RESULTS, normally without a data URI.
-        // Handle voice search before the URI guard used by document/torrent operations.
         if (requestCode == REQUEST_VOICE_SEARCH) {
             if (resultCode != RESULT_OK || data == null) return;
             java.util.ArrayList<String> results = data.getStringArrayListExtra(
