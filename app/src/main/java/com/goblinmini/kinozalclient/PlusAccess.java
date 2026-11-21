@@ -15,6 +15,7 @@ final class PlusAccess {
     private static final String KEY_ACTIVE = "plus_entitlement_active";
     private static final String KEY_FEATURES = "plus_entitlement_features";
     private static final String KEY_CHECKED = "plus_entitlement_checked_at";
+    private static final String KEY_EXPIRES = "plus_entitlement_expires_at";
     private static final long OFFLINE_GRACE_MS = 6L * 60L * 60L * 1000L;
     private static final ExecutorService EXECUTOR = Executors.newSingleThreadExecutor();
 
@@ -26,7 +27,9 @@ final class PlusAccess {
         if (!prefs.getBoolean(KEY_ACTIVE, false)) return false;
         long checkedAt = prefs.getLong(KEY_CHECKED, 0L);
         long now = System.currentTimeMillis();
-        if (checkedAt <= 0L || now < checkedAt || now - checkedAt > OFFLINE_GRACE_MS) return false;
+        long expiresAt = prefs.getLong(KEY_EXPIRES, 0L);
+        if (checkedAt <= 0L || now < checkedAt || now - checkedAt > OFFLINE_GRACE_MS
+                || expiresAt <= now) return false;
         try {
             JSONArray features = new JSONArray(prefs.getString(KEY_FEATURES, "[]"));
             for (int i = 0; i < features.length(); i++) {
@@ -48,11 +51,17 @@ final class PlusAccess {
             try {
                 JSONObject info = CloudSyncManager.licenseInfo(app);
                 String compactGrant = info.optString("grant", "");
-                JSONArray verifiedFeatures = PlusGrantVerifier.verify(app, compactGrant);
+                JSONObject verifiedGrant = PlusGrantVerifier.verify(app, compactGrant);
+                JSONArray verifiedFeatures = verifiedGrant.optJSONArray("verified_features");
+                long expiresAt = verifiedGrant.optLong("exp", 0L) * 1000L;
+                if (verifiedFeatures == null || expiresAt <= System.currentTimeMillis()) {
+                    throw new SecurityException("invalid_plus_expiry");
+                }
                 app.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
                         .putBoolean(KEY_ACTIVE, true)
                         .putString(KEY_FEATURES, verifiedFeatures.toString())
                         .putLong(KEY_CHECKED, System.currentTimeMillis())
+                        .putLong(KEY_EXPIRES, expiresAt)
                         .apply();
             } catch (SecurityException invalidGrant) {
                 // A bad signature, wrong device binding, wrong audience or expired
@@ -80,6 +89,7 @@ final class PlusAccess {
                 .putBoolean(KEY_ACTIVE, false)
                 .putString(KEY_FEATURES, "[]")
                 .putLong(KEY_CHECKED, System.currentTimeMillis())
+                .putLong(KEY_EXPIRES, 0L)
                 .apply();
     }
 
