@@ -4278,7 +4278,7 @@ public class MainActivity extends Activity {
         org.json.JSONObject app = new org.json.JSONObject();
         android.content.SharedPreferences prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
         String[] keys = {FAVORITES_KEY, RECENTLY_VIEWED_KEY, SEARCH_HISTORY_KEY,
-                "mirror", "startup_source", "torrserve_url"};
+                "mirror", "startup_source", "torrserve_url", "advanced_search_presets"};
         for (String key : keys) if (prefs.contains(key)) app.put(key, prefs.getAll().get(key));
         root.put("app", app);
         org.json.JSONObject jackett = new org.json.JSONObject();
@@ -4343,7 +4343,7 @@ public class MainActivity extends Activity {
             if (app != null) {
                 android.content.SharedPreferences.Editor editor = getSharedPreferences(PREFS, MODE_PRIVATE).edit();
                 String[] keys = {FAVORITES_KEY, RECENTLY_VIEWED_KEY, SEARCH_HISTORY_KEY,
-                        "mirror", "startup_source", "torrserve_url"};
+                        "mirror", "startup_source", "torrserve_url", "advanced_search_presets"};
                 for (String key : keys) if (app.has(key)) {
                     Object value = app.get(key);
                     if (value instanceof String) editor.putString(key, (String)value);
@@ -6511,7 +6511,8 @@ public class MainActivity extends Activity {
         android.widget.Spinner presetList = new android.widget.Spinner(this);
         presetList.setPrompt("Список пресетов");
         List<String> presetLabels = new ArrayList<>();
-        final org.json.JSONArray storedPresets;
+        List<Integer> presetIndexes = new ArrayList<>();
+        org.json.JSONArray storedPresets;
         org.json.JSONArray loadedPresets;
         try {
             loadedPresets = new org.json.JSONArray(getSharedPreferences(PREFS, MODE_PRIVATE)
@@ -6521,6 +6522,7 @@ public class MainActivity extends Activity {
         for (int i = 0; i < storedPresets.length(); i++) {
             try {
                 presetLabels.add(storedPresets.getJSONObject(i).optString("name", "Пресет " + (i + 1)));
+                presetIndexes.add(i);
             } catch (Exception ignored) { }
         }
         presetLabels.add(0, "Список пресетов");
@@ -6542,6 +6544,11 @@ public class MainActivity extends Activity {
         Button addPreset = button("+  Добавить пресет");
         addPreset.setTextSize(fontSize(14));
         panel.addView(addPreset, new LinearLayout.LayoutParams(-1, dp(42)));
+        Button deletePreset = button("Удалить выбранный пресет");
+        deletePreset.setTextSize(fontSize(13));
+        LinearLayout.LayoutParams deletePresetParams = new LinearLayout.LayoutParams(-1, dp(40));
+        deletePresetParams.topMargin = dp(5);
+        panel.addView(deletePreset, deletePresetParams);
 
         android.widget.Spinner where = addFilterSpinner(panel, "Где искать", searchIn, 0);
         android.widget.Spinner category = addFilterSpinner(panel, "Раздел", categories, 0);
@@ -6578,8 +6585,10 @@ public class MainActivity extends Activity {
             @Override public void onItemSelected(android.widget.AdapterView<?> parent, View view,
                     int position, long id) {
                 if (position <= 0) return;
-                try { restorePreset.accept(storedPresets.getJSONObject(position - 1)); }
-                catch (Exception e) { showMessage("Не удалось открыть пресет поиска."); }
+                try {
+                    int storedIndex = presetIndexes.get(position - 1);
+                    restorePreset.accept(storedPresets.getJSONObject(storedIndex));
+                } catch (Exception e) { showMessage("Не удалось открыть пресет поиска."); }
             }
         });
         addPreset.setOnClickListener(v -> {
@@ -6603,10 +6612,47 @@ public class MainActivity extends Activity {
                             for (int i = 0; i < keys.length; i++)
                                 preset.put(keys[i], ((FilterOption) filterSpinners[i].getSelectedItem()).value);
                             storedPresets.put(preset);
+                            presetIndexes.add(storedPresets.length() - 1);
+                            presetAdapter.add(name);
+                            presetAdapter.notifyDataSetChanged();
                             getSharedPreferences(PREFS, MODE_PRIVATE).edit()
                                     .putString("advanced_search_presets", storedPresets.toString()).apply();
+                            presetList.setSelection(presetAdapter.getCount() - 1);
                             showMessage("Пресет «" + name + "» сохранён");
                         } catch (Exception e) { showMessage("Не удалось сохранить пресет."); }
+                    }).show();
+        });
+        deletePreset.setOnClickListener(v -> {
+            int selectedPosition = presetList.getSelectedItemPosition();
+            if (selectedPosition <= 0 || selectedPosition > presetIndexes.size()) {
+                showMessage("Сначала выберите пресет для удаления");
+                return;
+            }
+            int storedIndex = presetIndexes.get(selectedPosition - 1);
+            String presetName = presetLabels.get(selectedPosition);
+            new AlertDialog.Builder(this).setTitle("Удалить пресет?")
+                    .setMessage("Пресет «" + presetName + "» будет удалён.")
+                    .setNegativeButton("Отмена", null)
+                    .setPositiveButton("Удалить", (d, which) -> {
+                        try {
+                            org.json.JSONArray updated = new org.json.JSONArray();
+                            for (int i = 0; i < storedPresets.length(); i++)
+                                if (i != storedIndex) updated.put(storedPresets.get(i));
+                            storedPresets = updated;
+                            presetIndexes.clear();
+                            presetLabels.clear();
+                            presetLabels.add("Список пресетов");
+                            for (int i = 0; i < storedPresets.length(); i++) {
+                                presetLabels.add(storedPresets.getJSONObject(i)
+                                        .optString("name", "Пресет " + (i + 1)));
+                                presetIndexes.add(i);
+                            }
+                            presetAdapter.notifyDataSetChanged();
+                            getSharedPreferences(PREFS, MODE_PRIVATE).edit()
+                                    .putString("advanced_search_presets", storedPresets.toString()).apply();
+                            presetList.setSelection(0);
+                            showMessage("Пресет удалён");
+                        } catch (Exception e) { showMessage("Не удалось удалить пресет."); }
                     }).show();
         });
 
