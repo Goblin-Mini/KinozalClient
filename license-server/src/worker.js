@@ -442,7 +442,7 @@ export default {
       if (request.method === "GET" && url.pathname === "/v1/devices") {
         return await getDevices(request, env);
       }
-      const ownDeviceMatch = url.pathname.match(/^\\/v1\\/devices\\/([a-f0-9]{32})$/);
+      const ownDeviceMatch = url.pathname.match(/^\/v1\/devices\/([a-f0-9]{32})$/);
       if (request.method === "DELETE" && ownDeviceMatch) {
         return await revokeDevice(request, env, ownDeviceMatch[1]);
       }
