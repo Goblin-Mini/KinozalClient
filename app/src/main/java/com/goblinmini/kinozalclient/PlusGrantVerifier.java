@@ -21,7 +21,7 @@ final class PlusGrantVerifier {
 
     private PlusGrantVerifier() { }
 
-    static JSONArray verify(Context context, String compactGrant) throws Exception {
+    static JSONObject verify(Context context, String compactGrant) throws Exception {
         if (context == null || compactGrant == null) throw new SecurityException("missing_plus_grant");
         String[] parts = compactGrant.split("\\.", -1);
         if (parts.length != 3) throw new SecurityException("malformed_plus_grant");
@@ -87,7 +87,8 @@ final class PlusGrantVerifier {
             if (supported.contains(feature) && granted.add(feature)) verifiedFeatures.put(feature);
         }
         if (verifiedFeatures.length() == 0) throw new SecurityException("empty_plus_features");
-        return verifiedFeatures;
+        claims.put("verified_features", verifiedFeatures);
+        return claims;
     }
 
     private static String sha256(String value) throws Exception {
