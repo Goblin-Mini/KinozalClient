@@ -355,6 +355,12 @@ public class MainActivity extends Activity {
 
     private void initializeNetwork(String savedBrowserCookies) {
         Socks5ProxyBridge.Settings config = socks5Bridge.getSettings();
+        if (config.enabled && !PlusAccess.hasFeature(this, "proxy")) {
+            socks5Bridge.stop();
+            client.setProxy(Proxy.NO_PROXY);
+            continueStartup(savedBrowserCookies);
+            return;
+        }
         if (!config.enabled) {
             client.setProxy(Proxy.NO_PROXY);
             continueStartup(savedBrowserCookies);
@@ -7430,6 +7436,7 @@ public class MainActivity extends Activity {
     }
 
     private void writeFavorites(java.util.LinkedHashMap<String, Torrent> favorites) {
+        if (!PlusAccess.hasFeature(this, "favorites")) return;
         org.json.JSONArray array = new org.json.JSONArray();
         for (Torrent t : favorites.values()) {
             org.json.JSONObject o = new org.json.JSONObject();
@@ -7608,6 +7615,7 @@ public class MainActivity extends Activity {
     }
 
     private void removeFavorite(String href) {
+        if (!PlusAccess.hasFeature(this, "favorites")) return;
         if (href == null || href.isEmpty()) return;
         java.util.LinkedHashMap<String, Torrent> favorites = readFavorites();
         favorites.remove(href);
@@ -7621,6 +7629,7 @@ public class MainActivity extends Activity {
     }
 
     private void removeRecentlyViewed(String href) {
+        if (!PlusAccess.hasFeature(this, "viewing_history")) return;
         if (href == null || href.isEmpty()) return;
         java.util.LinkedHashMap<String, Torrent> recent = readRecentlyViewed();
         recent.remove(href);
@@ -7629,12 +7638,14 @@ public class MainActivity extends Activity {
     }
 
     private void clearRecentlyViewed() {
+        if (!PlusAccess.hasFeature(this, "viewing_history")) return;
         saveRecentlyViewedList(new java.util.LinkedHashMap<>());
         showRecentlyViewed();
         showMessage("История очищена");
     }
 
     private void saveRecentlyViewedList(java.util.LinkedHashMap<String, Torrent> recent) {
+        if (!PlusAccess.hasFeature(this, "viewing_history")) return;
         org.json.JSONArray array = new org.json.JSONArray();
         java.util.List<Torrent> values = new java.util.ArrayList<>(recent.values());
         for (int i = 0; i < values.size(); i++) {
